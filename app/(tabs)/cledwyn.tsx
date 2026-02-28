@@ -17,6 +17,7 @@ import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { getApiUrl } from "@/lib/query-client";
 import { storage, CledwynMessage } from "@/lib/storage";
+import { useAuth } from "@/lib/auth-context";
 
 let messageCounter = 0;
 function generateUniqueId(): string {
@@ -93,6 +94,7 @@ const bubbleStyles = StyleSheet.create({
 
 export default function CledwynScreen() {
   const insets = useSafeAreaInsets();
+  const { user } = useAuth();
   const [messages, setMessages] = useState<CledwynMessage[]>([]);
   const [inputText, setInputText] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
@@ -141,7 +143,7 @@ export default function CledwynScreen() {
           "Content-Type": "application/json",
           Accept: "text/event-stream",
         },
-        body: JSON.stringify({ messages: chatHistory }),
+        body: JSON.stringify({ messages: chatHistory, lekkerNetworkAccess: !!user?.lekkerNetworkAccess }),
       });
 
       if (!response.ok) throw new Error("Failed to get response");
