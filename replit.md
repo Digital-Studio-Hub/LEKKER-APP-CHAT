@@ -24,6 +24,7 @@ A business messaging app for Lekker Network - connecting Lekkerpreneurs with the
 - `app/user-profile/[id].tsx` - View another user's profile (name, bio, business info, posts)
 - `app/new-chat.tsx` - Create new conversation (contacts integration + directory matching)
 - `app/new-group.tsx` - Create group chat (two-step: select members, name group)
+- `app/in-app-browser.tsx` - In-app browser for opening links (WebView/iframe with nav controls)
 - `app/new-post.tsx` - Create feed post
 - `app/post-comments.tsx` - View/add comments on posts
 - `lib/storage.ts` - AsyncStorage data layer (conversations, messages, groups, pins, receipts)
@@ -68,6 +69,10 @@ A business messaging app for Lekker Network - connecting Lekkerpreneurs with the
 - Web-safe location sharing (browser geolocation API on web, expo-location on native)
 - Permission denied handling with Settings deep-link on native
 - User profile view (tap name in chat header or directory entry to see their profile, posts, and business info)
+- In-app browser for opening links (WebView on native, iframe on web) instead of system browser
+- Google Programmable Search Engine (CSE cx=a4df62a18cab149ef) in Network > Search tab with Lekker-branded dark theme
+- Network tab has 3 sub-tabs: Directory, Search, Browse (Browse requires lekkerNetworkAccess)
+- Search result links open in the in-app browser
 - Black & yellow Lekker branding
 
 ## Data Types

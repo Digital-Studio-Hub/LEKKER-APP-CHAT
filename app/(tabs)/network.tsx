@@ -42,7 +42,7 @@ interface FiltersData {
   provinces: string[];
 }
 
-type TabMode = "directory" | "browse";
+type TabMode = "directory" | "search" | "browse";
 
 function Avatar({ name, color, size = 48 }: { name: string; color: string; size?: number }) {
   const initials = name.split(" ").map((w) => w[0]).join("").substring(0, 2).toUpperCase();
@@ -390,6 +390,136 @@ const dirStyles = StyleSheet.create({
   },
 });
 
+const GOOGLE_CSE_HTML = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: #0D0D0D;
+      color: #FFFFFF;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      padding: 8px;
+    }
+    .gsc-control-cse { background-color: #0D0D0D !important; border: none !important; padding: 0 !important; }
+    .gsc-input-box { background-color: #1A1A1A !important; border: 1px solid #2A2A2A !important; border-radius: 12px !important; }
+    .gsc-input { background-color: transparent !important; color: #FFFFFF !important; }
+    .gsc-search-button-v2 { background-color: #F5B800 !important; border: none !important; border-radius: 8px !important; padding: 10px 16px !important; }
+    .gsc-search-button-v2 svg { fill: #0D0D0D !important; }
+    .gsc-results .gsc-result { background-color: #1A1A1A !important; border: none !important; border-radius: 10px !important; margin-bottom: 8px !important; padding: 12px !important; }
+    .gs-title, .gs-title * { color: #F5B800 !important; text-decoration: none !important; }
+    .gs-snippet { color: #CCCCCC !important; }
+    .gs-visibleUrl { color: #888888 !important; }
+    .gsc-above-wrapper-area { border: none !important; }
+    .gsc-result-info { color: #888888 !important; }
+    .gcsc-more-maybe-branding-root { display: none !important; }
+    .gsc-adBlock { display: none !important; }
+    .gsc-cursor-page { color: #F5B800 !important; background-color: #1A1A1A !important; border-radius: 4px !important; padding: 4px 8px !important; }
+    .gsc-cursor-current-page { background-color: #F5B800 !important; color: #0D0D0D !important; }
+    table { background-color: transparent !important; }
+    td { background-color: transparent !important; }
+    .gsc-table-result { background-color: transparent !important; }
+    a.gs-title:hover { color: #FFD54F !important; }
+  </style>
+</head>
+<body>
+  <div class="gcse-search"></div>
+  <script async src="https://cse.google.com/cse.js?cx=a4df62a18cab149ef"></script>
+  <script>
+    document.addEventListener('click', function(e) {
+      var link = e.target.closest('a');
+      if (link && link.href && !link.href.includes('google.com/cse')) {
+        e.preventDefault();
+        e.stopPropagation();
+        window.ReactNativeWebView ? window.ReactNativeWebView.postMessage(JSON.stringify({type:'link', url: link.href, title: link.textContent || ''})) : window.parent.postMessage(JSON.stringify({type:'link', url: link.href, title: link.textContent || ''}), '*');
+      }
+    }, true);
+  </script>
+</body>
+</html>
+`;
+
+function SearchViewWeb() {
+  const [isLoading, setIsLoading] = useState(true);
+  const webBottomInset = 84;
+
+  useEffect(() => {
+    function handleMessage(event: MessageEvent) {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === "link" && data.url) {
+          router.push({ pathname: "/in-app-browser", params: { url: data.url, title: data.title || "" } });
+        }
+      } catch {}
+    }
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, []);
+
+  return (
+    <View style={{ flex: 1, paddingBottom: webBottomInset }}>
+      {isLoading && (
+        <View style={styles.loadingOverlay}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+          <Text style={styles.loadingText}>Loading search...</Text>
+        </View>
+      )}
+      <iframe
+        srcDoc={GOOGLE_CSE_HTML}
+        style={{
+          flex: 1,
+          width: "100%",
+          height: "100%",
+          border: "none",
+          backgroundColor: "#0D0D0D",
+        } as any}
+        onLoad={() => setIsLoading(false)}
+        sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+      />
+    </View>
+  );
+}
+
+function SearchViewNative() {
+  const [isLoading, setIsLoading] = useState(true);
+  const webViewRef = useRef<any>(null);
+
+  return (
+    <View style={{ flex: 1 }}>
+      {isLoading && (
+        <View style={styles.loadingOverlay}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+          <Text style={styles.loadingText}>Loading search...</Text>
+        </View>
+      )}
+      <WebView
+        ref={webViewRef}
+        source={{ html: GOOGLE_CSE_HTML }}
+        style={{ flex: 1, backgroundColor: Colors.background }}
+        onLoadStart={() => setIsLoading(true)}
+        onLoadEnd={() => setIsLoading(false)}
+        javaScriptEnabled={true}
+        domStorageEnabled={true}
+        onMessage={(event: any) => {
+          try {
+            const data = JSON.parse(event.nativeEvent.data);
+            if (data.type === "link" && data.url) {
+              router.push({ pathname: "/in-app-browser", params: { url: data.url, title: data.title || "" } });
+            }
+          } catch {}
+        }}
+      />
+    </View>
+  );
+}
+
+function SearchView() {
+  if (Platform.OS === "web") return <SearchViewWeb />;
+  return <SearchViewNative />;
+}
+
 function WebIframe() {
   const [isLoading, setIsLoading] = useState(true);
   const webBottomInset = 84;
@@ -479,15 +609,22 @@ export default function NetworkScreen() {
         <Text style={styles.headerTitle}>Network</Text>
       </View>
 
-      {hasNetworkAccess && (
-        <View style={styles.tabBar}>
-          <Pressable
-            style={[styles.tab, activeTab === "directory" && styles.tabActive]}
-            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setActiveTab("directory"); }}
-          >
-            <Ionicons name="people" size={16} color={activeTab === "directory" ? Colors.background : Colors.textSecondary} />
-            <Text style={[styles.tabText, activeTab === "directory" && styles.tabTextActive]}>Lekkerpreneurs</Text>
-          </Pressable>
+      <View style={styles.tabBar}>
+        <Pressable
+          style={[styles.tab, activeTab === "directory" && styles.tabActive]}
+          onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setActiveTab("directory"); }}
+        >
+          <Ionicons name="people" size={16} color={activeTab === "directory" ? Colors.background : Colors.textSecondary} />
+          <Text style={[styles.tabText, activeTab === "directory" && styles.tabTextActive]}>Directory</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.tab, activeTab === "search" && styles.tabActive]}
+          onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setActiveTab("search"); }}
+        >
+          <Ionicons name="search" size={16} color={activeTab === "search" ? Colors.background : Colors.textSecondary} />
+          <Text style={[styles.tabText, activeTab === "search" && styles.tabTextActive]}>Search</Text>
+        </Pressable>
+        {hasNetworkAccess && (
           <Pressable
             style={[styles.tab, activeTab === "browse" && styles.tabActive]}
             onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setActiveTab("browse"); }}
@@ -495,10 +632,12 @@ export default function NetworkScreen() {
             <Ionicons name="globe" size={16} color={activeTab === "browse" ? Colors.background : Colors.textSecondary} />
             <Text style={[styles.tabText, activeTab === "browse" && styles.tabTextActive]}>Browse</Text>
           </Pressable>
-        </View>
-      )}
+        )}
+      </View>
 
-      {!hasNetworkAccess || activeTab === "directory" ? <DirectoryView /> : <BrowseView />}
+      {activeTab === "directory" && <DirectoryView />}
+      {activeTab === "search" && <SearchView />}
+      {activeTab === "browse" && hasNetworkAccess && <BrowseView />}
     </View>
   );
 }

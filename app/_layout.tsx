@@ -29,6 +29,7 @@ function RootLayoutNav() {
       <Stack.Screen name="new-chat" options={{ presentation: "formSheet", sheetAllowedDetents: [0.6], sheetGrabberVisible: true }} />
       <Stack.Screen name="new-post" options={{ presentation: "formSheet", sheetAllowedDetents: [0.5], sheetGrabberVisible: true }} />
       <Stack.Screen name="post-comments" options={{ presentation: "formSheet", sheetAllowedDetents: [0.75, 1], sheetGrabberVisible: true }} />
+      <Stack.Screen name="in-app-browser" options={{ animation: "slide_from_bottom" }} />
     </Stack>
   );
 }

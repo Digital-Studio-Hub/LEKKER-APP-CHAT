@@ -214,7 +214,13 @@ function MessageBubbleInner({
         return (
           <Pressable
             onPress={() => {
-              if (message.fileUri) Linking.openURL(message.fileUri).catch(() => {});
+              if (message.fileUri) {
+                if (message.fileUri.startsWith("http")) {
+                  router.push({ pathname: "/in-app-browser", params: { url: message.fileUri, title: message.fileName || "File" } });
+                } else {
+                  Linking.openURL(message.fileUri).catch(() => {});
+                }
+              }
             }}
             style={{ flexDirection: "row", alignItems: "center", gap: 10 }}
           >
@@ -244,12 +250,17 @@ function MessageBubbleInner({
           <Pressable
             onPress={() => {
               if (message.latitude && message.longitude) {
-                const url = Platform.select({
-                  ios: `maps:0,0?q=${message.latitude},${message.longitude}`,
-                  android: `geo:${message.latitude},${message.longitude}?q=${message.latitude},${message.longitude}`,
-                  default: `https://www.google.com/maps?q=${message.latitude},${message.longitude}`,
-                });
-                Linking.openURL(url).catch(() => {});
+                if (Platform.OS === "web") {
+                  const mapUrl = `https://www.google.com/maps?q=${message.latitude},${message.longitude}`;
+                  router.push({ pathname: "/in-app-browser", params: { url: mapUrl, title: message.locationName || "Location" } });
+                } else {
+                  const url = Platform.select({
+                    ios: `maps:0,0?q=${message.latitude},${message.longitude}`,
+                    android: `geo:${message.latitude},${message.longitude}?q=${message.latitude},${message.longitude}`,
+                    default: `https://www.google.com/maps?q=${message.latitude},${message.longitude}`,
+                  });
+                  Linking.openURL(url).catch(() => {});
+                }
               }
             }}
           >
