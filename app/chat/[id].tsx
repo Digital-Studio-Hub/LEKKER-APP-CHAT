@@ -16,6 +16,7 @@ import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/lib/auth-context";
 import { storage, Conversation, ChatMessage } from "@/lib/storage";
+import { getApiUrl } from "@/lib/query-client";
 
 function MessageBubble({ message, isMe }: { message: ChatMessage; isMe: boolean }) {
   const time = new Date(message.timestamp).toLocaleTimeString([], {
@@ -58,10 +59,12 @@ export default function ChatDetailScreen() {
   const { user } = useAuth();
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [inputText, setInputText] = useState("");
+  const [isLekkerpreneur, setIsLekkerpreneur] = useState(false);
   const inputRef = useRef<TextInput>(null);
 
   useEffect(() => {
     loadConversation();
+    loadLekkerStatus();
   }, [id]);
 
   async function loadConversation() {
@@ -72,6 +75,20 @@ export default function ChatDetailScreen() {
       await storage.saveConversations(convs);
       setConversation(conv);
     }
+  }
+
+  async function loadLekkerStatus() {
+    try {
+      const url = new URL("/api/directory", getApiUrl());
+      const res = await fetch(url.toString());
+      const data = await res.json();
+      const convs = await storage.getConversations();
+      const conv = convs.find((c) => c.id === id);
+      if (conv) {
+        const phones = new Set(data.entries.map((e: any) => e.phone));
+        setIsLekkerpreneur(phones.has(conv.contactId));
+      }
+    } catch (e) {}
   }
 
   async function handleSend() {
@@ -102,7 +119,12 @@ export default function ChatDetailScreen() {
                 {conversation.contactName.split(" ").map((w) => w[0]).join("").substring(0, 2).toUpperCase()}
               </Text>
             </View>
-            <Text style={styles.headerName}>{conversation.contactName}</Text>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+              <Text style={styles.headerName}>{conversation.contactName}</Text>
+              {isLekkerpreneur && (
+                <Ionicons name="checkmark-circle" size={16} color={Colors.primary} />
+              )}
+            </View>
           </View>
         )}
         <View style={styles.backButton} />

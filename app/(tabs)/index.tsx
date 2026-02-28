@@ -16,6 +16,7 @@ import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/lib/auth-context";
 import { storage, Conversation } from "@/lib/storage";
+import { getApiUrl } from "@/lib/query-client";
 
 function Avatar({ name, color, size = 50, photo }: { name: string; color: string; size?: number; photo?: string }) {
   if (photo) {
@@ -52,16 +53,30 @@ export default function ChatsScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [lekkerPhones, setLekkerPhones] = useState<Set<string>>(new Set());
 
   useFocusEffect(
     useCallback(() => {
       loadConversations();
+      loadLekkerPhones();
     }, []),
   );
 
   async function loadConversations() {
     const convs = await storage.getConversations();
     setConversations(convs);
+  }
+
+  async function loadLekkerPhones() {
+    try {
+      const url = new URL("/api/directory", getApiUrl());
+      const res = await fetch(url.toString());
+      const data = await res.json();
+      const phones = new Set<string>(data.entries.map((e: any) => e.phone));
+      setLekkerPhones(phones);
+    } catch (e) {
+      console.error("Failed to load directory phones:", e);
+    }
   }
 
   function handleDeleteConversation(id: string) {
@@ -128,9 +143,16 @@ export default function ChatsScreen() {
             <Avatar name={item.contactName} color={item.contactAvatarColor} />
             <View style={styles.chatInfo}>
               <View style={styles.chatTopRow}>
-                <Text style={styles.chatName} numberOfLines={1}>
-                  {item.contactName}
-                </Text>
+                <View style={styles.nameRow}>
+                  <Text style={styles.chatName} numberOfLines={1}>
+                    {item.contactName}
+                  </Text>
+                  {lekkerPhones.has(item.contactId) && (
+                    <View style={styles.verifiedBadge}>
+                      <Ionicons name="checkmark-circle" size={16} color={Colors.primary} />
+                    </View>
+                  )}
+                </View>
                 <Text style={styles.chatTime}>
                   {item.lastMessageTime ? formatTime(item.lastMessageTime) : ""}
                 </Text>
@@ -229,12 +251,21 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 4,
   },
+  nameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+    marginRight: 8,
+    gap: 4,
+  },
   chatName: {
     fontFamily: "Poppins_600SemiBold",
     fontSize: 16,
     color: Colors.text,
-    flex: 1,
-    marginRight: 8,
+    flexShrink: 1,
+  },
+  verifiedBadge: {
+    flexShrink: 0,
   },
   chatTime: {
     fontFamily: "Poppins_400Regular",
