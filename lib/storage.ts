@@ -47,6 +47,14 @@ export interface Contact {
 
 export type MessageStatus = "sent" | "delivered" | "seen";
 
+export type MessageType = "text" | "image" | "file" | "voicenote" | "location" | "poll" | "contact";
+
+export interface PollOption {
+  id: string;
+  text: string;
+  votes: string[];
+}
+
 export interface ChatMessage {
   id: string;
   senderId: string;
@@ -54,6 +62,20 @@ export interface ChatMessage {
   timestamp: string;
   read: boolean;
   status?: MessageStatus;
+  type?: MessageType;
+  imageUri?: string;
+  fileUri?: string;
+  fileName?: string;
+  fileSize?: number;
+  audioUri?: string;
+  audioDuration?: number;
+  latitude?: number;
+  longitude?: number;
+  locationName?: string;
+  pollQuestion?: string;
+  pollOptions?: PollOption[];
+  sharedContactName?: string;
+  sharedContactPhone?: string;
 }
 
 export interface GroupMember {
@@ -247,6 +269,7 @@ export const storage = {
     conversationId: string,
     content: string,
     senderId: string,
+    attachment?: Partial<ChatMessage>,
   ): Promise<ChatMessage> {
     const conversations = await this.getConversations();
     const conv = conversations.find((c) => c.id === conversationId);
@@ -266,6 +289,8 @@ export const storage = {
       timestamp: new Date().toISOString(),
       read: senderId === "me",
       status: senderId === "me" ? "sent" : undefined,
+      type: attachment?.type || "text",
+      ...attachment,
     };
 
     conv.messages.push(message);
@@ -327,6 +352,27 @@ export const storage = {
     if (!msg) return;
     msg.status = status;
     if (status === "seen") msg.read = true;
+    await this.saveConversations(conversations);
+  },
+
+  async votePoll(
+    conversationId: string,
+    messageId: string,
+    optionId: string,
+    voterId: string,
+  ): Promise<void> {
+    const conversations = await this.getConversations();
+    const conv = conversations.find((c) => c.id === conversationId);
+    if (!conv) return;
+    const msg = conv.messages.find((m) => m.id === messageId);
+    if (!msg || msg.type !== "poll" || !msg.pollOptions) return;
+    for (const opt of msg.pollOptions) {
+      opt.votes = opt.votes.filter((v) => v !== voterId);
+    }
+    const option = msg.pollOptions.find((o) => o.id === optionId);
+    if (option) {
+      option.votes.push(voterId);
+    }
     await this.saveConversations(conversations);
   },
 

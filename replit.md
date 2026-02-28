@@ -30,6 +30,7 @@ A business messaging app for Lekker Network - connecting Lekkerpreneurs with the
 - `lib/query-client.ts` - React Query + API helpers
 - `lib/notifications.ts` - Push notification service (expo-notifications)
 - `lib/location.ts` - Location services (expo-location)
+- `lib/chat-attachments.ts` - Chat attachment utilities (image, camera, file, voicenote, location, poll, contact)
 
 ### Backend (Express)
 - `server/routes.ts` - API endpoints:
@@ -60,12 +61,18 @@ A business messaging app for Lekker Network - connecting Lekkerpreneurs with the
 - Push notifications for new messages (expo-notifications)
 - Location services to find nearby Lekkerpreneurs (expo-location)
 - Block/unblock users (long-press menu, chat header, Settings > Blocked Users)
+- Chat attachments: images (gallery), camera photos, file uploads, voice notes, location sharing, polls, contact sharing
+- Voice note recording with playback in chat bubbles
+- Poll creation with voting and percentage results
+- Web-safe location sharing (browser geolocation API on web, expo-location on native)
+- Permission denied handling with Settings deep-link on native
 - Black & yellow Lekker branding
 
 ## Data Types
 - `UserProfile` - id, phoneNumber, displayName, status, presence, avatarColor, profilePhoto, lekkerNetworkAccess, autoReplyEnabled, autoReplyMessage, notificationsEnabled, locationEnabled, lastLatitude, lastLongitude, locationCity, locationRegion
 - `Conversation` - id, contactId, contactName, messages[], pinned, isGroup, groupMembers[]
-- `ChatMessage` - id, senderId, content, timestamp, read, status (sent/delivered/seen)
+- `ChatMessage` - id, senderId, content, timestamp, read, status (sent/delivered/seen), type (text/image/file/voicenote/location/poll/contact), imageUri, fileUri, fileName, fileSize, audioUri, audioDuration, latitude, longitude, locationName, pollQuestion, pollOptions[], sharedContactName, sharedContactPhone
+- `PollOption` - id, text, votes[]
 - `GroupMember` - id, name, phone, avatarColor
 - `BlockedUser` - id, name, phone, blockedAt
 

@@ -51,6 +51,25 @@
           "icon": "./assets/images/icon.png",
           "color": "#F5C518"
         }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Lekker Chat needs access to your photos to share images in conversations.",
+          "cameraPermission": "Lekker Chat needs camera access to take photos and share them in conversations."
+        }
+      ],
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "Lekker Chat needs access to your contacts so you can share them in conversations."
+        }
+      ],
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Lekker Chat needs microphone access to record voice notes."
+        }
       ]
     ],
     "experiments": {
