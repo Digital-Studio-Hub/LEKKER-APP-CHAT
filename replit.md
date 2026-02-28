@@ -16,7 +16,7 @@ A business messaging app for Lekker Network - connecting Lekkerpreneurs with the
 - `app/(tabs)/` - Main tab navigation
   - `index.tsx` - Chats list (WhatsApp-style conversations)
   - `cledwyn.tsx` - CledwynAI chat with streaming
-  - `network.tsx` - WebView loading lekker.network workspace
+  - `network.tsx` - Directory + WebView (toggle between Directory and Browse)
   - `feed.tsx` - Social feed with 24h rolling posts
 - `app/chat/[id].tsx` - Individual chat conversation
 - `app/settings.tsx` - Settings (presence, privacy)
@@ -29,7 +29,10 @@ A business messaging app for Lekker Network - connecting Lekkerpreneurs with the
 - `lib/query-client.ts` - React Query + API helpers
 
 ### Backend (Express)
-- `server/routes.ts` - CledwynAI streaming chat endpoint (`/api/cledwyn/chat`)
+- `server/routes.ts` - API endpoints:
+  - `/api/cledwyn/chat` - CledwynAI streaming chat
+  - `/api/directory` - Lekkerpreneur directory with filters (serviceType, province, search)
+  - `/api/directory/:id` - Single directory entry
 - `server/index.ts` - Express server setup
 - Port 5000
 
@@ -37,7 +40,9 @@ A business messaging app for Lekker Network - connecting Lekkerpreneurs with the
 - Phone number login with verification flow
 - WhatsApp-style chat conversations
 - CledwynAI assistant powered by Grok (streaming SSE)
+- Lekkerpreneur Directory with location/service filters and direct chat start
 - Lekker Network workspace WebView with persistent cookies
+- Profile photo upload with camera/library picker
 - Social feed with 24h rolling posts, duplicate detection
 - Posts support likes, comments, and shares
 - Shared posts persist beyond 24 hours
