@@ -9,16 +9,27 @@ import {
   Platform,
 } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
-import { router, useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/lib/auth-context";
-import { storage, Conversation, ChatMessage } from "@/lib/storage";
+import { storage, Conversation, ChatMessage, MessageStatus } from "@/lib/storage";
 import { getApiUrl } from "@/lib/query-client";
 
-function MessageBubble({ message, isMe }: { message: ChatMessage; isMe: boolean }) {
+function ReceiptIcon({ status }: { status?: MessageStatus }) {
+  if (!status) return null;
+  if (status === "sent") {
+    return <Ionicons name="checkmark" size={14} color="rgba(0,0,0,0.4)" />;
+  }
+  if (status === "delivered") {
+    return <Ionicons name="checkmark-done" size={14} color="rgba(0,0,0,0.4)" />;
+  }
+  return <Ionicons name="checkmark-done" size={14} color="#4CD964" />;
+}
+
+function MessageBubble({ message, isMe, isGroup, senderName }: { message: ChatMessage; isMe: boolean; isGroup?: boolean; senderName?: string }) {
   const time = new Date(message.timestamp).toLocaleTimeString([], {
     hour: "2-digit",
     minute: "2-digit",
@@ -27,12 +38,18 @@ function MessageBubble({ message, isMe }: { message: ChatMessage; isMe: boolean 
   return (
     <View style={[bubbleStyles.wrapper, isMe ? bubbleStyles.meWrapper : bubbleStyles.themWrapper]}>
       <View style={[bubbleStyles.bubble, isMe ? bubbleStyles.meBubble : bubbleStyles.themBubble]}>
+        {isGroup && !isMe && senderName && (
+          <Text style={bubbleStyles.senderName}>{senderName}</Text>
+        )}
         <Text style={[bubbleStyles.text, isMe ? bubbleStyles.meText : bubbleStyles.themText]}>
           {message.content}
         </Text>
-        <Text style={[bubbleStyles.time, isMe ? bubbleStyles.meTime : bubbleStyles.themTime]}>
-          {time}
-        </Text>
+        <View style={bubbleStyles.metaRow}>
+          <Text style={[bubbleStyles.time, isMe ? bubbleStyles.meTime : bubbleStyles.themTime]}>
+            {time}
+          </Text>
+          {isMe && <ReceiptIcon status={message.status} />}
+        </View>
       </View>
     </View>
   );
@@ -45,10 +62,12 @@ const bubbleStyles = StyleSheet.create({
   bubble: { maxWidth: "78%", borderRadius: 18, paddingHorizontal: 14, paddingVertical: 8 },
   meBubble: { backgroundColor: Colors.primary, borderBottomRightRadius: 4 },
   themBubble: { backgroundColor: Colors.card, borderBottomLeftRadius: 4 },
+  senderName: { fontFamily: "Poppins_600SemiBold", fontSize: 12, color: Colors.primary, marginBottom: 2 },
   text: { fontFamily: "Poppins_400Regular", fontSize: 15, lineHeight: 22 },
   meText: { color: Colors.background },
   themText: { color: Colors.text },
-  time: { fontFamily: "Poppins_400Regular", fontSize: 10, marginTop: 2, alignSelf: "flex-end" },
+  metaRow: { flexDirection: "row", alignItems: "center", gap: 4, alignSelf: "flex-end", marginTop: 2 },
+  time: { fontFamily: "Poppins_400Regular", fontSize: 10 },
   meTime: { color: "rgba(0,0,0,0.4)" },
   themTime: { color: Colors.textMuted },
 });
@@ -61,11 +80,24 @@ export default function ChatDetailScreen() {
   const [inputText, setInputText] = useState("");
   const [isLekkerpreneur, setIsLekkerpreneur] = useState(false);
   const inputRef = useRef<TextInput>(null);
+  const refreshIntervalRef = useRef<ReturnType<typeof setInterval>>();
 
   useEffect(() => {
     loadConversation();
     loadLekkerStatus();
+    refreshIntervalRef.current = setInterval(() => {
+      loadConversation();
+    }, 2000);
+    return () => {
+      if (refreshIntervalRef.current) clearInterval(refreshIntervalRef.current);
+    };
   }, [id]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (id) storage.markConversationSeen(id);
+    }, [id]),
+  );
 
   async function loadConversation() {
     const convs = await storage.getConversations();
@@ -102,6 +134,12 @@ export default function ChatDetailScreen() {
     await loadConversation();
   }
 
+  function getSenderName(senderId: string): string | undefined {
+    if (!conversation?.isGroup || !conversation.groupMembers) return undefined;
+    const member = conversation.groupMembers.find((m) => m.phone === senderId || m.id === senderId);
+    return member?.name;
+  }
+
   const messages = conversation?.messages || [];
   const reversedMessages = [...messages].reverse();
   const webTopInset = Platform.OS === "web" ? 67 : 0;
@@ -115,14 +153,25 @@ export default function ChatDetailScreen() {
         {conversation && (
           <View style={styles.headerCenter}>
             <View style={[styles.avatar, { backgroundColor: conversation.contactAvatarColor }]}>
-              <Text style={styles.avatarText}>
-                {conversation.contactName.split(" ").map((w) => w[0]).join("").substring(0, 2).toUpperCase()}
-              </Text>
+              {conversation.isGroup ? (
+                <Ionicons name="people" size={16} color="#fff" />
+              ) : (
+                <Text style={styles.avatarText}>
+                  {conversation.contactName.split(" ").map((w) => w[0]).join("").substring(0, 2).toUpperCase()}
+                </Text>
+              )}
             </View>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-              <Text style={styles.headerName}>{conversation.contactName}</Text>
-              {isLekkerpreneur && (
-                <Ionicons name="checkmark-circle" size={16} color={Colors.primary} />
+            <View>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                <Text style={styles.headerName} numberOfLines={1}>{conversation.contactName}</Text>
+                {isLekkerpreneur && !conversation.isGroup && (
+                  <Ionicons name="checkmark-circle" size={16} color={Colors.primary} />
+                )}
+              </View>
+              {conversation.isGroup && conversation.groupMembers && (
+                <Text style={styles.headerMembers} numberOfLines={1}>
+                  {conversation.groupMembers.map((m) => m.name.split(" ")[0]).join(", ")}
+                </Text>
               )}
             </View>
           </View>
@@ -134,12 +183,17 @@ export default function ChatDetailScreen() {
         data={reversedMessages}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
-          <MessageBubble message={item} isMe={item.senderId === "me"} />
+          <MessageBubble
+            message={item}
+            isMe={item.senderId === "me"}
+            isGroup={conversation?.isGroup}
+            senderName={getSenderName(item.senderId)}
+          />
         )}
-        inverted={messages.length > 0}
+        inverted
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
-        contentContainerStyle={styles.messageList}
+        contentContainerStyle={[styles.messageList, messages.length === 0 && styles.emptyListContent]}
         ListEmptyComponent={
           <View style={styles.emptyState}>
             <Text style={styles.emptyText}>Send a message to start the conversation</Text>
@@ -186,7 +240,7 @@ const styles = StyleSheet.create({
     borderBottomColor: Colors.border,
   },
   backButton: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
-  headerCenter: { flexDirection: "row", alignItems: "center", gap: 10 },
+  headerCenter: { flexDirection: "row", alignItems: "center", gap: 10, flex: 1, justifyContent: "center" },
   avatar: {
     width: 36,
     height: 36,
@@ -196,7 +250,9 @@ const styles = StyleSheet.create({
   },
   avatarText: { fontFamily: "Poppins_600SemiBold", fontSize: 13, color: "#fff" },
   headerName: { fontFamily: "Poppins_600SemiBold", fontSize: 17, color: Colors.text },
+  headerMembers: { fontFamily: "Poppins_400Regular", fontSize: 11, color: Colors.textMuted, maxWidth: 200 },
   messageList: { paddingVertical: 8 },
+  emptyListContent: { flexGrow: 1, justifyContent: "center" },
   inputContainer: {
     flexDirection: "row",
     alignItems: "flex-end",

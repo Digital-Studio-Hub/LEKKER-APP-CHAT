@@ -9,6 +9,7 @@ import {
   Alert,
   Image,
   Switch,
+  TextInput,
 } from "react-native";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -26,12 +27,24 @@ const PRESENCE_OPTIONS: { value: PresenceStatus; label: string; icon: string; co
   { value: "offline", label: "Offline", icon: "ellipse-outline", color: Colors.offline },
 ];
 
+const AUTO_REPLY_PRESETS = [
+  "Hi! I'm currently unavailable. I'll get back to you as soon as possible.",
+  "Thanks for reaching out! I'm in a meeting right now. Will reply shortly.",
+  "I'm away from my phone. For urgent matters, please call me.",
+  "Out of office until Monday. I'll respond when I'm back.",
+];
+
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const { user, updateProfile, logout } = useAuth();
   const [selectedPresence, setSelectedPresence] = useState<PresenceStatus>(
     user?.presence || "online",
   );
+  const [autoReplyEnabled, setAutoReplyEnabled] = useState(user?.autoReplyEnabled || false);
+  const [autoReplyMessage, setAutoReplyMessage] = useState(
+    user?.autoReplyMessage || AUTO_REPLY_PRESETS[0],
+  );
+  const [isEditingAutoReply, setIsEditingAutoReply] = useState(false);
 
   const webTopInset = Platform.OS === "web" ? 67 : 0;
 
@@ -39,6 +52,17 @@ export default function SettingsScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setSelectedPresence(presence);
     await updateProfile({ presence });
+  }
+
+  async function handleAutoReplyToggle(val: boolean) {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setAutoReplyEnabled(val);
+    await updateProfile({ autoReplyEnabled: val, autoReplyMessage });
+  }
+
+  async function handleAutoReplyMessageUpdate(msg: string) {
+    setAutoReplyMessage(msg);
+    await updateProfile({ autoReplyMessage: msg });
   }
 
   async function handleLogout() {
@@ -114,6 +138,83 @@ export default function SettingsScreen() {
               )}
             </Pressable>
           ))}
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Auto Reply</Text>
+          <View style={styles.optionRow}>
+            <Ionicons name="chatbox-ellipses-outline" size={20} color={Colors.textSecondary} />
+            <Text style={styles.optionLabel}>Auto Reply</Text>
+            <Switch
+              value={autoReplyEnabled}
+              onValueChange={handleAutoReplyToggle}
+              trackColor={{ false: Colors.border, true: Colors.primary }}
+              thumbColor="#fff"
+            />
+          </View>
+          <Text style={styles.toggleHint}>
+            Automatically reply when someone messages you
+          </Text>
+
+          {autoReplyEnabled && (
+            <View style={styles.autoReplySection}>
+              {isEditingAutoReply ? (
+                <View style={styles.autoReplyEdit}>
+                  <TextInput
+                    style={styles.autoReplyInput}
+                    value={autoReplyMessage}
+                    onChangeText={setAutoReplyMessage}
+                    multiline
+                    maxLength={200}
+                    placeholder="Enter your auto-reply message..."
+                    placeholderTextColor={Colors.textMuted}
+                    autoFocus
+                  />
+                  <Pressable
+                    style={styles.autoReplySaveButton}
+                    onPress={() => {
+                      handleAutoReplyMessageUpdate(autoReplyMessage);
+                      setIsEditingAutoReply(false);
+                    }}
+                  >
+                    <Text style={styles.autoReplySaveText}>Save</Text>
+                  </Pressable>
+                </View>
+              ) : (
+                <Pressable
+                  style={styles.autoReplyPreview}
+                  onPress={() => setIsEditingAutoReply(true)}
+                >
+                  <Text style={styles.autoReplyPreviewText} numberOfLines={3}>
+                    "{autoReplyMessage}"
+                  </Text>
+                  <Ionicons name="pencil" size={16} color={Colors.primary} />
+                </Pressable>
+              )}
+
+              <Text style={styles.presetLabel}>Quick presets</Text>
+              {AUTO_REPLY_PRESETS.map((preset, idx) => (
+                <Pressable
+                  key={idx}
+                  style={({ pressed }) => [
+                    styles.presetRow,
+                    pressed && { backgroundColor: Colors.cardElevated },
+                    autoReplyMessage === preset && styles.presetRowActive,
+                  ]}
+                  onPress={() => {
+                    setAutoReplyMessage(preset);
+                    handleAutoReplyMessageUpdate(preset);
+                    setIsEditingAutoReply(false);
+                  }}
+                >
+                  <Text style={styles.presetText} numberOfLines={2}>{preset}</Text>
+                  {autoReplyMessage === preset && (
+                    <Ionicons name="checkmark-circle" size={18} color={Colors.primary} />
+                  )}
+                </Pressable>
+              ))}
+            </View>
+          )}
         </View>
 
         <View style={styles.section}>
@@ -236,6 +337,81 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     paddingHorizontal: 16,
     paddingTop: 6,
+  },
+  autoReplySection: {
+    marginTop: 12,
+    gap: 8,
+  },
+  autoReplyPreview: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: Colors.card,
+    borderRadius: 12,
+    padding: 14,
+    gap: 10,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  autoReplyPreviewText: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 13,
+    color: Colors.textSecondary,
+    flex: 1,
+    fontStyle: "italic" as const,
+  },
+  autoReplyEdit: {
+    gap: 8,
+  },
+  autoReplyInput: {
+    backgroundColor: Colors.inputBackground,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 14,
+    color: Colors.text,
+    fontFamily: "Poppins_400Regular",
+    borderWidth: 1,
+    borderColor: Colors.primary,
+    minHeight: 80,
+    textAlignVertical: "top" as const,
+  },
+  autoReplySaveButton: {
+    alignSelf: "flex-end",
+    backgroundColor: Colors.primary,
+    borderRadius: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+  },
+  autoReplySaveText: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 13,
+    color: Colors.background,
+  },
+  presetLabel: {
+    fontFamily: "Poppins_500Medium",
+    fontSize: 12,
+    color: Colors.textMuted,
+    marginTop: 8,
+    paddingHorizontal: 4,
+  },
+  presetRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: Colors.card,
+    borderRadius: 10,
+    padding: 12,
+    gap: 10,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  presetRowActive: {
+    borderColor: Colors.primary,
+  },
+  presetText: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12,
+    color: Colors.textSecondary,
+    flex: 1,
   },
   logoutButton: {
     flexDirection: "row",

@@ -18,6 +18,8 @@ export interface UserProfile {
   avatarColor: string;
   profilePhoto?: string;
   lekkerNetworkAccess?: boolean;
+  autoReplyEnabled?: boolean;
+  autoReplyMessage?: string;
 }
 
 export interface Contact {
@@ -28,12 +30,22 @@ export interface Contact {
   isAppUser: boolean;
 }
 
+export type MessageStatus = "sent" | "delivered" | "seen";
+
 export interface ChatMessage {
   id: string;
   senderId: string;
   content: string;
   timestamp: string;
   read: boolean;
+  status?: MessageStatus;
+}
+
+export interface GroupMember {
+  id: string;
+  name: string;
+  phone: string;
+  avatarColor: string;
 }
 
 export interface Conversation {
@@ -45,6 +57,10 @@ export interface Conversation {
   lastMessageTime: string;
   unreadCount: number;
   messages: ChatMessage[];
+  pinned?: boolean;
+  isGroup?: boolean;
+  groupMembers?: GroupMember[];
+  groupIcon?: string;
 }
 
 export interface CledwynMessage {
@@ -131,6 +147,8 @@ export const storage = {
       presence: "online",
       lastSeen: new Date().toISOString(),
       avatarColor: randomAvatarColor(),
+      autoReplyEnabled: false,
+      autoReplyMessage: "Hi! I'm currently unavailable. I'll get back to you as soon as possible.",
     };
     await this.saveUserProfile(profile);
     return profile;
@@ -138,7 +156,10 @@ export const storage = {
 
   async getConversations(): Promise<Conversation[]> {
     const data = await AsyncStorage.getItem(KEYS.CONVERSATIONS);
-    return data ? JSON.parse(data) : [];
+    const convs: Conversation[] = data ? JSON.parse(data) : [];
+    const pinned = convs.filter((c) => c.pinned);
+    const unpinned = convs.filter((c) => !c.pinned);
+    return [...pinned, ...unpinned];
   },
 
   async saveConversations(conversations: Conversation[]): Promise<void> {
@@ -167,10 +188,44 @@ export const storage = {
       lastMessageTime: new Date().toISOString(),
       unreadCount: 0,
       messages: [],
+      pinned: false,
+      isGroup: false,
     };
     conversations.unshift(conversation);
     await this.saveConversations(conversations);
     return conversation;
+  },
+
+  async createGroupConversation(
+    groupName: string,
+    members: GroupMember[],
+  ): Promise<Conversation> {
+    const conversations = await this.getConversations();
+    const conversation: Conversation = {
+      id: generateId(),
+      contactId: `group_${generateId()}`,
+      contactName: groupName,
+      contactAvatarColor: randomAvatarColor(),
+      lastMessage: "",
+      lastMessageTime: new Date().toISOString(),
+      unreadCount: 0,
+      messages: [],
+      pinned: false,
+      isGroup: true,
+      groupMembers: members,
+    };
+    conversations.unshift(conversation);
+    await this.saveConversations(conversations);
+    return conversation;
+  },
+
+  async togglePinConversation(conversationId: string): Promise<boolean> {
+    const conversations = await this.getConversations();
+    const conv = conversations.find((c) => c.id === conversationId);
+    if (!conv) return false;
+    conv.pinned = !conv.pinned;
+    await this.saveConversations(conversations);
+    return conv.pinned;
   },
 
   async addMessageToConversation(
@@ -188,6 +243,7 @@ export const storage = {
       content,
       timestamp: new Date().toISOString(),
       read: senderId === "me",
+      status: senderId === "me" ? "sent" : undefined,
     };
 
     conv.messages.push(message);
@@ -195,12 +251,73 @@ export const storage = {
     conv.lastMessageTime = message.timestamp;
     if (senderId !== "me") conv.unreadCount++;
 
+    if (senderId === "me") {
+      setTimeout(async () => {
+        await this.updateMessageStatus(conversationId, message.id, "delivered");
+      }, 800 + Math.random() * 1200);
+
+      setTimeout(async () => {
+        await this.updateMessageStatus(conversationId, message.id, "seen");
+      }, 2500 + Math.random() * 2000);
+    }
+
     const idx = conversations.indexOf(conv);
-    conversations.splice(idx, 1);
-    conversations.unshift(conv);
+    if (!conv.pinned) {
+      conversations.splice(idx, 1);
+      const pinnedCount = conversations.filter((c) => c.pinned).length;
+      conversations.splice(pinnedCount, 0, conv);
+    }
 
     await this.saveConversations(conversations);
+
+    if (senderId === "me") {
+      const profile = await this.getUserProfile();
+      if (profile?.autoReplyEnabled && profile.autoReplyMessage) {
+        setTimeout(async () => {
+          try {
+            await this.addMessageToConversation(
+              conversationId,
+              profile.autoReplyMessage!,
+              conv.contactId,
+            );
+          } catch (e) {}
+        }, 2000 + Math.random() * 3000);
+      }
+    }
+
     return message;
+  },
+
+  async updateMessageStatus(
+    conversationId: string,
+    messageId: string,
+    status: MessageStatus,
+  ): Promise<void> {
+    const conversations = await this.getConversations();
+    const conv = conversations.find((c) => c.id === conversationId);
+    if (!conv) return;
+    const msg = conv.messages.find((m) => m.id === messageId);
+    if (!msg) return;
+    msg.status = status;
+    if (status === "seen") msg.read = true;
+    await this.saveConversations(conversations);
+  },
+
+  async markConversationSeen(conversationId: string): Promise<void> {
+    const conversations = await this.getConversations();
+    const conv = conversations.find((c) => c.id === conversationId);
+    if (!conv) return;
+    let changed = false;
+    for (const msg of conv.messages) {
+      if (msg.senderId !== "me" && !msg.read) {
+        msg.read = true;
+        changed = true;
+      }
+    }
+    if (changed) {
+      conv.unreadCount = 0;
+      await this.saveConversations(conversations);
+    }
   },
 
   async deleteConversation(conversationId: string): Promise<void> {

@@ -18,9 +18,16 @@ import { useAuth } from "@/lib/auth-context";
 import { storage, Conversation } from "@/lib/storage";
 import { getApiUrl } from "@/lib/query-client";
 
-function Avatar({ name, color, size = 50, photo }: { name: string; color: string; size?: number; photo?: string }) {
+function Avatar({ name, color, size = 50, photo, isGroup }: { name: string; color: string; size?: number; photo?: string; isGroup?: boolean }) {
   if (photo) {
     return <Image source={{ uri: photo }} style={{ width: size, height: size, borderRadius: size / 2 }} />;
+  }
+  if (isGroup) {
+    return (
+      <View style={[styles.avatar, { width: size, height: size, borderRadius: size / 2, backgroundColor: color }]}>
+        <Ionicons name="people" size={size * 0.4} color="#fff" />
+      </View>
+    );
   }
   const initials = name
     .split(" ")
@@ -49,6 +56,19 @@ function formatTime(dateStr: string): string {
   return date.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
+function ReceiptIcon({ conversation }: { conversation: Conversation }) {
+  const lastMsg = conversation.messages[conversation.messages.length - 1];
+  if (!lastMsg || lastMsg.senderId !== "me") return null;
+  const status = lastMsg.status;
+  if (!status || status === "sent") {
+    return <Ionicons name="checkmark" size={14} color={Colors.textMuted} />;
+  }
+  if (status === "delivered") {
+    return <Ionicons name="checkmark-done" size={14} color={Colors.textMuted} />;
+  }
+  return <Ionicons name="checkmark-done" size={14} color="#4CD964" />;
+}
+
 export default function ChatsScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
@@ -59,6 +79,8 @@ export default function ChatsScreen() {
     useCallback(() => {
       loadConversations();
       loadLekkerPhones();
+      const interval = setInterval(loadConversations, 3000);
+      return () => clearInterval(interval);
     }, []),
   );
 
@@ -79,23 +101,54 @@ export default function ChatsScreen() {
     }
   }
 
-  function handleDeleteConversation(id: string) {
+  function handleChatActions(item: Conversation) {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     if (Platform.OS === "web") {
-      storage.deleteConversation(id).then(loadConversations);
+      Alert.alert(
+        item.contactName,
+        "",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: item.pinned ? "Unpin Chat" : "Pin Chat",
+            onPress: () => handlePinToggle(item.id),
+          },
+          {
+            text: "Delete Chat",
+            style: "destructive",
+            onPress: () => {
+              storage.deleteConversation(item.id).then(loadConversations);
+            },
+          },
+        ],
+      );
       return;
     }
-    Alert.alert("Delete Chat", "Are you sure you want to delete this chat?", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Delete",
-        style: "destructive",
-        onPress: async () => {
-          await storage.deleteConversation(id);
-          loadConversations();
+    Alert.alert(
+      item.contactName,
+      "",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: item.pinned ? "Unpin Chat" : "Pin Chat",
+          onPress: () => handlePinToggle(item.id),
         },
-      },
-    ]);
+        {
+          text: "Delete Chat",
+          style: "destructive",
+          onPress: async () => {
+            await storage.deleteConversation(item.id);
+            loadConversations();
+          },
+        },
+      ],
+    );
+  }
+
+  async function handlePinToggle(id: string) {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    await storage.togglePinConversation(id);
+    loadConversations();
   }
 
   const webTopInset = Platform.OS === "web" ? 67 : 0;
@@ -113,6 +166,15 @@ export default function ChatsScreen() {
             style={styles.iconButton}
           >
             <Ionicons name="settings-outline" size={24} color={Colors.text} />
+          </Pressable>
+          <Pressable
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              router.push("/new-group");
+            }}
+            style={styles.iconButton}
+          >
+            <Ionicons name="people-outline" size={24} color={Colors.text} />
           </Pressable>
           <Pressable
             onPress={() => {
@@ -138,16 +200,19 @@ export default function ChatsScreen() {
           <Pressable
             style={({ pressed }) => [styles.chatItem, pressed && styles.chatItemPressed]}
             onPress={() => router.push({ pathname: "/chat/[id]", params: { id: item.id } })}
-            onLongPress={() => handleDeleteConversation(item.id)}
+            onLongPress={() => handleChatActions(item)}
           >
-            <Avatar name={item.contactName} color={item.contactAvatarColor} />
+            <Avatar name={item.contactName} color={item.contactAvatarColor} isGroup={item.isGroup} />
             <View style={styles.chatInfo}>
               <View style={styles.chatTopRow}>
                 <View style={styles.nameRow}>
+                  {item.pinned && (
+                    <Ionicons name="pin" size={12} color={Colors.primary} style={{ transform: [{ rotate: "45deg" }] }} />
+                  )}
                   <Text style={styles.chatName} numberOfLines={1}>
                     {item.contactName}
                   </Text>
-                  {lekkerPhones.has(item.contactId) && (
+                  {!item.isGroup && lekkerPhones.has(item.contactId) && (
                     <View style={styles.verifiedBadge}>
                       <Ionicons name="checkmark-circle" size={16} color={Colors.primary} />
                     </View>
@@ -158,9 +223,12 @@ export default function ChatsScreen() {
                 </Text>
               </View>
               <View style={styles.chatBottomRow}>
-                <Text style={styles.chatLastMessage} numberOfLines={1}>
-                  {item.lastMessage || "Start a conversation"}
-                </Text>
+                <View style={styles.lastMessageRow}>
+                  <ReceiptIcon conversation={item} />
+                  <Text style={styles.chatLastMessage} numberOfLines={1}>
+                    {item.lastMessage || "Start a conversation"}
+                  </Text>
+                </View>
                 {item.unreadCount > 0 && (
                   <View style={styles.unreadBadge}>
                     <Text style={styles.unreadText}>{item.unreadCount}</Text>
@@ -277,12 +345,18 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
   },
+  lastMessageRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+    marginRight: 8,
+    gap: 4,
+  },
   chatLastMessage: {
     fontFamily: "Poppins_400Regular",
     fontSize: 14,
     color: Colors.textSecondary,
     flex: 1,
-    marginRight: 8,
   },
   unreadBadge: {
     backgroundColor: Colors.primary,
