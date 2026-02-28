@@ -228,7 +228,7 @@ export default function FeedScreen() {
   return (
     <View style={[styles.container, { paddingTop: insets.top + webTopInset }]}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Feed</Text>
+        <Text style={styles.headerTitle}>Newsfeed</Text>
         <Pressable
           onPress={() => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);

@@ -24,7 +24,7 @@ function NativeTabLayout() {
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="feed">
         <Icon sf={{ default: "rectangle.stack", selected: "rectangle.stack.fill" }} />
-        <Label>Feed</Label>
+        <Label>Newsfeed</Label>
       </NativeTabs.Trigger>
     </NativeTabs>
   );
@@ -90,7 +90,7 @@ function ClassicTabLayout() {
       <Tabs.Screen
         name="feed"
         options={{
-          title: "Feed",
+          title: "Newsfeed",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="layers-outline" size={size} color={color} />
           ),
