@@ -7,7 +7,15 @@ const KEYS = {
   CLEDWYN_MESSAGES: "lekker_cledwyn_messages",
   FEED_POSTS: "lekker_feed_posts",
   CONTACTS: "lekker_contacts",
+  BLOCKED_USERS: "lekker_blocked_users",
 };
+
+export interface BlockedUser {
+  id: string;
+  name: string;
+  phone: string;
+  blockedAt: string;
+}
 
 export interface UserProfile {
   id: string;
@@ -244,6 +252,13 @@ export const storage = {
     const conv = conversations.find((c) => c.id === conversationId);
     if (!conv) throw new Error("Conversation not found");
 
+    if (senderId !== "me" && !conv.isGroup) {
+      const blocked = await this.isUserBlocked(conv.contactId);
+      if (blocked) {
+        throw new Error("User is blocked");
+      }
+    }
+
     const message: ChatMessage = {
       id: generateId(),
       senderId,
@@ -474,6 +489,34 @@ export const storage = {
     contacts.push(contact);
     await AsyncStorage.setItem(KEYS.CONTACTS, JSON.stringify(contacts));
     return contact;
+  },
+
+  async getBlockedUsers(): Promise<BlockedUser[]> {
+    const data = await AsyncStorage.getItem(KEYS.BLOCKED_USERS);
+    return data ? JSON.parse(data) : [];
+  },
+
+  async blockUser(name: string, phone: string): Promise<void> {
+    const blocked = await this.getBlockedUsers();
+    if (blocked.some((b) => b.phone === phone)) return;
+    blocked.push({
+      id: generateId(),
+      name,
+      phone,
+      blockedAt: new Date().toISOString(),
+    });
+    await AsyncStorage.setItem(KEYS.BLOCKED_USERS, JSON.stringify(blocked));
+  },
+
+  async unblockUser(phone: string): Promise<void> {
+    const blocked = await this.getBlockedUsers();
+    const filtered = blocked.filter((b) => b.phone !== phone);
+    await AsyncStorage.setItem(KEYS.BLOCKED_USERS, JSON.stringify(filtered));
+  },
+
+  async isUserBlocked(phone: string): Promise<boolean> {
+    const blocked = await this.getBlockedUsers();
+    return blocked.some((b) => b.phone === phone);
   },
 
   async clearAll(): Promise<void> {

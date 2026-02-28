@@ -15,7 +15,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/lib/auth-context";
-import { storage, Conversation } from "@/lib/storage";
+import { storage, Conversation, BlockedUser } from "@/lib/storage";
 import { getApiUrl } from "@/lib/query-client";
 
 function Avatar({ name, color, size = 50, photo, isGroup }: { name: string; color: string; size?: number; photo?: string; isGroup?: boolean }) {
@@ -74,11 +74,13 @@ export default function ChatsScreen() {
   const { user } = useAuth();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [lekkerPhones, setLekkerPhones] = useState<Set<string>>(new Set());
+  const [blockedPhones, setBlockedPhones] = useState<Set<string>>(new Set());
 
   useFocusEffect(
     useCallback(() => {
       loadConversations();
       loadLekkerPhones();
+      loadBlockedUsers();
       const interval = setInterval(loadConversations, 3000);
       return () => clearInterval(interval);
     }, []),
@@ -101,38 +103,60 @@ export default function ChatsScreen() {
     }
   }
 
+  async function loadBlockedUsers() {
+    const blocked = await storage.getBlockedUsers();
+    setBlockedPhones(new Set(blocked.map((b) => b.phone)));
+  }
+
+  async function handleBlockUser(item: Conversation) {
+    const isBlocked = blockedPhones.has(item.contactId);
+    if (isBlocked) {
+      await storage.unblockUser(item.contactId);
+    } else {
+      await storage.blockUser(item.contactName, item.contactId);
+    }
+    loadBlockedUsers();
+    loadConversations();
+  }
+
   function handleChatActions(item: Conversation) {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    if (Platform.OS === "web") {
-      Alert.alert(
-        item.contactName,
-        "",
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: item.pinned ? "Unpin Chat" : "Pin Chat",
-            onPress: () => handlePinToggle(item.id),
-          },
-          {
-            text: "Delete Chat",
-            style: "destructive",
-            onPress: () => {
-              storage.deleteConversation(item.id).then(loadConversations);
-            },
-          },
-        ],
-      );
-      return;
-    }
+    const isBlocked = blockedPhones.has(item.contactId);
+    const blockOption = item.isGroup ? [] : [
+      {
+        text: isBlocked ? "Unblock User" : "Block User",
+        style: (isBlocked ? "default" : "destructive") as "default" | "destructive",
+        onPress: () => {
+          if (isBlocked) {
+            handleBlockUser(item);
+          } else {
+            Alert.alert(
+              "Block " + item.contactName + "?",
+              "Blocked users cannot send you messages. You can unblock them later from Settings.",
+              [
+                { text: "Cancel", style: "cancel" },
+                {
+                  text: "Block",
+                  style: "destructive",
+                  onPress: () => handleBlockUser(item),
+                },
+              ],
+            );
+          }
+        },
+      },
+    ];
+
     Alert.alert(
       item.contactName,
-      "",
+      isBlocked ? "This user is blocked" : "",
       [
         { text: "Cancel", style: "cancel" },
         {
           text: item.pinned ? "Unpin Chat" : "Pin Chat",
           onPress: () => handlePinToggle(item.id),
         },
+        ...blockOption,
         {
           text: "Delete Chat",
           style: "destructive",
@@ -212,7 +236,10 @@ export default function ChatsScreen() {
                   <Text style={styles.chatName} numberOfLines={1}>
                     {item.contactName}
                   </Text>
-                  {!item.isGroup && lekkerPhones.has(item.contactId) && (
+                  {!item.isGroup && blockedPhones.has(item.contactId) && (
+                    <Ionicons name="ban-outline" size={14} color={Colors.danger} />
+                  )}
+                  {!item.isGroup && !blockedPhones.has(item.contactId) && lekkerPhones.has(item.contactId) && (
                     <View style={styles.verifiedBadge}>
                       <Ionicons name="checkmark-circle" size={16} color={Colors.primary} />
                     </View>

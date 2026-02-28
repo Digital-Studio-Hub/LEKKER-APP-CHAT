@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   View,
   Text,
@@ -12,7 +12,7 @@ import {
   TextInput,
   Linking,
 } from "react-native";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
@@ -20,6 +20,7 @@ import Colors from "@/constants/colors";
 import { useAuth } from "@/lib/auth-context";
 import { requestNotificationPermissions, areNotificationsEnabled, disableNotifications, canAskForNotifications } from "@/lib/notifications";
 import { requestLocationPermissions, isLocationEnabled, getLastLocation, disableLocation, UserLocation } from "@/lib/location";
+import { storage, BlockedUser } from "@/lib/storage";
 
 type PresenceStatus = "online" | "away" | "dnd" | "offline";
 
@@ -51,6 +52,7 @@ export default function SettingsScreen() {
   const [notificationsOn, setNotificationsOn] = useState(false);
   const [locationOn, setLocationOn] = useState(false);
   const [lastLocation, setLastLocation] = useState<UserLocation | null>(null);
+  const [blockedUsers, setBlockedUsers] = useState<BlockedUser[]>([]);
 
   useEffect(() => {
     async function loadPermissions() {
@@ -66,7 +68,37 @@ export default function SettingsScreen() {
       }
     }
     loadPermissions();
+    loadBlockedUsers();
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadBlockedUsers();
+    }, []),
+  );
+
+  async function loadBlockedUsers() {
+    const blocked = await storage.getBlockedUsers();
+    setBlockedUsers(blocked);
+  }
+
+  async function handleUnblock(phone: string) {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    Alert.alert(
+      "Unblock User",
+      "This user will be able to send you messages again.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Unblock",
+          onPress: async () => {
+            await storage.unblockUser(phone);
+            loadBlockedUsers();
+          },
+        },
+      ],
+    );
+  }
 
   const webTopInset = Platform.OS === "web" ? 67 : 0;
 
@@ -392,6 +424,32 @@ export default function SettingsScreen() {
         </View>
 
         <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Blocked Users</Text>
+          {blockedUsers.length === 0 ? (
+            <View style={styles.optionRow}>
+              <Ionicons name="ban-outline" size={20} color={Colors.textSecondary} />
+              <Text style={[styles.optionLabel, { color: Colors.textMuted }]}>No blocked users</Text>
+            </View>
+          ) : (
+            blockedUsers.map((bu) => (
+              <View key={bu.id} style={styles.optionRow}>
+                <Ionicons name="ban" size={20} color={Colors.danger} />
+                <Text style={styles.optionLabel}>{bu.name}</Text>
+                <Pressable
+                  onPress={() => handleUnblock(bu.phone)}
+                  style={styles.unblockSettingsButton}
+                >
+                  <Text style={styles.unblockSettingsText}>Unblock</Text>
+                </Pressable>
+              </View>
+            ))
+          )}
+          <Text style={styles.toggleHint}>
+            Blocked users cannot send you messages
+          </Text>
+        </View>
+
+        <View style={styles.section}>
           <Text style={styles.sectionTitle}>Account</Text>
           <View style={styles.optionRow}>
             <Ionicons name="call-outline" size={20} color={Colors.textSecondary} />
@@ -552,6 +610,19 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: Colors.textSecondary,
     flex: 1,
+  },
+  unblockSettingsButton: {
+    backgroundColor: Colors.card,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  unblockSettingsText: {
+    fontFamily: "Poppins_500Medium",
+    fontSize: 12,
+    color: Colors.text,
   },
   locationInfo: {
     flexDirection: "row",

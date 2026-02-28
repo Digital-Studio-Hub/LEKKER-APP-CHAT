@@ -7,6 +7,7 @@ import {
   Pressable,
   StyleSheet,
   Platform,
+  Alert,
 } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { router, useLocalSearchParams, useFocusEffect } from "expo-router";
@@ -79,12 +80,14 @@ export default function ChatDetailScreen() {
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [inputText, setInputText] = useState("");
   const [isLekkerpreneur, setIsLekkerpreneur] = useState(false);
+  const [isBlocked, setIsBlocked] = useState(false);
   const inputRef = useRef<TextInput>(null);
   const refreshIntervalRef = useRef<ReturnType<typeof setInterval>>();
 
   useEffect(() => {
     loadConversation();
     loadLekkerStatus();
+    checkBlocked();
     refreshIntervalRef.current = setInterval(() => {
       loadConversation();
     }, 2000);
@@ -95,7 +98,10 @@ export default function ChatDetailScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      if (id) storage.markConversationSeen(id);
+      if (id) {
+        storage.markConversationSeen(id);
+        checkBlocked();
+      }
     }, [id]),
   );
 
@@ -123,9 +129,44 @@ export default function ChatDetailScreen() {
     } catch (e) {}
   }
 
+  async function checkBlocked() {
+    if (!id) return;
+    const convs = await storage.getConversations();
+    const conv = convs.find((c) => c.id === id);
+    if (conv && !conv.isGroup) {
+      const blocked = await storage.isUserBlocked(conv.contactId);
+      setIsBlocked(blocked);
+    }
+  }
+
+  async function handleToggleBlock() {
+    if (!conversation || conversation.isGroup) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    if (isBlocked) {
+      await storage.unblockUser(conversation.contactId);
+      setIsBlocked(false);
+    } else {
+      Alert.alert(
+        "Block " + conversation.contactName + "?",
+        "Blocked users cannot send you messages. You can unblock them later from Settings.",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Block",
+            style: "destructive",
+            onPress: async () => {
+              await storage.blockUser(conversation.contactName, conversation.contactId);
+              setIsBlocked(true);
+            },
+          },
+        ],
+      );
+    }
+  }
+
   async function handleSend() {
     const text = inputText.trim();
-    if (!text || !id) return;
+    if (!text || !id || isBlocked) return;
 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setInputText("");
@@ -176,7 +217,17 @@ export default function ChatDetailScreen() {
             </View>
           </View>
         )}
-        <View style={styles.backButton} />
+        {conversation && !conversation.isGroup ? (
+          <Pressable onPress={handleToggleBlock} style={styles.backButton}>
+            <Ionicons
+              name={isBlocked ? "ban" : "ban-outline"}
+              size={22}
+              color={isBlocked ? Colors.danger : Colors.textMuted}
+            />
+          </Pressable>
+        ) : (
+          <View style={styles.backButton} />
+        )}
       </View>
 
       <FlatList
@@ -201,29 +252,42 @@ export default function ChatDetailScreen() {
         }
       />
 
-      <View style={[styles.inputContainer, { paddingBottom: Math.max(insets.bottom, 8) }]}>
-        <TextInput
-          ref={inputRef}
-          style={styles.input}
-          placeholder="Type a message..."
-          placeholderTextColor={Colors.textMuted}
-          value={inputText}
-          onChangeText={setInputText}
-          multiline
-          maxLength={2000}
-          blurOnSubmit={false}
-        />
-        <Pressable
-          onPress={() => {
-            handleSend();
-            inputRef.current?.focus();
-          }}
-          style={[styles.sendButton, !inputText.trim() && styles.sendButtonDisabled]}
-          disabled={!inputText.trim()}
-        >
-          <Ionicons name="send" size={18} color={Colors.background} />
-        </Pressable>
-      </View>
+      {isBlocked ? (
+        <View style={[styles.blockedBar, { paddingBottom: Math.max(insets.bottom, 8) }]}>
+          <Ionicons name="ban" size={16} color={Colors.danger} />
+          <Text style={styles.blockedBarText}>You blocked this user</Text>
+          <Pressable
+            onPress={handleToggleBlock}
+            style={styles.unblockButton}
+          >
+            <Text style={styles.unblockButtonText}>Unblock</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <View style={[styles.inputContainer, { paddingBottom: Math.max(insets.bottom, 8) }]}>
+          <TextInput
+            ref={inputRef}
+            style={styles.input}
+            placeholder="Type a message..."
+            placeholderTextColor={Colors.textMuted}
+            value={inputText}
+            onChangeText={setInputText}
+            multiline
+            maxLength={2000}
+            blurOnSubmit={false}
+          />
+          <Pressable
+            onPress={() => {
+              handleSend();
+              inputRef.current?.focus();
+            }}
+            style={[styles.sendButton, !inputText.trim() && styles.sendButtonDisabled]}
+            disabled={!inputText.trim()}
+          >
+            <Ionicons name="send" size={18} color={Colors.background} />
+          </Pressable>
+        </View>
+      )}
     </KeyboardAvoidingView>
   );
 }
@@ -286,6 +350,35 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   sendButtonDisabled: { opacity: 0.4 },
+  blockedBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    gap: 8,
+    borderTopWidth: 0.5,
+    borderTopColor: Colors.border,
+  },
+  blockedBarText: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 14,
+    color: Colors.textMuted,
+    flex: 1,
+  },
+  unblockButton: {
+    backgroundColor: Colors.card,
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  unblockButtonText: {
+    fontFamily: "Poppins_500Medium",
+    fontSize: 13,
+    color: Colors.text,
+  },
   emptyState: {
     alignItems: "center",
     paddingTop: 60,

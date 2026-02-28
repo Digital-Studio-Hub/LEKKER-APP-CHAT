@@ -59,6 +59,7 @@ A business messaging app for Lekker Network - connecting Lekkerpreneurs with the
 - Profile with status updates (online/away/DND/offline)
 - Push notifications for new messages (expo-notifications)
 - Location services to find nearby Lekkerpreneurs (expo-location)
+- Block/unblock users (long-press menu, chat header, Settings > Blocked Users)
 - Black & yellow Lekker branding
 
 ## Data Types
@@ -66,6 +67,7 @@ A business messaging app for Lekker Network - connecting Lekkerpreneurs with the
 - `Conversation` - id, contactId, contactName, messages[], pinned, isGroup, groupMembers[]
 - `ChatMessage` - id, senderId, content, timestamp, read, status (sent/delivered/seen)
 - `GroupMember` - id, name, phone, avatarColor
+- `BlockedUser` - id, name, phone, blockedAt
 
 ## Colors
 - Primary: #F5B800 (Lekker Yellow)
