@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useMemo } from "react";
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   Platform,
   Alert,
   Image,
+  TextInput,
 } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -75,6 +76,17 @@ export default function ChatsScreen() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [lekkerPhones, setLekkerPhones] = useState<Set<string>>(new Set());
   const [blockedPhones, setBlockedPhones] = useState<Set<string>>(new Set());
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const filteredConversations = useMemo(() => {
+    if (!searchQuery.trim()) return conversations;
+    const q = searchQuery.toLowerCase().trim();
+    return conversations.filter((c) => {
+      if (c.contactName.toLowerCase().includes(q)) return true;
+      if (c.lastMessage.toLowerCase().includes(q)) return true;
+      return c.messages.some((m) => m.content.toLowerCase().includes(q));
+    });
+  }, [conversations, searchQuery]);
 
   useFocusEffect(
     useCallback(() => {
@@ -212,8 +224,26 @@ export default function ChatsScreen() {
         </View>
       </View>
 
+      <View style={styles.searchContainer}>
+        <Ionicons name="search" size={18} color={Colors.textMuted} />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search chats..."
+          placeholderTextColor={Colors.textMuted}
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          returnKeyType="search"
+          clearButtonMode="while-editing"
+        />
+        {searchQuery.length > 0 && (
+          <Pressable onPress={() => setSearchQuery("")} style={styles.searchClear}>
+            <Ionicons name="close-circle" size={18} color={Colors.textMuted} />
+          </Pressable>
+        )}
+      </View>
+
       <FlatList
-        data={conversations}
+        data={filteredConversations}
         keyExtractor={(item) => item.id}
         contentContainerStyle={[
           styles.listContent,
@@ -265,21 +295,32 @@ export default function ChatsScreen() {
             </View>
           </Pressable>
         )}
+        keyboardShouldPersistTaps="handled"
         ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <Ionicons name="chatbubbles-outline" size={64} color={Colors.textMuted} />
-            <Text style={styles.emptyTitle}>No conversations yet</Text>
-            <Text style={styles.emptySubtitle}>
-              Start chatting with your contacts
-            </Text>
-            <Pressable
-              style={({ pressed }) => [styles.emptyButton, pressed && { opacity: 0.8 }]}
-              onPress={() => router.push("/new-chat")}
-            >
-              <Ionicons name="add" size={20} color={Colors.background} />
-              <Text style={styles.emptyButtonText}>New Chat</Text>
-            </Pressable>
-          </View>
+          searchQuery.trim() ? (
+            <View style={styles.emptyState}>
+              <Ionicons name="search-outline" size={48} color={Colors.textMuted} />
+              <Text style={styles.emptyTitle}>No results</Text>
+              <Text style={styles.emptySubtitle}>
+                No chats matching "{searchQuery}"
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.emptyState}>
+              <Ionicons name="chatbubbles-outline" size={64} color={Colors.textMuted} />
+              <Text style={styles.emptyTitle}>No conversations yet</Text>
+              <Text style={styles.emptySubtitle}>
+                Start chatting with your contacts
+              </Text>
+              <Pressable
+                style={({ pressed }) => [styles.emptyButton, pressed && { opacity: 0.8 }]}
+                onPress={() => router.push("/new-chat")}
+              >
+                <Ionicons name="add" size={20} color={Colors.background} />
+                <Text style={styles.emptyButtonText}>New Chat</Text>
+              </Pressable>
+            </View>
+          )
         }
       />
     </View>
@@ -312,6 +353,29 @@ const styles = StyleSheet.create({
     height: 44,
     alignItems: "center",
     justifyContent: "center",
+  },
+  searchContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginHorizontal: 16,
+    marginBottom: 8,
+    backgroundColor: Colors.inputBackground,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    height: 40,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 15,
+    color: Colors.text,
+    fontFamily: "Poppins_400Regular",
+    paddingVertical: 0,
+  },
+  searchClear: {
+    padding: 2,
   },
   listContent: {
     paddingHorizontal: 16,
