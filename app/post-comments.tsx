@@ -6,6 +6,7 @@ import {
   FlatList,
   Pressable,
   StyleSheet,
+  ActivityIndicator,
 } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -50,7 +51,16 @@ export default function PostCommentsScreen() {
     await loadPost();
   }
 
-  if (!post) return null;
+  if (!post) {
+    return (
+      <View style={[styles.container, { alignItems: "center", justifyContent: "center" }]}>
+        <ActivityIndicator size="large" color={Colors.primary} />
+        <Text style={{ fontFamily: "Poppins_400Regular", fontSize: 14, color: Colors.textMuted, marginTop: 12 }}>
+          Loading...
+        </Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
