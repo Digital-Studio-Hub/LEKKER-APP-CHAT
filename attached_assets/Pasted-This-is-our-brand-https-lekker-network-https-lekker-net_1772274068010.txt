@@ -1,0 +1,22 @@
+This is our brand https://lekker.network/
+https://lekker.network/sitemap.xml 
+We have an AI bot called CledwynAI and our software is a tool that is Lekker Network. 
+We also have a marketplace - https://lekkermarketplace.com/sitemap.xml 
+I want to create an app that has the following features
+it has a chat feature like whatsapp for businesses. So people can message on the app through their website and those messages will come into the app as well. So they can have live chats with customers on the site and with customers using a mobile device. So there are two sides to this app, one is the business side chat and the other is the consumer side chat. The consumer side does not all the same features. But where there is opportunity for duality we must use it. 
+So will focus on the entrepreneur side first and we call these users Lekkerpreneurs. 
+We will call the app Lekker Chat. 
+So there is a tab for conversations with people who they have numbers for and they are able to send invites to people who dont have the app. 
+Next there is a tab for a chat with cledywn and this uses our grok api as the underlying agent for cledwyn. 
+Next is a tab that should load their lekker network workspace. So just loading the page browser would be ideal so as not have to recreate the whole app. So it automatically loads and we should have persistent cookies enabled so they only have to login once or maybe have a way of verifying their login to the website on the app that is some sort of auto two way connection. 
+There is no need for a tab for marketplace. We need the cledwyn in our app to speak to the cledwyn in the lekker network app so that the cledwyns can share data when a customer is looking for quotes or services or products. Cledwyn can pull it from the app. 
+Just like whatsapp we have statuses. And perhaps we can do a live feed like an ig or tiktok and twitter feed. So we show the latest posts from all users as they post. Pages lazily load. And we always see the latest content as it is posted. We dont want people to post duplicate content in the same 24 hours. We need to have duplication checks. All the content must clear every 24 hours on a rolling 24 hours. We dont need the data to persist. 
+
+Login and verify number. 
+App loads. 
+Settings has 
+Last seen, online, away, dnd, status updates. And profile page. Profile pages show latest posts the user made. 
+And all post can have comments, likes, and shares. This way shared posts can last beyond the 24 hours. 
+Basically sharing is only allowed on the platform.
+
+We use the black and yellow colors of lekker network with a focus on black. atatched is the lekker logo. 
