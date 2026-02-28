@@ -17,6 +17,7 @@ export interface UserProfile {
   lastSeen: string;
   avatarColor: string;
   profilePhoto?: string;
+  lekkerNetworkAccess?: boolean;
 }
 
 export interface Contact {

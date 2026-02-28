@@ -8,6 +8,7 @@ import {
   Platform,
   Alert,
   Image,
+  Switch,
 } from "react-native";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -130,6 +131,26 @@ export default function SettingsScreen() {
         </View>
 
         <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Lekker Network</Text>
+          <View style={styles.optionRow}>
+            <Ionicons name="globe-outline" size={20} color={Colors.textSecondary} />
+            <Text style={styles.optionLabel}>Network Access</Text>
+            <Switch
+              value={!!user?.lekkerNetworkAccess}
+              onValueChange={async (val) => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                await updateProfile({ lekkerNetworkAccess: val });
+              }}
+              trackColor={{ false: Colors.border, true: Colors.primary }}
+              thumbColor="#fff"
+            />
+          </View>
+          <Text style={styles.toggleHint}>
+            Enable to browse lekker.network directly in the app
+          </Text>
+        </View>
+
+        <View style={styles.section}>
           <Text style={styles.sectionTitle}>Account</Text>
           <View style={styles.optionRow}>
             <Ionicons name="call-outline" size={20} color={Colors.textSecondary} />
@@ -209,6 +230,13 @@ const styles = StyleSheet.create({
   },
   optionLabel: { fontFamily: "Poppins_400Regular", fontSize: 15, color: Colors.text, flex: 1 },
   optionValue: { fontFamily: "Poppins_400Regular", fontSize: 14, color: Colors.textMuted },
+  toggleHint: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12,
+    color: Colors.textMuted,
+    paddingHorizontal: 16,
+    paddingTop: 6,
+  },
   logoutButton: {
     flexDirection: "row",
     alignItems: "center",

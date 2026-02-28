@@ -18,6 +18,7 @@ import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { getApiUrl } from "@/lib/query-client";
 import { storage } from "@/lib/storage";
+import { useAuth } from "@/lib/auth-context";
 
 let WebView: any = null;
 if (Platform.OS !== "web") {
@@ -448,6 +449,8 @@ function BrowseView() {
 
 export default function NetworkScreen() {
   const insets = useSafeAreaInsets();
+  const { user } = useAuth();
+  const hasNetworkAccess = !!user?.lekkerNetworkAccess;
   const [activeTab, setActiveTab] = useState<TabMode>("directory");
   const webTopInset = Platform.OS === "web" ? 67 : 0;
 
@@ -457,24 +460,26 @@ export default function NetworkScreen() {
         <Text style={styles.headerTitle}>Network</Text>
       </View>
 
-      <View style={styles.tabBar}>
-        <Pressable
-          style={[styles.tab, activeTab === "directory" && styles.tabActive]}
-          onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setActiveTab("directory"); }}
-        >
-          <Ionicons name="people" size={16} color={activeTab === "directory" ? Colors.background : Colors.textSecondary} />
-          <Text style={[styles.tabText, activeTab === "directory" && styles.tabTextActive]}>Directory</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.tab, activeTab === "browse" && styles.tabActive]}
-          onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setActiveTab("browse"); }}
-        >
-          <Ionicons name="globe" size={16} color={activeTab === "browse" ? Colors.background : Colors.textSecondary} />
-          <Text style={[styles.tabText, activeTab === "browse" && styles.tabTextActive]}>Browse</Text>
-        </Pressable>
-      </View>
+      {hasNetworkAccess && (
+        <View style={styles.tabBar}>
+          <Pressable
+            style={[styles.tab, activeTab === "directory" && styles.tabActive]}
+            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setActiveTab("directory"); }}
+          >
+            <Ionicons name="people" size={16} color={activeTab === "directory" ? Colors.background : Colors.textSecondary} />
+            <Text style={[styles.tabText, activeTab === "directory" && styles.tabTextActive]}>Lekkerpreneurs</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.tab, activeTab === "browse" && styles.tabActive]}
+            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setActiveTab("browse"); }}
+          >
+            <Ionicons name="globe" size={16} color={activeTab === "browse" ? Colors.background : Colors.textSecondary} />
+            <Text style={[styles.tabText, activeTab === "browse" && styles.tabTextActive]}>Browse</Text>
+          </Pressable>
+        </View>
+      )}
 
-      {activeTab === "directory" ? <DirectoryView /> : <BrowseView />}
+      {!hasNetworkAccess || activeTab === "directory" ? <DirectoryView /> : <BrowseView />}
     </View>
   );
 }
