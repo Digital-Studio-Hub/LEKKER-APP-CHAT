@@ -245,6 +245,7 @@ export const storage = {
     authorName: string,
     authorAvatarColor: string,
     content: string,
+    mediaUrl?: string,
   ): Promise<FeedPost | null> {
     const posts = await this.getFeedPosts();
     const contentHash = hashContent(content.toLowerCase().trim());
@@ -266,6 +267,7 @@ export const storage = {
       authorName,
       authorAvatarColor,
       content,
+      mediaUrl,
       createdAt: new Date().toISOString(),
       likes: [],
       comments: [],

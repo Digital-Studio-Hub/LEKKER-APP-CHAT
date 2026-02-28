@@ -8,6 +8,7 @@ import {
   Platform,
   RefreshControl,
   Image,
+  ActivityIndicator,
 } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -75,6 +76,14 @@ function PostCard({
 
       <Text style={postStyles.content}>{post.content}</Text>
 
+      {post.mediaUrl && (
+        <Image
+          source={{ uri: post.mediaUrl }}
+          style={postStyles.media}
+          resizeMode="cover"
+        />
+      )}
+
       <View style={postStyles.stats}>
         {post.likes.length > 0 && (
           <Text style={postStyles.statText}>{post.likes.length} likes</Text>
@@ -140,6 +149,13 @@ const postStyles = StyleSheet.create({
     lineHeight: 24,
     marginBottom: 12,
   },
+  media: {
+    width: "100%",
+    height: 200,
+    borderRadius: 12,
+    marginBottom: 12,
+    backgroundColor: Colors.card,
+  },
   stats: {
     flexDirection: "row",
     gap: 16,
@@ -157,11 +173,15 @@ const postStyles = StyleSheet.create({
   actionText: { fontFamily: "Poppins_500Medium", fontSize: 13, color: Colors.textSecondary },
 });
 
+const PAGE_SIZE = 10;
+
 export default function FeedScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
-  const [posts, setPosts] = useState<FeedPost[]>([]);
+  const [allPosts, setAllPosts] = useState<FeedPost[]>([]);
+  const [visiblePosts, setVisiblePosts] = useState<FeedPost[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -171,7 +191,16 @@ export default function FeedScreen() {
 
   async function loadPosts() {
     const feedPosts = await storage.getFeedPosts();
-    setPosts(feedPosts);
+    setAllPosts(feedPosts);
+    setVisiblePosts(feedPosts.slice(0, PAGE_SIZE));
+  }
+
+  function loadMore() {
+    if (loadingMore || visiblePosts.length >= allPosts.length) return;
+    setLoadingMore(true);
+    const nextBatch = allPosts.slice(0, visiblePosts.length + PAGE_SIZE);
+    setVisiblePosts(nextBatch);
+    setLoadingMore(false);
   }
 
   async function handleRefresh() {
@@ -212,7 +241,7 @@ export default function FeedScreen() {
       </View>
 
       <FlatList
-        data={posts}
+        data={visiblePosts}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
           <PostCard
@@ -228,13 +257,25 @@ export default function FeedScreen() {
           styles.listContent,
           Platform.OS === "web" ? { paddingBottom: 84 } : undefined,
         ]}
-        contentInsetAdjustmentBehavior="automatic"
+        onEndReached={loadMore}
+        onEndReachedThreshold={0.5}
+        initialNumToRender={PAGE_SIZE}
+        maxToRenderPerBatch={PAGE_SIZE}
+        windowSize={5}
+        removeClippedSubviews={Platform.OS !== "web"}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
             onRefresh={handleRefresh}
             tintColor={Colors.primary}
           />
+        }
+        ListFooterComponent={
+          loadingMore ? (
+            <View style={styles.loadingMore}>
+              <ActivityIndicator size="small" color={Colors.primary} />
+            </View>
+          ) : null
         }
         ListEmptyComponent={
           <View style={styles.emptyState}>
@@ -276,6 +317,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   listContent: { paddingHorizontal: 16 },
+  loadingMore: { paddingVertical: 20, alignItems: "center" },
   emptyState: {
     alignItems: "center",
     justifyContent: "center",
