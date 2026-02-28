@@ -7,6 +7,7 @@ import {
   StyleSheet,
   Platform,
   Alert,
+  Image,
 } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -16,7 +17,10 @@ import Colors from "@/constants/colors";
 import { useAuth } from "@/lib/auth-context";
 import { storage, Conversation } from "@/lib/storage";
 
-function Avatar({ name, color, size = 50 }: { name: string; color: string; size?: number }) {
+function Avatar({ name, color, size = 50, photo }: { name: string; color: string; size?: number; photo?: string }) {
+  if (photo) {
+    return <Image source={{ uri: photo }} style={{ width: size, height: size, borderRadius: size / 2 }} />;
+  }
   const initials = name
     .split(" ")
     .map((w) => w[0])

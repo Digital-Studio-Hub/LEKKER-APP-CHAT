@@ -7,11 +7,15 @@ import {
   Pressable,
   StyleSheet,
   Platform,
+  Image,
+  Alert,
+  ActionSheetIOS,
 } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import * as ImagePicker from "expo-image-picker";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/lib/auth-context";
 import { storage, FeedPost } from "@/lib/storage";
@@ -62,6 +66,91 @@ export default function ProfileScreen() {
     setIsEditingName(false);
   }
 
+  async function pickImage(useCamera: boolean) {
+    try {
+      if (useCamera) {
+        const perm = await ImagePicker.requestCameraPermissionsAsync();
+        if (!perm.granted) {
+          Alert.alert("Permission needed", "Camera access is required to take a photo.");
+          return;
+        }
+      } else {
+        const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!perm.granted) {
+          Alert.alert("Permission needed", "Photo library access is required to choose a photo.");
+          return;
+        }
+      }
+
+      const result = useCamera
+        ? await ImagePicker.launchCameraAsync({
+            mediaTypes: ["images"],
+            allowsEditing: true,
+            aspect: [1, 1],
+            quality: 0.5,
+            base64: true,
+          })
+        : await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ["images"],
+            allowsEditing: true,
+            aspect: [1, 1],
+            quality: 0.5,
+            base64: true,
+          });
+
+      if (!result.canceled && result.assets[0]) {
+        const asset = result.assets[0];
+        const uri = asset.base64
+          ? `data:image/jpeg;base64,${asset.base64}`
+          : asset.uri;
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        await updateProfile({ profilePhoto: uri });
+      }
+    } catch (e) {
+      console.error("Image pick error:", e);
+      Alert.alert("Error", "Could not pick image. Please try again.");
+    }
+  }
+
+  function handleAvatarPress() {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+    if (Platform.OS === "ios") {
+      const options = user?.profilePhoto
+        ? ["Take Photo", "Choose from Library", "Remove Photo", "Cancel"]
+        : ["Take Photo", "Choose from Library", "Cancel"];
+      const cancelIndex = options.length - 1;
+      const destructiveIndex = user?.profilePhoto ? 2 : undefined;
+
+      ActionSheetIOS.showActionSheetWithOptions(
+        { options, cancelButtonIndex: cancelIndex, destructiveButtonIndex: destructiveIndex },
+        (buttonIndex) => {
+          if (buttonIndex === 0) pickImage(true);
+          else if (buttonIndex === 1) pickImage(false);
+          else if (buttonIndex === 2 && user?.profilePhoto) {
+            updateProfile({ profilePhoto: undefined });
+          }
+        },
+      );
+    } else {
+      Alert.alert("Profile Photo", "Choose an option", [
+        { text: "Take Photo", onPress: () => pickImage(true) },
+        { text: "Choose from Library", onPress: () => pickImage(false) },
+        ...(user?.profilePhoto
+          ? [{ text: "Remove Photo", style: "destructive" as const, onPress: () => updateProfile({ profilePhoto: undefined }) }]
+          : []),
+        { text: "Cancel", style: "cancel" as const },
+      ]);
+    }
+  }
+
+  const initials = user?.displayName
+    ?.split(" ")
+    .map((w) => w[0])
+    .join("")
+    .substring(0, 2)
+    .toUpperCase() || "?";
+
   return (
     <View style={[styles.container, { paddingTop: insets.top + webTopInset }]}>
       <View style={styles.header}>
@@ -77,11 +166,18 @@ export default function ProfileScreen() {
         keyExtractor={(item) => item.id}
         ListHeaderComponent={
           <View style={styles.profileSection}>
-            <View style={[styles.avatar, { backgroundColor: user?.avatarColor || Colors.primary }]}>
-              <Text style={styles.avatarText}>
-                {user?.displayName?.split(" ").map((w) => w[0]).join("").substring(0, 2).toUpperCase() || "?"}
-              </Text>
-            </View>
+            <Pressable onPress={handleAvatarPress} style={styles.avatarContainer}>
+              {user?.profilePhoto ? (
+                <Image source={{ uri: user.profilePhoto }} style={styles.avatarImage} />
+              ) : (
+                <View style={[styles.avatar, { backgroundColor: user?.avatarColor || Colors.primary }]}>
+                  <Text style={styles.avatarText}>{initials}</Text>
+                </View>
+              )}
+              <View style={styles.cameraIcon}>
+                <Ionicons name="camera" size={16} color="#fff" />
+              </View>
+            </Pressable>
 
             {isEditingName ? (
               <View style={styles.editRow}>
@@ -165,15 +261,36 @@ const styles = StyleSheet.create({
   headerTitle: { fontFamily: "Poppins_600SemiBold", fontSize: 18, color: Colors.text },
   listContent: { padding: 20 },
   profileSection: { alignItems: "center", marginBottom: 32 },
-  avatar: {
-    width: 90,
-    height: 90,
-    borderRadius: 45,
-    alignItems: "center",
-    justifyContent: "center",
+  avatarContainer: {
+    position: "relative",
     marginBottom: 16,
   },
-  avatarText: { fontFamily: "Poppins_700Bold", fontSize: 32, color: "#fff" },
+  avatar: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarImage: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+  },
+  avatarText: { fontFamily: "Poppins_700Bold", fontSize: 36, color: "#fff" },
+  cameraIcon: {
+    position: "absolute",
+    bottom: 2,
+    right: 2,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: Colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: Colors.background,
+  },
   name: { fontFamily: "Poppins_700Bold", fontSize: 24, color: Colors.text, marginBottom: 4 },
   phone: { fontFamily: "Poppins_400Regular", fontSize: 14, color: Colors.textMuted, marginBottom: 8 },
   status: { fontFamily: "Poppins_400Regular", fontSize: 14, color: Colors.textSecondary, fontStyle: "italic" as const },

@@ -7,6 +7,7 @@ import {
   StyleSheet,
   Platform,
   RefreshControl,
+  Image,
 } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -16,7 +17,10 @@ import Colors from "@/constants/colors";
 import { useAuth } from "@/lib/auth-context";
 import { storage, FeedPost } from "@/lib/storage";
 
-function Avatar({ name, color, size = 40 }: { name: string; color: string; size?: number }) {
+function Avatar({ name, color, size = 40, photo }: { name: string; color: string; size?: number; photo?: string }) {
+  if (photo) {
+    return <Image source={{ uri: photo }} style={{ width: size, height: size, borderRadius: size / 2 }} />;
+  }
   const initials = name.split(" ").map((w) => w[0]).join("").substring(0, 2).toUpperCase();
   return (
     <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: color, alignItems: "center", justifyContent: "center" }}>
@@ -38,22 +42,25 @@ function formatTimeAgo(dateStr: string): string {
 function PostCard({
   post,
   userId,
+  userPhoto,
   onLike,
   onComment,
   onShare,
 }: {
   post: FeedPost;
   userId: string;
+  userPhoto?: string;
   onLike: () => void;
   onComment: () => void;
   onShare: () => void;
 }) {
   const isLiked = post.likes.includes(userId);
+  const photo = post.authorId === userId ? userPhoto : undefined;
 
   return (
     <View style={postStyles.card}>
       <View style={postStyles.header}>
-        <Avatar name={post.authorName} color={post.authorAvatarColor} size={42} />
+        <Avatar name={post.authorName} color={post.authorAvatarColor} size={42} photo={photo} />
         <View style={postStyles.headerInfo}>
           <Text style={postStyles.authorName}>{post.authorName}</Text>
           <Text style={postStyles.timestamp}>{formatTimeAgo(post.createdAt)}</Text>
@@ -211,6 +218,7 @@ export default function FeedScreen() {
           <PostCard
             post={item}
             userId={user?.id || ""}
+            userPhoto={user?.profilePhoto}
             onLike={() => handleLike(item.id)}
             onComment={() => router.push({ pathname: "/post-comments", params: { postId: item.id } })}
             onShare={() => handleShare(item.id)}

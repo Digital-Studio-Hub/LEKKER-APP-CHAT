@@ -16,6 +16,7 @@ export interface UserProfile {
   presence: "online" | "away" | "dnd" | "offline";
   lastSeen: string;
   avatarColor: string;
+  profilePhoto?: string;
 }
 
 export interface Contact {

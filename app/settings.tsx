@@ -7,6 +7,7 @@ import {
   ScrollView,
   Platform,
   Alert,
+  Image,
 } from "react-native";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -74,11 +75,15 @@ export default function SettingsScreen() {
           style={({ pressed }) => [styles.profileCard, pressed && { opacity: 0.8 }]}
           onPress={() => router.push("/profile")}
         >
-          <View style={[styles.profileAvatar, { backgroundColor: user?.avatarColor || Colors.primary }]}>
-            <Text style={styles.profileAvatarText}>
-              {user?.displayName?.split(" ").map((w) => w[0]).join("").substring(0, 2).toUpperCase() || "?"}
-            </Text>
-          </View>
+          {user?.profilePhoto ? (
+            <Image source={{ uri: user.profilePhoto }} style={styles.profileAvatar} />
+          ) : (
+            <View style={[styles.profileAvatar, { backgroundColor: user?.avatarColor || Colors.primary }]}>
+              <Text style={styles.profileAvatarText}>
+                {user?.displayName?.split(" ").map((w) => w[0]).join("").substring(0, 2).toUpperCase() || "?"}
+              </Text>
+            </View>
+          )}
           <View style={styles.profileInfo}>
             <Text style={styles.profileName}>{user?.displayName || "User"}</Text>
             <Text style={styles.profileStatus}>{user?.status || ""}</Text>
