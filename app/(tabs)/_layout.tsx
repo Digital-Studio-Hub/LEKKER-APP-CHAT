@@ -16,7 +16,7 @@ function NativeTabLayout() {
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="cledwyn">
         <Icon sf={{ default: "sparkles", selected: "sparkles" }} />
-        <Label>CledwynAI</Label>
+        <Label>Assistant</Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="network">
         <Icon sf={{ default: "globe", selected: "globe" }} />
@@ -72,7 +72,7 @@ function ClassicTabLayout() {
       <Tabs.Screen
         name="cledwyn"
         options={{
-          title: "CledwynAI",
+          title: "Assistant",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="sparkles-outline" size={size} color={color} />
           ),

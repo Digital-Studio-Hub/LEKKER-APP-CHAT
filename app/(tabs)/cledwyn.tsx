@@ -244,7 +244,7 @@ export default function CledwynScreen() {
             <Ionicons name="sparkles" size={20} color={Colors.background} />
           </View>
           <View>
-            <Text style={styles.headerTitle}>CledwynAI</Text>
+            <Text style={styles.headerTitle}>Your Assistant</Text>
             <Text style={styles.headerSubtitle}>Your business assistant</Text>
           </View>
         </View>
@@ -267,7 +267,7 @@ export default function CledwynScreen() {
             <View style={styles.emptyIcon}>
               <Ionicons name="sparkles" size={48} color={Colors.primary} />
             </View>
-            <Text style={styles.emptyTitle}>CledwynAI</Text>
+            <Text style={styles.emptyTitle}>Your Assistant</Text>
             <Text style={styles.emptySubtitle}>
               Ask me about business strategy, quotes, marketing, or anything else
             </Text>
@@ -279,7 +279,7 @@ export default function CledwynScreen() {
         <TextInput
           ref={inputRef}
           style={styles.input}
-          placeholder="Ask CledwynAI..."
+          placeholder="Ask your assistant..."
           placeholderTextColor={Colors.textMuted}
           value={inputText}
           onChangeText={setInputText}
