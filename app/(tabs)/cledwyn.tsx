@@ -257,11 +257,11 @@ export default function CledwynScreen() {
         data={reversedMessages}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => <MessageBubble message={item} />}
-        inverted={messages.length > 0}
+        inverted
         ListHeaderComponent={showTyping ? <TypingIndicator /> : null}
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
-        contentContainerStyle={styles.messagesList}
+        contentContainerStyle={[styles.messagesList, messages.length === 0 && styles.emptyListContent]}
         ListEmptyComponent={
           <View style={styles.emptyState}>
             <View style={styles.emptyIcon}>
@@ -352,6 +352,10 @@ const styles = StyleSheet.create({
   messagesList: {
     paddingVertical: 8,
   },
+  emptyListContent: {
+    flexGrow: 1,
+    justifyContent: "center",
+  },
   inputContainer: {
     flexDirection: "row",
     alignItems: "flex-end",
@@ -390,7 +394,6 @@ const styles = StyleSheet.create({
   emptyState: {
     alignItems: "center",
     justifyContent: "center",
-    paddingTop: 80,
     paddingHorizontal: 40,
     transform: [{ scaleY: -1 }],
   },
