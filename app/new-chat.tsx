@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
   SectionList,
   Linking,
+  Share,
 } from "react-native";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -165,6 +166,10 @@ export default function NewChatScreen() {
   }
 
   async function handleStartChat(contact: MatchedContact) {
+    if (!contact.isLekkerpreneur) {
+      handleInvite(contact);
+      return;
+    }
     setStartingChat(contact.id);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
@@ -177,6 +182,64 @@ export default function NewChatScreen() {
       console.error("Start chat error:", e);
     } finally {
       setStartingChat(null);
+    }
+  }
+
+  async function handleInvite(contact: MatchedContact) {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const inviteMessage = `Hey ${contact.name.split(" ")[0]}! Join me on Lekker Chat — the messaging app for South African entrepreneurs. Download it here: https://lekker.network/chat`;
+
+    if (Platform.OS === "web") {
+      Alert.alert(
+        "Invite to Lekker Chat",
+        `${contact.name} is not on Lekker Chat yet. Would you like to invite them?`,
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Copy Invite",
+            onPress: () => {
+              if (typeof navigator !== "undefined" && navigator.clipboard) {
+                navigator.clipboard.writeText(inviteMessage);
+              }
+              Alert.alert("Copied!", "Invite message copied to clipboard. Send it to your contact.");
+            },
+          },
+        ],
+      );
+      return;
+    }
+
+    Alert.alert(
+      "Invite to Lekker Chat",
+      `${contact.name} is not on Lekker Chat yet. Send them an invite?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Send via SMS",
+          onPress: () => {
+            const smsUrl = Platform.OS === "ios"
+              ? `sms:${contact.phone}&body=${encodeURIComponent(inviteMessage)}`
+              : `sms:${contact.phone}?body=${encodeURIComponent(inviteMessage)}`;
+            Linking.openURL(smsUrl).catch(() => shareInvite(inviteMessage));
+          },
+        },
+        {
+          text: "Send via WhatsApp",
+          onPress: () => {
+            const cleaned = contact.phone.replace(/\D/g, "");
+            const waUrl = `https://wa.me/${cleaned}?text=${encodeURIComponent(inviteMessage)}`;
+            Linking.openURL(waUrl).catch(() => shareInvite(inviteMessage));
+          },
+        },
+      ],
+    );
+  }
+
+  async function shareInvite(message: string) {
+    try {
+      await Share.share({ message });
+    } catch (e) {
+      console.error("Share error:", e);
     }
   }
 
@@ -275,9 +338,13 @@ export default function NewChatScreen() {
               </View>
               {startingChat === item.id ? (
                 <ActivityIndicator size="small" color={Colors.primary} />
-              ) : (
+              ) : item.isLekkerpreneur ? (
                 <View style={styles.chatIcon}>
                   <Ionicons name="chatbubble" size={16} color={Colors.background} />
+                </View>
+              ) : (
+                <View style={styles.inviteIcon}>
+                  <Ionicons name="paper-plane" size={14} color={Colors.primary} />
                 </View>
               )}
             </Pressable>
@@ -446,6 +513,16 @@ const styles = StyleSheet.create({
     height: 32,
     borderRadius: 16,
     backgroundColor: Colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  inviteIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "transparent",
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
     alignItems: "center",
     justifyContent: "center",
   },
