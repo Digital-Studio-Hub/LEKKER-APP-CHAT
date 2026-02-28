@@ -71,10 +71,25 @@ export const queryClient = new QueryClient({
       refetchInterval: false,
       refetchOnWindowFocus: false,
       staleTime: Infinity,
-      retry: false,
+      retry: 2,
+      retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 10000),
     },
     mutations: {
-      retry: false,
+      retry: 1,
     },
   },
 });
+
+let directoryCache: { data: any; timestamp: number } | null = null;
+const DIRECTORY_CACHE_TTL = 60000;
+
+export async function fetchDirectoryCached(): Promise<any> {
+  if (directoryCache && Date.now() - directoryCache.timestamp < DIRECTORY_CACHE_TTL) {
+    return directoryCache.data;
+  }
+  const url = new URL("/api/directory", getApiUrl());
+  const res = await fetch(url.toString());
+  const data = await res.json();
+  directoryCache = { data, timestamp: Date.now() };
+  return data;
+}

@@ -78,6 +78,16 @@ A business messaging app for Lekker Network - connecting Lekkerpreneurs with the
 - `GroupMember` - id, name, phone, avatarColor
 - `BlockedUser` - id, name, phone, blockedAt
 
+## Performance Optimizations (Low-bandwidth SA / Samsung A52)
+- Polling intervals: Chats list 5s (was 3s), Chat detail 4s (was 2s)
+- Directory API: 60s in-memory cache via `fetchDirectoryCached()` in `lib/query-client.ts`
+- FlatList: `maxToRenderPerBatch`, `windowSize`, `removeClippedSubviews`, `initialNumToRender` on all list screens
+- `React.memo` on MessageBubble component to avoid re-renders
+- Image compression: quality 0.5 (was 0.7) for gallery/camera attachments
+- Server gzip: `compression` middleware on Express backend
+- React Query: retry 2 with exponential backoff (1s, 2s, 4s max 10s)
+- Directory network tab: 15s fetch timeout with 2 auto-retries on failure
+
 ## Colors
 - Primary: #F5B800 (Lekker Yellow)
 - Background: #0D0D0D (Near Black)

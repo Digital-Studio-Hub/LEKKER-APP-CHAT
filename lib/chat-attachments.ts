@@ -31,7 +31,7 @@ export async function pickImage(): Promise<Partial<ChatMessage> | null> {
   }
   const result = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: ["images"],
-    quality: 0.7,
+    quality: 0.5,
     allowsEditing: false,
   });
   if (result.canceled || !result.assets?.[0]) return null;
@@ -51,7 +51,7 @@ export async function takePhoto(): Promise<Partial<ChatMessage> | null> {
     return null;
   }
   const result = await ImagePicker.launchCameraAsync({
-    quality: 0.7,
+    quality: 0.5,
     allowsEditing: false,
   });
   if (result.canceled || !result.assets?.[0]) return null;

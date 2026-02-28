@@ -14,7 +14,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { storage, FeedPost } from "@/lib/storage";
-import { getApiUrl } from "@/lib/query-client";
+import { fetchDirectoryCached } from "@/lib/query-client";
 
 interface UserInfo {
   name: string;
@@ -66,9 +66,7 @@ export default function UserProfileScreen() {
     };
 
     try {
-      const url = new URL("/api/directory", getApiUrl());
-      const res = await fetch(url.toString());
-      const data = await res.json();
+      const data = await fetchDirectoryCached();
       const entry = data.entries.find((e: any) => e.phone === id);
       if (entry) {
         info = {

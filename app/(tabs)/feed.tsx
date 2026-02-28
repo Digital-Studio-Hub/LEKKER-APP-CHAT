@@ -253,6 +253,10 @@ export default function FeedScreen() {
             onShare={() => handleShare(item.id)}
           />
         )}
+        maxToRenderPerBatch={8}
+        windowSize={5}
+        removeClippedSubviews={Platform.OS !== "web"}
+        initialNumToRender={10}
         contentContainerStyle={[
           styles.listContent,
           Platform.OS === "web" ? { paddingBottom: 84 } : undefined,

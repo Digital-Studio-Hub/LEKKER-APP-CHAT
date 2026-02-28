@@ -21,7 +21,7 @@ import { Audio } from "expo-av";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/lib/auth-context";
 import { storage, Conversation, ChatMessage, MessageStatus, PollOption } from "@/lib/storage";
-import { getApiUrl } from "@/lib/query-client";
+import { fetchDirectoryCached } from "@/lib/query-client";
 import {
   pickImage,
   takePhoto,
@@ -168,7 +168,7 @@ function PollBubble({ message, isMe, conversationId, onVote }: { message: ChatMe
   );
 }
 
-function MessageBubble({
+function MessageBubbleInner({
   message,
   isMe,
   isGroup,
@@ -320,6 +320,8 @@ function MessageBubble({
   );
 }
 
+const MessageBubble = React.memo(MessageBubbleInner);
+
 const bubbleStyles = StyleSheet.create({
   wrapper: { paddingHorizontal: 16, paddingVertical: 2 },
   meWrapper: { alignItems: "flex-end" },
@@ -366,7 +368,7 @@ export default function ChatDetailScreen() {
     checkBlocked();
     refreshIntervalRef.current = setInterval(() => {
       loadConversation();
-    }, 2000);
+    }, 4000);
     return () => {
       if (refreshIntervalRef.current) clearInterval(refreshIntervalRef.current);
       if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
@@ -394,9 +396,7 @@ export default function ChatDetailScreen() {
 
   async function loadLekkerStatus() {
     try {
-      const url = new URL("/api/directory", getApiUrl());
-      const res = await fetch(url.toString());
-      const data = await res.json();
+      const data = await fetchDirectoryCached();
       const convs = await storage.getConversations();
       const conv = convs.find((c) => c.id === id);
       if (conv) {
@@ -662,6 +662,10 @@ export default function ChatDetailScreen() {
         inverted
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
+        maxToRenderPerBatch={15}
+        windowSize={7}
+        removeClippedSubviews={Platform.OS !== "web"}
+        initialNumToRender={20}
         contentContainerStyle={[styles.messageList, messages.length === 0 && styles.emptyListContent]}
         ListEmptyComponent={
           <View style={styles.emptyState}>

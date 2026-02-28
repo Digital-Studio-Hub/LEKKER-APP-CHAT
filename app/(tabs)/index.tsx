@@ -17,7 +17,7 @@ import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/lib/auth-context";
 import { storage, Conversation, BlockedUser } from "@/lib/storage";
-import { getApiUrl } from "@/lib/query-client";
+import { fetchDirectoryCached } from "@/lib/query-client";
 
 function Avatar({ name, color, size = 50, photo, isGroup }: { name: string; color: string; size?: number; photo?: string; isGroup?: boolean }) {
   if (photo) {
@@ -93,7 +93,7 @@ export default function ChatsScreen() {
       loadConversations();
       loadLekkerPhones();
       loadBlockedUsers();
-      const interval = setInterval(loadConversations, 3000);
+      const interval = setInterval(loadConversations, 5000);
       return () => clearInterval(interval);
     }, []),
   );
@@ -105,9 +105,7 @@ export default function ChatsScreen() {
 
   async function loadLekkerPhones() {
     try {
-      const url = new URL("/api/directory", getApiUrl());
-      const res = await fetch(url.toString());
-      const data = await res.json();
+      const data = await fetchDirectoryCached();
       const phones = new Set<string>(data.entries.map((e: any) => e.phone));
       setLekkerPhones(phones);
     } catch (e) {
@@ -250,6 +248,10 @@ export default function ChatsScreen() {
           Platform.OS === "web" ? { paddingBottom: 84 } : undefined,
         ]}
         contentInsetAdjustmentBehavior="automatic"
+        maxToRenderPerBatch={10}
+        windowSize={5}
+        removeClippedSubviews={Platform.OS !== "web"}
+        initialNumToRender={15}
         renderItem={({ item }) => (
           <Pressable
             style={({ pressed }) => [styles.chatItem, pressed && styles.chatItemPressed]}

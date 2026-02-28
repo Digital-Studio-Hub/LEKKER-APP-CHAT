@@ -103,7 +103,7 @@ function DirectoryView() {
     }, [selectedService, selectedProvince, searchText]),
   );
 
-  async function fetchDirectory() {
+  async function fetchDirectory(retries = 2) {
     try {
       setIsLoading(true);
       const params = new URLSearchParams();
@@ -112,11 +112,18 @@ function DirectoryView() {
       if (searchText.trim()) params.set("search", searchText.trim());
 
       const url = new URL(`/api/directory?${params.toString()}`, getApiUrl());
-      const res = await fetch(url.toString());
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+      const res = await fetch(url.toString(), { signal: controller.signal });
+      clearTimeout(timeout);
       const data = await res.json();
       setEntries(data.entries);
       setFilters(data.filters);
     } catch (e) {
+      if (retries > 0) {
+        await new Promise((r) => setTimeout(r, 1000));
+        return fetchDirectory(retries - 1);
+      }
       console.error("Directory fetch error:", e);
     } finally {
       setIsLoading(false);
@@ -189,6 +196,10 @@ function DirectoryView() {
         <FlatList
           data={entries}
           keyExtractor={(item) => item.id}
+          maxToRenderPerBatch={10}
+          windowSize={5}
+          removeClippedSubviews={Platform.OS !== "web"}
+          initialNumToRender={12}
           renderItem={({ item }) => (
             <View style={dirStyles.card}>
               <Pressable
