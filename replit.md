@@ -20,7 +20,8 @@ A business messaging app for Lekker Network - connecting Lekkerpreneurs with the
   - `feed.tsx` - Social feed with 24h rolling posts
 - `app/chat/[id].tsx` - Individual/group chat conversation with sent/delivered/seen receipts
 - `app/settings.tsx` - Settings (presence, privacy, auto-reply)
-- `app/profile.tsx` - Profile with posts
+- `app/profile.tsx` - Own profile with posts
+- `app/user-profile/[id].tsx` - View another user's profile (name, bio, business info, posts)
 - `app/new-chat.tsx` - Create new conversation (contacts integration + directory matching)
 - `app/new-group.tsx` - Create group chat (two-step: select members, name group)
 - `app/new-post.tsx` - Create feed post
@@ -66,6 +67,7 @@ A business messaging app for Lekker Network - connecting Lekkerpreneurs with the
 - Poll creation with voting and percentage results
 - Web-safe location sharing (browser geolocation API on web, expo-location on native)
 - Permission denied handling with Settings deep-link on native
+- User profile view (tap name in chat header or directory entry to see their profile, posts, and business info)
 - Black & yellow Lekker branding
 
 ## Data Types

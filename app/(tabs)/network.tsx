@@ -191,7 +191,15 @@ function DirectoryView() {
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
             <View style={dirStyles.card}>
-              <View style={dirStyles.cardHeader}>
+              <Pressable
+                style={dirStyles.cardHeader}
+                onPress={() =>
+                  router.push({
+                    pathname: "/user-profile/[id]",
+                    params: { id: item.phone, name: item.name, avatarColor: item.avatarColor },
+                  })
+                }
+              >
                 <Avatar name={item.name} color={item.avatarColor} size={50} />
                 <View style={dirStyles.cardInfo}>
                   <Text style={dirStyles.cardName}>{item.name}</Text>
@@ -201,7 +209,7 @@ function DirectoryView() {
                     <Text style={dirStyles.cardLocation}>{item.location}, {item.province}</Text>
                   </View>
                 </View>
-              </View>
+              </Pressable>
               <View style={dirStyles.serviceBadge}>
                 <Ionicons name="briefcase-outline" size={12} color={Colors.primary} />
                 <Text style={dirStyles.serviceText}>{item.serviceType}</Text>

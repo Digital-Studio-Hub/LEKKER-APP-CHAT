@@ -594,7 +594,21 @@ export default function ChatDetailScreen() {
           <Ionicons name="chevron-back" size={28} color={Colors.text} />
         </Pressable>
         {conversation && (
-          <View style={styles.headerCenter}>
+          <Pressable
+            style={styles.headerCenter}
+            onPress={() => {
+              if (!conversation.isGroup) {
+                router.push({
+                  pathname: "/user-profile/[id]",
+                  params: {
+                    id: conversation.contactId,
+                    name: conversation.contactName,
+                    avatarColor: conversation.contactAvatarColor,
+                  },
+                });
+              }
+            }}
+          >
             <View style={[styles.avatar, { backgroundColor: conversation.contactAvatarColor }]}>
               {conversation.isGroup ? (
                 <Ionicons name="people" size={16} color="#fff" />
@@ -617,7 +631,7 @@ export default function ChatDetailScreen() {
                 </Text>
               )}
             </View>
-          </View>
+          </Pressable>
         )}
         {conversation && !conversation.isGroup ? (
           <Pressable onPress={handleToggleBlock} style={styles.backButton}>
