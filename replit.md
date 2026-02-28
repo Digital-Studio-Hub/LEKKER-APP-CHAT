@@ -28,6 +28,8 @@ A business messaging app for Lekker Network - connecting Lekkerpreneurs with the
 - `lib/storage.ts` - AsyncStorage data layer (conversations, messages, groups, pins, receipts)
 - `lib/auth-context.tsx` - Authentication context
 - `lib/query-client.ts` - React Query + API helpers
+- `lib/notifications.ts` - Push notification service (expo-notifications)
+- `lib/location.ts` - Location services (expo-location)
 
 ### Backend (Express)
 - `server/routes.ts` - API endpoints:
@@ -55,10 +57,12 @@ A business messaging app for Lekker Network - connecting Lekkerpreneurs with the
 - Posts support likes, comments, and shares
 - Shared posts persist beyond 24 hours
 - Profile with status updates (online/away/DND/offline)
+- Push notifications for new messages (expo-notifications)
+- Location services to find nearby Lekkerpreneurs (expo-location)
 - Black & yellow Lekker branding
 
 ## Data Types
-- `UserProfile` - id, phoneNumber, displayName, status, presence, avatarColor, profilePhoto, lekkerNetworkAccess, autoReplyEnabled, autoReplyMessage
+- `UserProfile` - id, phoneNumber, displayName, status, presence, avatarColor, profilePhoto, lekkerNetworkAccess, autoReplyEnabled, autoReplyMessage, notificationsEnabled, locationEnabled, lastLatitude, lastLongitude, locationCity, locationRegion
 - `Conversation` - id, contactId, contactName, messages[], pinned, isGroup, groupMembers[]
 - `ChatMessage` - id, senderId, content, timestamp, read, status (sent/delivered/seen)
 - `GroupMember` - id, name, phone, avatarColor

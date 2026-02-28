@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { sendMessageNotification, setBadgeCount } from "@/lib/notifications";
 
 const KEYS = {
   USER_PROFILE: "lekker_user_profile",
@@ -20,6 +21,12 @@ export interface UserProfile {
   lekkerNetworkAccess?: boolean;
   autoReplyEnabled?: boolean;
   autoReplyMessage?: string;
+  notificationsEnabled?: boolean;
+  locationEnabled?: boolean;
+  lastLatitude?: number;
+  lastLongitude?: number;
+  locationCity?: string;
+  locationRegion?: string;
 }
 
 export interface Contact {
@@ -249,7 +256,12 @@ export const storage = {
     conv.messages.push(message);
     conv.lastMessage = content;
     conv.lastMessageTime = message.timestamp;
-    if (senderId !== "me") conv.unreadCount++;
+    if (senderId !== "me") {
+      conv.unreadCount++;
+      sendMessageNotification(conv.contactName, content, conversationId);
+      const totalUnread = conversations.reduce((sum, c) => sum + c.unreadCount, 0);
+      setBadgeCount(totalUnread);
+    }
 
     if (senderId === "me") {
       setTimeout(async () => {

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   Image,
   Switch,
   TextInput,
+  Linking,
 } from "react-native";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -17,6 +18,8 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/lib/auth-context";
+import { requestNotificationPermissions, areNotificationsEnabled, disableNotifications, canAskForNotifications } from "@/lib/notifications";
+import { requestLocationPermissions, isLocationEnabled, getLastLocation, disableLocation, UserLocation } from "@/lib/location";
 
 type PresenceStatus = "online" | "away" | "dnd" | "offline";
 
@@ -45,6 +48,25 @@ export default function SettingsScreen() {
     user?.autoReplyMessage || AUTO_REPLY_PRESETS[0],
   );
   const [isEditingAutoReply, setIsEditingAutoReply] = useState(false);
+  const [notificationsOn, setNotificationsOn] = useState(false);
+  const [locationOn, setLocationOn] = useState(false);
+  const [lastLocation, setLastLocation] = useState<UserLocation | null>(null);
+
+  useEffect(() => {
+    async function loadPermissions() {
+      const [notif, loc] = await Promise.all([
+        areNotificationsEnabled(),
+        isLocationEnabled(),
+      ]);
+      setNotificationsOn(notif);
+      setLocationOn(loc);
+      if (loc) {
+        const l = await getLastLocation();
+        setLastLocation(l);
+      }
+    }
+    loadPermissions();
+  }, []);
 
   const webTopInset = Platform.OS === "web" ? 67 : 0;
 
@@ -232,6 +254,124 @@ export default function SettingsScreen() {
         </View>
 
         <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Notifications</Text>
+          <View style={styles.optionRow}>
+            <Ionicons name="notifications-outline" size={20} color={Colors.textSecondary} />
+            <Text style={styles.optionLabel}>Push Notifications</Text>
+            <Switch
+              value={notificationsOn}
+              onValueChange={async (val) => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                if (val) {
+                  const canAsk = await canAskForNotifications();
+                  if (!canAsk && Platform.OS !== "web") {
+                    Alert.alert(
+                      "Notifications Disabled",
+                      "Notification permission was previously denied. Please enable it in your device settings.",
+                      [
+                        { text: "Cancel", style: "cancel" },
+                        { text: "Open Settings", onPress: () => Linking.openSettings() },
+                      ],
+                    );
+                    return;
+                  }
+                  const granted = await requestNotificationPermissions();
+                  setNotificationsOn(granted);
+                  await updateProfile({ notificationsEnabled: granted });
+                  if (!granted) {
+                    Alert.alert(
+                      "Notifications Disabled",
+                      "Please enable notifications in your device settings to receive message alerts.",
+                      Platform.OS !== "web"
+                        ? [
+                            { text: "Cancel", style: "cancel" },
+                            { text: "Open Settings", onPress: () => Linking.openSettings() },
+                          ]
+                        : [{ text: "OK" }],
+                    );
+                  }
+                } else {
+                  await disableNotifications();
+                  setNotificationsOn(false);
+                  await updateProfile({ notificationsEnabled: false });
+                }
+              }}
+              trackColor={{ false: Colors.border, true: Colors.primary }}
+              thumbColor="#fff"
+            />
+          </View>
+          <Text style={styles.toggleHint}>
+            Get notified when you receive new messages
+          </Text>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Location</Text>
+          <View style={styles.optionRow}>
+            <Ionicons name="location-outline" size={20} color={Colors.textSecondary} />
+            <Text style={styles.optionLabel}>Location Services</Text>
+            <Switch
+              value={locationOn}
+              onValueChange={async (val) => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                if (val) {
+                  const granted = await requestLocationPermissions();
+                  setLocationOn(granted);
+                  if (granted) {
+                    const loc = await getLastLocation();
+                    setLastLocation(loc);
+                    await updateProfile({
+                      locationEnabled: true,
+                      lastLatitude: loc?.latitude,
+                      lastLongitude: loc?.longitude,
+                      locationCity: loc?.city,
+                      locationRegion: loc?.region,
+                    });
+                  } else {
+                    Alert.alert(
+                      "Location Disabled",
+                      "Please enable location services in your device settings.",
+                      Platform.OS !== "web"
+                        ? [
+                            { text: "Cancel", style: "cancel" },
+                            { text: "Open Settings", onPress: () => Linking.openSettings() },
+                          ]
+                        : [{ text: "OK" }],
+                    );
+                  }
+                } else {
+                  await disableLocation();
+                  setLocationOn(false);
+                  setLastLocation(null);
+                  await updateProfile({
+                    locationEnabled: false,
+                    lastLatitude: undefined,
+                    lastLongitude: undefined,
+                    locationCity: undefined,
+                    locationRegion: undefined,
+                  });
+                }
+              }}
+              trackColor={{ false: Colors.border, true: Colors.primary }}
+              thumbColor="#fff"
+            />
+          </View>
+          <Text style={styles.toggleHint}>
+            Share your location to find nearby Lekkerpreneurs
+          </Text>
+          {locationOn && lastLocation && (
+            <View style={styles.locationInfo}>
+              <Ionicons name="navigate" size={14} color={Colors.primary} />
+              <Text style={styles.locationText}>
+                {lastLocation.city && lastLocation.region
+                  ? `${lastLocation.city}, ${lastLocation.region}`
+                  : `${lastLocation.latitude.toFixed(4)}, ${lastLocation.longitude.toFixed(4)}`}
+              </Text>
+            </View>
+          )}
+        </View>
+
+        <View style={styles.section}>
           <Text style={styles.sectionTitle}>Lekker Network</Text>
           <View style={styles.optionRow}>
             <Ionicons name="globe-outline" size={20} color={Colors.textSecondary} />
@@ -412,6 +552,18 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: Colors.textSecondary,
     flex: 1,
+  },
+  locationInfo: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingTop: 8,
+  },
+  locationText: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12,
+    color: Colors.primary,
   },
   logoutButton: {
     flexDirection: "row",

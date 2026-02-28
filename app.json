@@ -37,7 +37,21 @@
         }
       ],
       "expo-font",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Lekker Chat uses your location to find nearby Lekkerpreneurs and enhance your networking experience.",
+          "locationWhenInUsePermission": "Lekker Chat uses your location to find nearby Lekkerpreneurs."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/icon.png",
+          "color": "#F5C518"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
