@@ -83,7 +83,8 @@ function setupRequestLogging(app: express.Application) {
 
       const duration = Date.now() - start;
 
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
+      const queryStr = Object.keys(req.query).length > 0 ? `?${new URLSearchParams(req.query as Record<string, string>).toString()}` : "";
+      let logLine = `${req.method} ${path}${queryStr} ${res.statusCode} in ${duration}ms`;
       if (capturedJsonResponse) {
         logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
       }

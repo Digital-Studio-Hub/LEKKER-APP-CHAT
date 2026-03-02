@@ -476,7 +476,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json({ users: [] });
       }
 
+      const phoneVariants: string[] = [query];
+      const digitsOnly = query.replace(/[^0-9]/g, "");
+      if (digitsOnly.length >= 9) {
+        if (query.startsWith("0") && digitsOnly.length === 10) {
+          phoneVariants.push(`+27${digitsOnly.substring(1)}`);
+          phoneVariants.push(`27${digitsOnly.substring(1)}`);
+        } else if (query.startsWith("+27")) {
+          phoneVariants.push(`0${digitsOnly.substring(2)}`);
+        } else if (query.startsWith("27") && digitsOnly.length === 11) {
+          phoneVariants.push(`+${query}`);
+          phoneVariants.push(`0${digitsOnly.substring(2)}`);
+        }
+      }
+
       const userId = req.user!.userId;
+      const phoneConditions = phoneVariants.map(
+        (variant) => sql`${users.phone} LIKE ${`%${variant}%`}`
+      );
+
       const results = await db.select({
         id: users.id,
         firstName: users.firstName,
@@ -495,7 +513,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             sql`LOWER(${users.lastName}) LIKE ${`%${query}%`}`,
             sql`LOWER(${users.username}) LIKE ${`%${query}%`}`,
             sql`LOWER(${users.email}) LIKE ${`%${query}%`}`,
-            sql`${users.phone} LIKE ${`%${query}%`}`
+            ...phoneConditions
           )
         )
       ).limit(20);
