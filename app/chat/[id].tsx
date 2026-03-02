@@ -609,13 +609,13 @@ export default function ChatDetailScreen() {
           <Pressable
             style={styles.headerCenter}
             onPress={() => {
-              if (!conversation.isGroup) {
+              if (!conversation.isGroup && conversation.contactId) {
                 router.push({
                   pathname: "/user-profile/[id]",
                   params: {
                     id: conversation.contactId,
-                    name: conversation.contactName,
-                    avatarColor: conversation.contactAvatarColor,
+                    name: conversation.contactName || "Unknown",
+                    avatarColor: conversation.contactAvatarColor || "#F7DC6F",
                   },
                 });
               }
