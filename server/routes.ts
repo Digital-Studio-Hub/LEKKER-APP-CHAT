@@ -377,19 +377,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (apiResult?.success && apiResult.data) {
         const entries = apiResult.data.map((d) => ({
           id: d.id,
-          name: d.ownerName,
-          businessName: d.businessName,
+          name: d.ownerName || d.businessName || "Unknown",
+          businessName: d.businessName || d.ownerName || "Unknown Business",
           tradingName: d.tradingName || "",
-          serviceType: d.category || "",
-          location: d.location?.province || "",
+          serviceType: d.category || "General",
+          location: d.location?.province || "South Africa",
           province: d.location?.province || "",
-          phone: d.phone,
-          email: d.email,
+          phone: d.phone || "",
+          email: d.email || "",
           bio: "",
           avatarColor: "#F5B800",
           website: d.website || "",
           logoUrl: d.logoUrl || "",
-          isVerified: d.isVerified,
+          isVerified: d.isVerified ?? false,
+          emailVerified: d.emailVerified ?? false,
+          memberSince: d.memberSince || d.createdAt || "",
         }));
 
         return res.json({
@@ -431,19 +433,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (apiEntry) {
         return res.json({
           id: apiEntry.id,
-          name: apiEntry.ownerName,
-          businessName: apiEntry.businessName,
+          name: apiEntry.ownerName || apiEntry.businessName || "Unknown",
+          businessName: apiEntry.businessName || apiEntry.ownerName || "Unknown Business",
           tradingName: apiEntry.tradingName || "",
-          serviceType: apiEntry.category || "",
-          location: apiEntry.location?.province || "",
+          serviceType: apiEntry.category || "General",
+          location: apiEntry.location?.province || "South Africa",
           province: apiEntry.location?.province || "",
-          phone: apiEntry.phone,
-          email: apiEntry.email,
+          phone: apiEntry.phone || "",
+          email: apiEntry.email || "",
           bio: "",
           avatarColor: "#F5B800",
           website: apiEntry.website || "",
           logoUrl: apiEntry.logoUrl || "",
-          isVerified: apiEntry.isVerified,
+          isVerified: apiEntry.isVerified ?? false,
+          emailVerified: apiEntry.emailVerified ?? false,
+          memberSince: apiEntry.memberSince || apiEntry.createdAt || "",
           source: "lekker_network",
         });
       }
@@ -467,12 +471,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (match) {
         return res.json({
           verified: true,
-          businessName: match.businessName,
+          businessName: match.businessName || "Unknown Business",
           website: match.website || "",
           verifiedLinks: match.website ? [match.website] : [],
-          name: match.ownerName,
-          phone: match.phone,
-          isVerified: match.isVerified,
+          name: match.ownerName || match.businessName || "Unknown",
+          phone: match.phone || "",
+          isVerified: match.isVerified ?? false,
           logoUrl: match.logoUrl || "",
         });
       }
