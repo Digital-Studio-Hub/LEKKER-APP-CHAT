@@ -90,6 +90,7 @@ const chipStyles = StyleSheet.create({
 });
 
 function DirectoryView() {
+  const dirInsets = useSafeAreaInsets();
   const [entries, setEntries] = useState<DirectoryEntry[]>([]);
   const [filters, setFilters] = useState<FiltersData>({ serviceTypes: [], provinces: [] });
   const [selectedService, setSelectedService] = useState<string | null>(null);
@@ -245,7 +246,7 @@ function DirectoryView() {
           )}
           contentContainerStyle={[
             dirStyles.listContent,
-            Platform.OS === "web" ? { paddingBottom: 84 } : undefined,
+            { paddingBottom: Platform.OS === "web" ? 84 : 49 + dirInsets.bottom + 8 },
           ]}
           ListEmptyComponent={
             <View style={dirStyles.emptyState}>
@@ -486,9 +487,11 @@ function SearchViewWeb() {
 function SearchViewNative() {
   const [isLoading, setIsLoading] = useState(true);
   const webViewRef = useRef<any>(null);
+  const searchInsets = useSafeAreaInsets();
+  const searchBottomPad = 49 + searchInsets.bottom + 8;
 
   return (
-    <View style={{ flex: 1 }}>
+    <View style={{ flex: 1, paddingBottom: searchBottomPad }}>
       {isLoading && (
         <View style={styles.loadingOverlay}>
           <ActivityIndicator size="large" color={Colors.primary} />
@@ -553,13 +556,15 @@ function BrowseView() {
   const [isLoading, setIsLoading] = useState(true);
   const webViewRef = useRef<any>(null);
   const [currentUrl, setCurrentUrl] = useState("https://lekker.network/");
+  const browseInsets = useSafeAreaInsets();
+  const browseBottomPad = 49 + browseInsets.bottom + 8;
 
   if (Platform.OS === "web") {
     return <WebIframe />;
   }
 
   return (
-    <View style={{ flex: 1 }}>
+    <View style={{ flex: 1, paddingBottom: browseBottomPad }}>
       <View style={styles.navBar}>
         <Pressable onPress={() => webViewRef.current?.goBack()} style={styles.navButton}>
           <Ionicons name="chevron-back" size={22} color={Colors.text} />

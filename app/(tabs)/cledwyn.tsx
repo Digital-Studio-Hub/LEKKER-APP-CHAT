@@ -237,7 +237,10 @@ export default function CledwynScreen() {
 
   const reversedMessages = [...messages].reverse();
   const webTopInset = Platform.OS === "web" ? 67 : 0;
-  const webBottomInset = Platform.OS === "web" ? 84 : 0;
+  const isWeb = Platform.OS === "web";
+  const TAB_BAR_HEIGHT = 49;
+  const nativeBottomPadding = TAB_BAR_HEIGHT + insets.bottom + 8;
+  const bottomPadding = isWeb ? 84 : nativeBottomPadding;
 
   return (
     <KeyboardAvoidingView style={styles.container} behavior="padding" keyboardVerticalOffset={0}>
@@ -278,7 +281,7 @@ export default function CledwynScreen() {
         }
       />
 
-      <View style={[styles.inputContainer, { paddingBottom: Math.max(insets.bottom, 8) + webBottomInset }]}>
+      <View style={[styles.inputContainer, { paddingBottom: bottomPadding }]}>
         <TextInput
           ref={inputRef}
           style={styles.input}

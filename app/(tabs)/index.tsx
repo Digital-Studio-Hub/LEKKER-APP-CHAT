@@ -246,7 +246,7 @@ export default function ChatsScreen() {
         keyExtractor={(item) => item.id}
         contentContainerStyle={[
           styles.listContent,
-          Platform.OS === "web" ? { paddingBottom: 84 } : undefined,
+          { paddingBottom: Platform.OS === "web" ? 84 : 49 + insets.bottom + 8 },
         ]}
         contentInsetAdjustmentBehavior="automatic"
         maxToRenderPerBatch={10}

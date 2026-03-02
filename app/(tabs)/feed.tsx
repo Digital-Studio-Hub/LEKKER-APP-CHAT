@@ -260,7 +260,7 @@ export default function FeedScreen() {
         initialNumToRender={10}
         contentContainerStyle={[
           styles.listContent,
-          Platform.OS === "web" ? { paddingBottom: 84 } : undefined,
+          { paddingBottom: Platform.OS === "web" ? 84 : 49 + insets.bottom + 8 },
         ]}
         onEndReached={loadMore}
         onEndReachedThreshold={0.5}
