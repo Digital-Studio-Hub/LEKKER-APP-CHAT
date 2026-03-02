@@ -1,0 +1,61 @@
+Full Endpoint Connection Code
+React Native (Fetch API)
+const API_BASE = "https://lekker.network";
+const API_KEY = "lkr_925976c3afdc4e3049d669a50431d1ef9ed731fcfd8abef2686b49a9d4d97455";
+async function getLekkerpreneurs({ page = 1, limit = 20, search = "", location = "", category = "", sort = "createdAt_desc" } = {}) {
+  const params = new URLSearchParams({
+    page: String(page),
+    limit: String(limit),
+    ...(search && { search }),
+    ...(location && { location }),
+    ...(category && { category }),
+    ...(sort && { sort }),
+  });
+  const response = await fetch(`${API_BASE}/api/v1/lekkerpreneurs?${params}`, {
+    method: "GET",
+    headers: {
+      "X-API-Key": API_KEY,
+      "Content-Type": "application/json",
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`Request failed: ${response.status}`);
+  }
+  return response.json();
+}
+// Usage
+const result = await getLekkerpreneurs({ page: 1, limit: 20 });
+console.log(result.total);   // total number of users
+console.log(result.data);    // array of Lekkerpreneur records
+Axios (if you prefer)
+import axios from "axios";
+const api = axios.create({
+  baseURL: "https://lekker.network",
+  headers: {
+    "X-API-Key": "lkr_925976c3afdc4e3049d669a50431d1ef9ed731fcfd8abef2686b49a9d4d97455",
+    "Content-Type": "application/json",
+  },
+});
+// Get all lekkerpreneurs
+const { data } = await api.get("/api/v1/lekkerpreneurs", {
+  params: { page: 1, limit: 20 }
+});
+// Search by name
+const { data: searchResult } = await api.get("/api/v1/lekkerpreneurs", {
+  params: { search: "bakery", location: "Gauteng" }
+});
+Full Endpoint URL
+https://lekker.network/api/v1/lekkerpreneurs
+Required Header (every request)
+X-API-Key: lkr_925976c3afdc4e3049d669a50431d1ef9ed731fcfd8abef2686b49a9d4d97455
+Available Query Parameters
+?page=1
+?limit=20
+?search=bakery
+?location=Gauteng
+?category=micro
+?sort=createdAt_desc       ← newest first (default)
+?sort=createdAt_asc        ← oldest first
+?sort=businessName_asc     ← A–Z
+?sort=businessName_desc    ← Z–A
+Security reminder: Store your API key in a .env file or your mobile app's secure config — never commit it to a public repository.
