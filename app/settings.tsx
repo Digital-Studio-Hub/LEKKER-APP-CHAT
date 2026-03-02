@@ -437,15 +437,29 @@ export default function SettingsScreen() {
           <View style={styles.sectionCard}>
             {user?.isVerifiedLekkerpreneur ? (
               <>
-                <View style={styles.infoRow}>
+                <View style={[styles.infoRow, { backgroundColor: "rgba(245,184,0,0.1)", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 }]}>
                   <Ionicons name="checkmark-circle" size={18} color={Colors.primary} />
-                  <Text style={[styles.infoLabel, { color: Colors.primary }]}>Verified Lekkerpreneur</Text>
+                  <Text style={[styles.infoLabel, { color: Colors.primary, fontWeight: "700" as const }]}>Verified Lekkerpreneur</Text>
                 </View>
+                {user.lekkerVerifiedAt ? (
+                  <View style={styles.infoRow}>
+                    <Ionicons name="calendar-outline" size={18} color={Colors.textSecondary} />
+                    <Text style={styles.infoLabel}>Verified on</Text>
+                    <Text style={styles.infoValue}>{new Date(user.lekkerVerifiedAt).toLocaleDateString("en-ZA", { year: "numeric", month: "long", day: "numeric" })}</Text>
+                  </View>
+                ) : null}
                 {user.businessName ? (
                   <View style={styles.infoRow}>
                     <Ionicons name="business-outline" size={18} color={Colors.textSecondary} />
                     <Text style={styles.infoLabel}>Business</Text>
                     <Text style={styles.infoValue}>{user.businessName}</Text>
+                  </View>
+                ) : null}
+                {user.tradingName ? (
+                  <View style={styles.infoRow}>
+                    <Ionicons name="storefront-outline" size={18} color={Colors.textSecondary} />
+                    <Text style={styles.infoLabel}>Trading As</Text>
+                    <Text style={styles.infoValue}>{user.tradingName}</Text>
                   </View>
                 ) : null}
                 {user.businessCategory ? (
@@ -467,6 +481,13 @@ export default function SettingsScreen() {
                     <Ionicons name="globe-outline" size={18} color={Colors.textSecondary} />
                     <Text style={styles.infoLabel}>Website</Text>
                     <Text style={styles.infoValue} numberOfLines={1}>{user.businessWebsite}</Text>
+                  </View>
+                ) : null}
+                {user.lekkerNetworkId ? (
+                  <View style={styles.infoRow}>
+                    <Ionicons name="finger-print-outline" size={18} color={Colors.textSecondary} />
+                    <Text style={styles.infoLabel}>Network ID</Text>
+                    <Text style={[styles.infoValue, { fontSize: 11 }]} numberOfLines={1}>{user.lekkerNetworkId}</Text>
                   </View>
                 ) : null}
               </>

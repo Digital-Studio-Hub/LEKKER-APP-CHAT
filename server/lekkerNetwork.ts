@@ -225,12 +225,12 @@ export function extractLekkerpreneurProfile(entry: LekkerNetworkEntry) {
     businessName: entry.businessName,
     tradingName: entry.tradingName || null,
     lekkerNetworkId: entry.id,
-    isVerifiedLekkerpreneur: entry.isVerified,
+    isVerifiedLekkerpreneur: true,
     businessCategory: entry.category || null,
     businessWebsite: entry.website || null,
     businessLogoUrl: entry.logoUrl || null,
     businessProvince: entry.province || entry.location?.province || null,
     businessCountry: entry.location?.country || "South Africa",
-    lekkerVerifiedAt: entry.isVerified ? new Date() : null,
+    lekkerVerifiedAt: new Date(),
   };
 }

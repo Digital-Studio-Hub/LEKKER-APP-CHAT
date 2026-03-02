@@ -26,6 +26,8 @@ interface UserInfo {
   province?: string;
   bio?: string;
   isLekkerpreneur: boolean;
+  isVerified?: boolean;
+  memberSince?: string;
 }
 
 function formatTimeAgo(dateStr: string): string {
@@ -67,18 +69,20 @@ export default function UserProfileScreen() {
 
     try {
       const data = await fetchDirectoryCached();
-      const entry = data.entries.find((e: any) => e.phone === id);
+      const entry = data.entries.find((e: any) => e.id === id || e.phone === id);
       if (entry) {
         info = {
           name: entry.name,
           phone: entry.phone,
-          avatarColor: entry.avatarColor,
+          avatarColor: entry.avatarColor || info.avatarColor,
           businessName: entry.businessName,
           serviceType: entry.serviceType,
           location: entry.location,
           province: entry.province,
           bio: entry.bio,
           isLekkerpreneur: true,
+          isVerified: entry.isVerified ?? false,
+          memberSince: entry.memberSince,
         };
       }
     } catch {}
@@ -175,6 +179,20 @@ export default function UserProfileScreen() {
                 <Text style={styles.infoText}>
                   {[userInfo.location, userInfo.province].filter(Boolean).join(", ")}
                 </Text>
+              </View>
+            )}
+
+            {userInfo?.isVerified && (
+              <View style={[styles.infoRow, { backgroundColor: "rgba(245,184,0,0.1)", paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, marginTop: 4 }]}>
+                <Ionicons name="shield-checkmark" size={14} color={Colors.primary} />
+                <Text style={[styles.infoText, { color: Colors.primary, fontWeight: "600" as const }]}>CIPC Verified Business</Text>
+              </View>
+            )}
+
+            {userInfo?.memberSince && (
+              <View style={styles.infoRow}>
+                <Ionicons name="calendar-outline" size={14} color={Colors.textMuted} />
+                <Text style={styles.infoText}>Member since {new Date(userInfo.memberSince).toLocaleDateString("en-ZA", { year: "numeric", month: "long" })}</Text>
               </View>
             )}
 

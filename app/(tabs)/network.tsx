@@ -36,6 +36,8 @@ interface DirectoryEntry {
   phone: string;
   bio: string;
   avatarColor: string;
+  isVerified?: boolean;
+  memberSince?: string;
 }
 
 interface FiltersData {
@@ -215,7 +217,12 @@ function DirectoryView() {
               >
                 <Avatar name={item.name || item.businessName} color={item.avatarColor} size={50} />
                 <View style={dirStyles.cardInfo}>
-                  <Text style={dirStyles.cardName}>{item.name || item.businessName}</Text>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                    <Text style={dirStyles.cardName}>{item.name || item.businessName}</Text>
+                    {item.isVerified && (
+                      <Ionicons name="checkmark-circle" size={16} color={Colors.primary} />
+                    )}
+                  </View>
                   <Text style={dirStyles.cardBusiness}>{item.businessName}</Text>
                   <View style={dirStyles.cardMeta}>
                     <Ionicons name="location-outline" size={13} color={Colors.textMuted} />

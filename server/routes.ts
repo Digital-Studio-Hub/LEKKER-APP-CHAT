@@ -574,27 +574,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
+      if (!user.isVerifiedLekkerpreneur) {
+        await storage.updateUser(user.id, {
+          isVerifiedLekkerpreneur: true,
+          lekkerVerifiedAt: new Date(),
+        });
+      }
+
       await storage.logAuthEvent("external_verify", user.id, req.ip, undefined, `Verified by Lekker Network via ${email ? "email" : "phone"}`);
+
+      const updatedUser = await storage.getUser(user.id);
+      const u = updatedUser || user;
 
       res.json({
         success: true,
         matched: true,
         user: {
-          id: user.id,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          username: user.username,
-          businessName: user.businessName,
-          tradingName: user.tradingName,
-          businessCategory: user.businessCategory,
-          businessWebsite: user.businessWebsite,
-          businessProvince: user.businessProvince,
-          businessCountry: user.businessCountry,
-          isVerifiedLekkerpreneur: user.isVerifiedLekkerpreneur,
-          lekkerNetworkId: user.lekkerNetworkId,
-          profilePhoto: user.profilePhoto,
-          presence: user.presence,
-          memberSince: user.createdAt,
+          id: u.id,
+          firstName: u.firstName,
+          lastName: u.lastName,
+          username: u.username,
+          businessName: u.businessName,
+          tradingName: u.tradingName,
+          businessCategory: u.businessCategory,
+          businessWebsite: u.businessWebsite,
+          businessProvince: u.businessProvince,
+          businessCountry: u.businessCountry,
+          isVerifiedLekkerpreneur: u.isVerifiedLekkerpreneur,
+          lekkerNetworkId: u.lekkerNetworkId,
+          profilePhoto: u.profilePhoto,
+          presence: u.presence,
+          memberSince: u.createdAt,
         },
       });
     } catch (error) {
