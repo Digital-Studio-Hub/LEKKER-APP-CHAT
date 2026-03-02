@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, boolean, timestamp, integer } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, boolean, timestamp, integer, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -43,7 +43,9 @@ export const users = pgTable("users", {
   profileImageUpdatedAt: timestamp("profile_image_updated_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (table) => [
+  index("idx_users_verified").on(table.isVerifiedLekkerpreneur),
+]);
 
 export const authAuditLogs = pgTable("auth_audit_logs", {
   id: varchar("id", { length: 36 })

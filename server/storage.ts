@@ -1,5 +1,5 @@
 import { drizzle } from "drizzle-orm/node-postgres";
-import { eq, or, sql } from "drizzle-orm";
+import { eq, or, and, ne, sql, asc, desc, count } from "drizzle-orm";
 import { users, authAuditLogs, type User, type InsertUser } from "@shared/schema";
 
 if (!process.env.DATABASE_URL) {
@@ -16,6 +16,7 @@ export interface IStorage {
   getUserByIdentifier(identifier: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   updateUser(id: string, data: Partial<User>): Promise<User | undefined>;
+  getVerifiedUsers(excludeId: string, page: number, limit: number): Promise<{ users: User[]; total: number }>;
   logAuthEvent(event: string, userId?: string, ipAddress?: string, userAgent?: string, details?: string): Promise<void>;
 }
 
@@ -68,6 +69,25 @@ class PgStorage implements IStorage {
       .where(eq(users.id, id))
       .returning();
     return user;
+  }
+
+  async getVerifiedUsers(excludeId: string, page: number, limit: number): Promise<{ users: User[]; total: number }> {
+    const whereClause = and(
+      eq(users.isVerifiedLekkerpreneur, true),
+      ne(users.id, excludeId)
+    );
+
+    const [totalResult] = await db.select({ value: count() }).from(users).where(whereClause);
+    const total = totalResult?.value || 0;
+
+    const offset = (page - 1) * limit;
+    const results = await db.select().from(users)
+      .where(whereClause)
+      .orderBy(desc(users.lekkerVerifiedAt), asc(users.businessName))
+      .limit(limit)
+      .offset(offset);
+
+    return { users: results, total };
   }
 
   async logAuthEvent(

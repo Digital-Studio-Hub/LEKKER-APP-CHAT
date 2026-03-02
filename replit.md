@@ -50,6 +50,7 @@ A business messaging app for Lekker Network - connecting Lekkerpreneurs with the
   - `/objects/*` - Serve objects from storage (public ACL checked)
   - `/public-objects/*` - Serve public objects from storage
   - `/api/auth/sync-lekker` - Manual sync with Lekker Network API (protected)
+  - `/api/v1/network` - Secured network: verified Lekkerpreneurs only, paginated, no sensitive fields (protected, rate-limited)
   - `/api/cledwyn/chat` - CledwynAI streaming chat
   - `/api/directory` - Lekkerpreneur directory with filters (serviceType, province, search)
   - `/api/directory/:id` - Single directory entry

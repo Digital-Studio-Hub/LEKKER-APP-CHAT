@@ -551,6 +551,71 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  const networkLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 60,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { success: false, message: "Too many requests. Please try again later." },
+    validate: { xForwardedForHeader: false } as Partial<Options>,
+  });
+
+  app.get("/api/v1/network", authMiddleware, networkLimiter, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const requestingUser = await storage.getUser(req.user!.userId);
+      if (!requestingUser) {
+        return res.status(404).json({ success: false, message: "User not found" });
+      }
+
+      if (!requestingUser.isVerifiedLekkerpreneur) {
+        return res.status(403).json({
+          success: false,
+          message: "Access denied. Only verified Lekkerpreneurs can access the network.",
+        });
+      }
+
+      const page = Math.max(1, parseInt(req.query.page as string) || 1);
+      const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 20));
+
+      const { users: verifiedUsers, total } = await storage.getVerifiedUsers(requestingUser.id, page, limit);
+
+      const safeUsers = verifiedUsers.map((u) => ({
+        id: u.id,
+        firstName: u.firstName,
+        lastName: u.lastName,
+        username: u.username,
+        avatarColor: u.avatarColor,
+        profilePhoto: u.profilePhoto,
+        bio: u.bio,
+        businessName: u.businessName,
+        tradingName: u.tradingName,
+        businessCategory: u.businessCategory,
+        businessWebsite: u.businessWebsite,
+        businessLogoUrl: u.businessLogoUrl,
+        businessProvince: u.businessProvince,
+        businessCountry: u.businessCountry,
+        isVerifiedLekkerpreneur: u.isVerifiedLekkerpreneur,
+        lekkerVerifiedAt: u.lekkerVerifiedAt,
+        presence: u.presence,
+        status: u.status,
+        locationCity: u.locationCity,
+        locationRegion: u.locationRegion,
+      }));
+
+      res.json({
+        success: true,
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+        data: safeUsers,
+      });
+    } catch (error) {
+      console.error("Network endpoint error:", error);
+      res.status(500).json({ success: false, message: "Internal server error" });
+    }
+  });
+
   app.post("/api/cledwyn/chat", async (req: Request, res: Response) => {
     try {
       const { messages, lekkerNetworkAccess } = req.body;
