@@ -165,24 +165,28 @@ export async function findLekkerpreneurByPhoneOrEmail(
     return syncResult.user;
   }
 
-  if (normalizedEmail && normalizedEmail.includes("@")) {
-    const emailResult = await fetchFromApi({ search: normalizedEmail, limit: "10" });
-    if (emailResult?.data?.length) {
-      const emailMatch = emailResult.data.find(
+  const maxPages = 10;
+  const pageSize = 100;
+
+  for (let page = 1; page <= maxPages; page++) {
+    const result = await fetchFromApi({ page: String(page), limit: String(pageSize) });
+    if (!result?.data?.length) break;
+
+    if (normalizedEmail && normalizedEmail.includes("@")) {
+      const emailMatch = result.data.find(
         (entry) => entry.email?.toLowerCase().trim() === normalizedEmail
       );
       if (emailMatch) return emailMatch;
     }
-  }
 
-  if (normalizedPhone) {
-    const phoneResult = await fetchFromApi({ search: normalizedPhone, limit: "10" });
-    if (phoneResult?.data?.length) {
-      const phoneMatch = phoneResult.data.find(
-        (entry) => normalizePhone(entry.phone || "") === normalizedPhone
+    if (normalizedPhone) {
+      const phoneMatch = result.data.find(
+        (entry) => entry.phone && normalizePhone(entry.phone) === normalizedPhone
       );
       if (phoneMatch) return phoneMatch;
     }
+
+    if (result.data.length < pageSize) break;
   }
 
   return null;
