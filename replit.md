@@ -57,7 +57,7 @@ A business messaging app for Lekker Network - connecting Lekkerpreneurs with the
   - `/api/directory/:id` - Single directory entry
 - `server/auth.ts` - JWT + bcrypt auth utilities, authMiddleware
 - `server/storage.ts` - PostgreSQL storage via Drizzle ORM (PgStorage class)
-- `server/lekkerNetwork.ts` - Lekker Network API client (directory fetch, user matching by phone/email, profile extraction)
+- `server/lekkerNetwork.ts` - Lekker Network API client (directory fetch, user matching by phone/email, profile extraction, workspace data resolution, buildSyncUserResponse, buildDirectoryEntry)
 - `server/objectStorage.ts` - Object Storage service (upload URLs, ACL, file serving)
 - `server/objectAcl.ts` - Object ACL management (owner, visibility policies)
 - `server/index.ts` - Express server setup
@@ -81,7 +81,7 @@ A business messaging app for Lekker Network - connecting Lekkerpreneurs with the
 - Auth audit logging for all auth events
 
 ## Features
-- Lekker Network API integration: matches users by phone/email on register/login, auto-populates business data for verified Lekkerpreneurs, manual sync via Settings
+- Lekker Network API integration: matches users by phone/email on register/login, auto-populates business data for verified Lekkerpreneurs, manual sync via Settings, workspace data (currency, VAT, invoicing, address) returned in sync response
 - Production auth with registration and login
 - WhatsApp-style chat conversations (P2P and group)
 - Group chat creation with member selection and naming

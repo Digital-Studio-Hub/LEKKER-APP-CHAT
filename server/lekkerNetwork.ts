@@ -3,6 +3,31 @@ const LEKKER_API_URL = `${LEKKER_API_BASE}/api/v1/lekkerpreneurs`;
 const LEKKER_SYNC_URL = `${LEKKER_API_BASE}/api/auth/sync-lekker`;
 const LEKKER_API_KEY = process.env.LEKKER_NETWORK_API_KEY || "";
 
+export interface LekkerWorkspace {
+  id?: string;
+  name?: string;
+  currency?: string;
+  shippingEnabled?: boolean;
+  paymentUrl?: string;
+  websiteUrl?: string;
+  businessName?: string;
+  tradingName?: string;
+  businessAddress?: string;
+  businessPhone?: string;
+  businessEmail?: string;
+  businessWebsite?: string;
+  logoUrl?: string;
+  category?: string;
+  province?: string;
+  website?: string;
+  isVatVendor?: boolean;
+  defaultVatStatus?: string;
+  invoiceNumberPrefix?: string;
+  quoteNumberPrefix?: string;
+  financialYearEndMonth?: number;
+  isVerified?: boolean;
+}
+
 export interface LekkerNetworkEntry {
   id: string;
   name?: string;
@@ -25,6 +50,8 @@ export interface LekkerNetworkEntry {
   };
   isVerified: boolean;
   createdAt?: string;
+  workspaceCreatedAt?: string;
+  workspace?: LekkerWorkspace;
 }
 
 interface LekkerNetworkResponse {
@@ -38,7 +65,9 @@ interface LekkerNetworkResponse {
 interface LekkerSyncResponse {
   matched: boolean;
   message?: string;
-  user?: LekkerNetworkEntry;
+  user?: LekkerNetworkEntry & {
+    workspace?: LekkerWorkspace;
+  };
 }
 
 function normalizePhone(phone: string): string {
@@ -220,17 +249,81 @@ export async function fetchLekkerpreneurById(id: string): Promise<LekkerNetworkE
   return null;
 }
 
-export function extractLekkerpreneurProfile(entry: LekkerNetworkEntry) {
+function resolveWorkspace(entry: LekkerNetworkEntry): LekkerWorkspace {
+  const ws = entry.workspace || {};
   return {
-    businessName: entry.businessName,
-    tradingName: entry.tradingName || null,
+    id: ws.id || undefined,
+    name: ws.name || undefined,
+    currency: ws.currency || "ZAR",
+    shippingEnabled: ws.shippingEnabled ?? false,
+    paymentUrl: ws.paymentUrl || null,
+    websiteUrl: ws.websiteUrl || entry.website || null,
+    businessName: ws.businessName || entry.businessName || null,
+    tradingName: ws.tradingName || entry.tradingName || null,
+    businessAddress: ws.businessAddress || null,
+    businessPhone: ws.businessPhone || entry.phone || entry.businessPhone || null,
+    businessEmail: ws.businessEmail || entry.email || entry.businessEmail || null,
+    businessWebsite: ws.businessWebsite || entry.website || null,
+    logoUrl: ws.logoUrl || entry.logoUrl || null,
+    category: ws.category || entry.category || null,
+    province: ws.province || entry.province || entry.location?.province || null,
+    website: ws.website || entry.website || null,
+    isVatVendor: ws.isVatVendor ?? false,
+    defaultVatStatus: ws.defaultVatStatus || "no_vat",
+    invoiceNumberPrefix: ws.invoiceNumberPrefix || "INV",
+    quoteNumberPrefix: ws.quoteNumberPrefix || "QUO",
+    financialYearEndMonth: ws.financialYearEndMonth ?? 2,
+    isVerified: ws.isVerified ?? entry.isVerified ?? false,
+  };
+}
+
+export function extractLekkerpreneurProfile(entry: LekkerNetworkEntry) {
+  const ws = resolveWorkspace(entry);
+  return {
+    businessName: ws.businessName || entry.businessName,
+    tradingName: ws.tradingName || entry.tradingName || null,
     lekkerNetworkId: entry.id,
     isVerifiedLekkerpreneur: true,
-    businessCategory: entry.category || null,
-    businessWebsite: entry.website || null,
-    businessLogoUrl: entry.logoUrl || null,
-    businessProvince: entry.province || entry.location?.province || null,
+    businessCategory: ws.category || entry.category || null,
+    businessWebsite: ws.businessWebsite || ws.websiteUrl || entry.website || null,
+    businessLogoUrl: ws.logoUrl || entry.logoUrl || null,
+    businessProvince: ws.province || entry.province || entry.location?.province || null,
     businessCountry: entry.location?.country || "South Africa",
     lekkerVerifiedAt: new Date(),
+  };
+}
+
+export function buildSyncUserResponse(entry: LekkerNetworkEntry) {
+  const ws = resolveWorkspace(entry);
+  return {
+    id: entry.id,
+    name: entry.ownerName || entry.name || entry.businessName || "Unknown",
+    email: entry.email || "",
+    emailVerified: entry.emailVerified ?? false,
+    memberSince: entry.memberSince || entry.createdAt || "",
+    workspace: ws,
+  };
+}
+
+export function buildDirectoryEntry(d: LekkerNetworkEntry) {
+  const ws = resolveWorkspace(d);
+  return {
+    id: d.id,
+    name: d.ownerName || d.businessName || "Unknown",
+    businessName: d.businessName || d.ownerName || "Unknown Business",
+    tradingName: ws.tradingName || "",
+    serviceType: ws.category || "General",
+    location: ws.province || d.location?.province || "South Africa",
+    province: ws.province || d.location?.province || "",
+    phone: ws.businessPhone || d.phone || "",
+    email: ws.businessEmail || d.email || "",
+    bio: "",
+    avatarColor: "#F5B800",
+    website: ws.businessWebsite || ws.websiteUrl || d.website || "",
+    logoUrl: ws.logoUrl || d.logoUrl || "",
+    isVerified: ws.isVerified ?? d.isVerified ?? false,
+    emailVerified: d.emailVerified ?? false,
+    memberSince: d.memberSince || d.createdAt || "",
+    workspace: ws,
   };
 }

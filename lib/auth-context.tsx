@@ -231,24 +231,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function updateProfile(updates: Partial<AuthUser>) {
     if (!user) return;
 
+    const ALLOWED_FIELDS = new Set([
+      "firstName", "lastName", "username", "bio", "businessName", "tradingName",
+      "businessCategory", "businessWebsite", "businessLogoUrl", "businessProvince",
+      "businessCountry", "status", "presence", "avatarColor", "profilePhoto",
+      "autoReplyEnabled", "autoReplyMessage", "notificationsEnabled", "locationEnabled",
+      "lastLatitude", "lastLongitude", "locationCity", "locationRegion",
+    ]);
+
+    const filtered: Record<string, any> = {};
+    for (const [key, value] of Object.entries(updates)) {
+      if (ALLOWED_FIELDS.has(key)) {
+        filtered[key] = value;
+      }
+    }
+
     try {
       const baseUrl = getApiUrl();
       const token = getAuthToken();
-      const res = await fetch(`${baseUrl}api/auth/profile`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(updates),
-      });
 
-      if (res.ok) {
-        const data = await res.json();
-        const enriched = enrichUser(data.user);
-        setUser(enriched);
-        await storeUser(enriched);
+      if (Object.keys(filtered).length > 0) {
+        const res = await fetch(`${baseUrl}api/auth/profile`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(filtered),
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          const enriched = enrichUser(data.user);
+          setUser(enriched);
+          await storeUser(enriched);
+          return;
+        }
       }
+
+      const updated = enrichUser({ ...user, ...updates });
+      setUser(updated);
+      await storeUser(updated);
     } catch (e) {
       const updated = enrichUser({ ...user, ...updates });
       setUser(updated);

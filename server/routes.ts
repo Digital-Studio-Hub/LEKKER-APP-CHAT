@@ -14,7 +14,7 @@ import {
 } from "./auth";
 import { ObjectStorageService, ObjectNotFoundError } from "./objectStorage";
 import { ObjectPermission } from "./objectAcl";
-import { findLekkerpreneurByPhoneOrEmail, fetchDirectory as fetchLekkerDirectory, fetchLekkerpreneurById, extractLekkerpreneurProfile, type LekkerNetworkEntry } from "./lekkerNetwork";
+import { findLekkerpreneurByPhoneOrEmail, fetchDirectory as fetchLekkerDirectory, fetchLekkerpreneurById, extractLekkerpreneurProfile, buildSyncUserResponse, buildDirectoryEntry, type LekkerNetworkEntry } from "./lekkerNetwork";
 
 const openrouter = new OpenAI({
   baseURL: process.env.AI_INTEGRATIONS_OPENROUTER_BASE_URL,
@@ -375,24 +375,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       if (apiResult?.success && apiResult.data) {
-        const entries = apiResult.data.map((d) => ({
-          id: d.id,
-          name: d.ownerName || d.businessName || "Unknown",
-          businessName: d.businessName || d.ownerName || "Unknown Business",
-          tradingName: d.tradingName || "",
-          serviceType: d.category || "General",
-          location: d.location?.province || "South Africa",
-          province: d.location?.province || "",
-          phone: d.phone || "",
-          email: d.email || "",
-          bio: "",
-          avatarColor: "#F5B800",
-          website: d.website || "",
-          logoUrl: d.logoUrl || "",
-          isVerified: d.isVerified ?? false,
-          emailVerified: d.emailVerified ?? false,
-          memberSince: d.memberSince || d.createdAt || "",
-        }));
+        const entries = apiResult.data.map((d) => buildDirectoryEntry(d));
 
         return res.json({
           entries,
@@ -432,22 +415,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const apiEntry = await fetchLekkerpreneurById(req.params.id);
       if (apiEntry) {
         return res.json({
-          id: apiEntry.id,
-          name: apiEntry.ownerName || apiEntry.businessName || "Unknown",
-          businessName: apiEntry.businessName || apiEntry.ownerName || "Unknown Business",
-          tradingName: apiEntry.tradingName || "",
-          serviceType: apiEntry.category || "General",
-          location: apiEntry.location?.province || "South Africa",
-          province: apiEntry.location?.province || "",
-          phone: apiEntry.phone || "",
-          email: apiEntry.email || "",
-          bio: "",
-          avatarColor: "#F5B800",
-          website: apiEntry.website || "",
-          logoUrl: apiEntry.logoUrl || "",
-          isVerified: apiEntry.isVerified ?? false,
-          emailVerified: apiEntry.emailVerified ?? false,
-          memberSince: apiEntry.memberSince || apiEntry.createdAt || "",
+          ...buildDirectoryEntry(apiEntry),
           source: "lekker_network",
         });
       }
@@ -630,7 +598,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       await storage.logAuthEvent("lekker_network_sync", user.id, req.ip, undefined, `Synced with: ${match.businessName} (${match.id})`);
 
-      res.json({ matched: true, user: sanitizeUser(updated || user) });
+      const syncUserData = buildSyncUserResponse(match);
+      const sanitized = sanitizeUser(updated || user);
+
+      res.json({
+        matched: true,
+        user: {
+          ...sanitized,
+          workspace: syncUserData.workspace,
+        },
+      });
     } catch (error) {
       console.error("Lekker Network sync error:", error);
       res.status(500).json({ message: "Failed to sync with Lekker Network" });
