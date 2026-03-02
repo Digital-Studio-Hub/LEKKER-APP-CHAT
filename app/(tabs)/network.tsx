@@ -209,13 +209,13 @@ function DirectoryView() {
                 onPress={() =>
                   router.push({
                     pathname: "/user-profile/[id]",
-                    params: { id: item.phone, name: item.name, avatarColor: item.avatarColor },
+                    params: { id: item.id, name: item.name || item.businessName, avatarColor: item.avatarColor },
                   })
                 }
               >
-                <Avatar name={item.name} color={item.avatarColor} size={50} />
+                <Avatar name={item.name || item.businessName} color={item.avatarColor} size={50} />
                 <View style={dirStyles.cardInfo}>
-                  <Text style={dirStyles.cardName}>{item.name}</Text>
+                  <Text style={dirStyles.cardName}>{item.name || item.businessName}</Text>
                   <Text style={dirStyles.cardBusiness}>{item.businessName}</Text>
                   <View style={dirStyles.cardMeta}>
                     <Ionicons name="location-outline" size={13} color={Colors.textMuted} />
