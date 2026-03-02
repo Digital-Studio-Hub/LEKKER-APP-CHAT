@@ -20,16 +20,17 @@ A business messaging app for Lekker Network - connecting Lekkerpreneurs with the
   - `cledwyn.tsx` - CledwynAI chat with streaming
   - `network.tsx` - Directory + WebView (toggle between Directory and Browse)
   - `feed.tsx` - Social feed with 24h rolling posts
-- `app/chat/[id].tsx` - Individual/group chat conversation with sent/delivered/seen receipts
+- `app/chat/[id].tsx` - Individual/group chat conversation (server-backed via chat-api.ts)
 - `app/settings.tsx` - Settings (profile photo upload, editable fields, presence, privacy, auto-reply)
 - `app/profile.tsx` - Own profile with posts
 - `app/user-profile/[id].tsx` - View another user's profile (name, bio, business info, posts)
-- `app/new-chat.tsx` - Create new conversation (contacts integration + directory matching)
-- `app/new-group.tsx` - Create group chat (two-step: select members, name group)
+- `app/new-chat.tsx` - Create new P2P chat (search registered users + directory contacts)
+- `app/new-group.tsx` - Create group chat (search users, select members, name group)
 - `app/in-app-browser.tsx` - In-app browser for opening links (WebView/iframe with nav controls)
 - `app/new-post.tsx` - Create feed post
 - `app/post-comments.tsx` - View/add comments on posts
-- `lib/storage.ts` - AsyncStorage data layer (conversations, messages, groups, pins, receipts)
+- `lib/storage.ts` - AsyncStorage data layer (block/unblock, pins, local preferences)
+- `lib/chat-api.ts` - Server-backed chat client (fetchChats, fetchChatMessages, createP2PChat, createGroupChat, sendChatMessage, markChatRead, deleteServerChat, searchUsers, getChatDetail, display helpers)
 - `lib/auth-context.tsx` - Server-backed authentication context (JWT + SecureStore)
 - `lib/auth-token.ts` - Singleton auth token accessor (breaks circular dependency)
 - `lib/query-client.ts` - React Query + API helpers with Authorization headers

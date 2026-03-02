@@ -20,8 +20,7 @@ import * as Haptics from "expo-haptics";
 import { Audio } from "expo-av";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/lib/auth-context";
-import { storage, Conversation, ChatMessage, MessageStatus, PollOption } from "@/lib/storage";
-import { fetchDirectoryCached } from "@/lib/query-client";
+import { storage } from "@/lib/storage";
 import { isSmallScreen, fontScale, responsivePadding } from "@/lib/responsive";
 import {
   pickImage,
@@ -34,8 +33,22 @@ import {
   formatDuration,
   formatFileSize,
 } from "@/lib/chat-attachments";
+import {
+  ServerMessage,
+  ServerChat,
+  ChatParticipant,
+  fetchChatMessages,
+  sendChatMessage,
+  getChatDetail,
+  markChatRead,
+  getChatDisplayName,
+  getChatAvatarColor,
+  getChatProfilePhoto,
+  getOtherParticipant,
+  getDisplayName,
+} from "@/lib/chat-api";
 
-function ReceiptIcon({ status }: { status?: MessageStatus }) {
+function ReceiptIcon({ status }: { status?: string }) {
   if (!status) return null;
   if (status === "sent") {
     return <Ionicons name="checkmark" size={14} color="rgba(0,0,0,0.4)" />;
@@ -117,14 +130,24 @@ const vnStyles = StyleSheet.create({
   duration: { fontSize: 11, fontFamily: "Poppins_400Regular" },
 });
 
-function PollBubble({ message, isMe, conversationId, onVote }: { message: ChatMessage; isMe: boolean; conversationId: string; onVote: () => void }) {
-  const options = message.pollOptions || [];
-  const totalVotes = options.reduce((sum, o) => sum + o.votes.length, 0);
-  const myVote = options.find((o) => o.votes.includes("me"));
+interface ParsedPollOption {
+  id: string;
+  text: string;
+  votes: string[];
+}
+
+function PollBubble({ message, isMe, myUserId, onVote }: { message: ServerMessage; isMe: boolean; myUserId: string; onVote: () => void }) {
+  let options: ParsedPollOption[] = [];
+  try {
+    if (message.pollOptions) {
+      options = typeof message.pollOptions === "string" ? JSON.parse(message.pollOptions) : message.pollOptions;
+    }
+  } catch {}
+  const totalVotes = options.reduce((sum, o) => sum + (o.votes?.length || 0), 0);
+  const myVote = options.find((o) => o.votes?.includes(myUserId));
 
   async function handleVote(optionId: string) {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    await storage.votePoll(conversationId, message.id, optionId, "me");
     onVote();
   }
 
@@ -142,8 +165,8 @@ function PollBubble({ message, isMe, conversationId, onVote }: { message: ChatMe
         </Text>
       </View>
       {options.map((opt) => {
-        const pct = totalVotes > 0 ? Math.round((opt.votes.length / totalVotes) * 100) : 0;
-        const isMyVote = opt.votes.includes("me");
+        const pct = totalVotes > 0 ? Math.round(((opt.votes?.length || 0) / totalVotes) * 100) : 0;
+        const isMyVote = opt.votes?.includes(myUserId);
         return (
           <Pressable key={opt.id} onPress={() => handleVote(opt.id)} style={{ borderRadius: 8, overflow: "hidden" }}>
             <View style={{ backgroundColor: barBg, borderRadius: 8, padding: 8, position: "relative" }}>
@@ -174,17 +197,17 @@ function MessageBubbleInner({
   isMe,
   isGroup,
   senderName,
-  conversationId,
+  myUserId,
   onReload,
 }: {
-  message: ChatMessage;
+  message: ServerMessage;
   isMe: boolean;
   isGroup?: boolean;
   senderName?: string;
-  conversationId: string;
+  myUserId: string;
   onReload: () => void;
 }) {
-  const time = new Date(message.timestamp).toLocaleTimeString([], {
+  const time = new Date(message.createdAt).toLocaleTimeString([], {
     hour: "2-digit",
     minute: "2-digit",
   });
@@ -233,7 +256,7 @@ function MessageBubbleInner({
                 {message.fileName || "File"}
               </Text>
               <Text style={{ fontFamily: "Poppins_400Regular", fontSize: 11, color: mColor }}>
-                {formatFileSize(message.fileSize)}
+                {formatFileSize(message.fileSize ?? undefined)}
               </Text>
             </View>
           </Pressable>
@@ -242,7 +265,7 @@ function MessageBubbleInner({
         return (
           <VoiceNotePlayer
             uri={message.audioUri || ""}
-            duration={message.audioDuration}
+            duration={message.audioDuration ?? undefined}
             isMe={isMe}
           />
         );
@@ -285,7 +308,7 @@ function MessageBubbleInner({
           <PollBubble
             message={message}
             isMe={isMe}
-            conversationId={conversationId}
+            myUserId={myUserId}
             onVote={onReload}
           />
         );
@@ -359,9 +382,10 @@ export default function ChatDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
-  const [conversation, setConversation] = useState<Conversation | null>(null);
+  const myUserId = user?.id || "";
+  const [chat, setChat] = useState<ServerChat | null>(null);
+  const [messages, setMessages] = useState<ServerMessage[]>([]);
   const [inputText, setInputText] = useState("");
-  const [isLekkerpreneur, setIsLekkerpreneur] = useState(false);
   const [isBlocked, setIsBlocked] = useState(false);
   const [showAttachMenu, setShowAttachMenu] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -375,11 +399,10 @@ export default function ChatDetailScreen() {
   const recordingTimerRef = useRef<ReturnType<typeof setInterval>>();
 
   useEffect(() => {
-    loadConversation();
-    loadLekkerStatus();
+    loadChatData();
     checkBlocked();
     refreshIntervalRef.current = setInterval(() => {
-      loadConversation();
+      loadMessages();
     }, 4000);
     return () => {
       if (refreshIntervalRef.current) clearInterval(refreshIntervalRef.current);
@@ -390,53 +413,61 @@ export default function ChatDetailScreen() {
   useFocusEffect(
     useCallback(() => {
       if (id) {
-        storage.markConversationSeen(id);
+        markChatRead(id);
         checkBlocked();
       }
     }, [id]),
   );
 
-  async function loadConversation() {
-    const convs = await storage.getConversations();
-    const conv = convs.find((c) => c.id === id);
-    if (conv) {
-      conv.unreadCount = 0;
-      await storage.saveConversations(convs);
-      setConversation(conv);
+  async function loadChatData() {
+    if (!id) return;
+    const detail = await getChatDetail(id);
+    if (detail) {
+      setChat(detail.chat);
     }
+    const msgs = await fetchChatMessages(id);
+    setMessages(msgs);
   }
 
-  async function loadLekkerStatus() {
-    try {
-      const data = await fetchDirectoryCached();
-      const convs = await storage.getConversations();
-      const conv = convs.find((c) => c.id === id);
-      if (conv) {
-        const phones = new Set(data.entries.map((e: any) => e.phone));
-        setIsLekkerpreneur(phones.has(conv.contactId));
-      }
-    } catch (e) {}
+  async function loadMessages() {
+    if (!id) return;
+    const msgs = await fetchChatMessages(id);
+    setMessages(msgs);
   }
 
   async function checkBlocked() {
-    if (!id) return;
-    const convs = await storage.getConversations();
-    const conv = convs.find((c) => c.id === id);
-    if (conv && !conv.isGroup) {
-      const blocked = await storage.isUserBlocked(conv.contactId);
-      setIsBlocked(blocked);
+    if (!id || !chat) return;
+    if (chat.type !== "group") {
+      const other = getOtherParticipant(chat, myUserId);
+      if (other) {
+        const blocked = await storage.isUserBlocked(other.id);
+        setIsBlocked(blocked);
+      }
     }
   }
 
+  useEffect(() => {
+    if (chat) {
+      checkBlocked();
+    }
+  }, [chat]);
+
+  const otherParticipant = chat ? getOtherParticipant(chat, myUserId) : undefined;
+  const chatName = chat ? getChatDisplayName(chat, myUserId) : "";
+  const avatarColor = chat ? getChatAvatarColor(chat, myUserId) : "#F5B800";
+  const profilePhoto = chat ? getChatProfilePhoto(chat, myUserId) : null;
+  const isVerified = otherParticipant?.isVerifiedLekkerpreneur ?? false;
+  const isGroup = chat?.type === "group";
+
   async function handleToggleBlock() {
-    if (!conversation || conversation.isGroup) return;
+    if (!chat || isGroup || !otherParticipant) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     if (isBlocked) {
-      await storage.unblockUser(conversation.contactId);
+      await storage.unblockUser(otherParticipant.id);
       setIsBlocked(false);
     } else {
       Alert.alert(
-        "Block " + conversation.contactName + "?",
+        "Block " + chatName + "?",
         "Blocked users cannot send you messages. You can unblock them later from Settings.",
         [
           { text: "Cancel", style: "cancel" },
@@ -444,7 +475,7 @@ export default function ChatDetailScreen() {
             text: "Block",
             style: "destructive",
             onPress: async () => {
-              await storage.blockUser(conversation.contactName, conversation.contactId);
+              await storage.blockUser(chatName, otherParticipant.id);
               setIsBlocked(true);
             },
           },
@@ -458,58 +489,70 @@ export default function ChatDetailScreen() {
     if (!text || !id || isBlocked) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setInputText("");
-    await storage.addMessageToConversation(id, text, "me");
-    await loadConversation();
+    await sendChatMessage(id, text, "text");
+    await loadMessages();
   }
 
-  async function handleSendAttachment(attachment: Partial<ChatMessage>) {
+  async function handleSendAttachment(type: string, content: string, extras: Record<string, any>) {
     if (!id || isBlocked) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    const label = getAttachmentLabel(attachment);
-    await storage.addMessageToConversation(id, label, "me", attachment);
-    await loadConversation();
-  }
-
-  function getAttachmentLabel(attachment: Partial<ChatMessage>): string {
-    switch (attachment.type) {
-      case "image": return "📷 Photo";
-      case "file": return `📎 ${attachment.fileName || "File"}`;
-      case "voicenote": return `🎤 Voice note (${formatDuration(attachment.audioDuration || 0)})`;
-      case "location": return `📍 ${attachment.locationName || "Location"}`;
-      case "poll": return `📊 Poll: ${attachment.pollQuestion}`;
-      case "contact": return `👤 ${attachment.sharedContactName || "Contact"}`;
-      default: return "";
-    }
+    await sendChatMessage(id, content, type, extras);
+    await loadMessages();
   }
 
   async function handlePickImage() {
     setShowAttachMenu(false);
     const result = await pickImage();
-    if (result) await handleSendAttachment(result);
+    if (result) {
+      await handleSendAttachment("image", "📷 Photo", {
+        imageUri: result.imageUri,
+      });
+    }
   }
 
   async function handleTakePhoto() {
     setShowAttachMenu(false);
     const result = await takePhoto();
-    if (result) await handleSendAttachment(result);
+    if (result) {
+      await handleSendAttachment("image", "📷 Photo", {
+        imageUri: result.imageUri,
+      });
+    }
   }
 
   async function handlePickDocument() {
     setShowAttachMenu(false);
     const result = await pickDocument();
-    if (result) await handleSendAttachment(result);
+    if (result) {
+      await handleSendAttachment("file", `📎 ${result.fileName || "File"}`, {
+        fileUri: result.fileUri,
+        fileName: result.fileName,
+        fileSize: result.fileSize,
+      });
+    }
   }
 
   async function handleShareLocation() {
     setShowAttachMenu(false);
     const result = await shareLocation();
-    if (result) await handleSendAttachment(result);
+    if (result) {
+      await handleSendAttachment("location", `📍 ${result.locationName || "Location"}`, {
+        latitude: result.latitude,
+        longitude: result.longitude,
+        locationName: result.locationName,
+      });
+    }
   }
 
   async function handleShareContact() {
     setShowAttachMenu(false);
     const result = await shareContact();
-    if (result) await handleSendAttachment(result);
+    if (result) {
+      await handleSendAttachment("contact", `👤 ${result.sharedContactName || "Contact"}`, {
+        sharedContactName: result.sharedContactName,
+        sharedContactPhone: result.sharedContactPhone,
+      });
+    }
   }
 
   function handleOpenPoll() {
@@ -531,14 +574,14 @@ export default function ChatDetailScreen() {
       return;
     }
     setShowPollModal(false);
-    await handleSendAttachment({
-      type: "poll",
+    const pollOpts = opts.map((text) => ({
+      id: generateId(),
+      text,
+      votes: [],
+    }));
+    await handleSendAttachment("poll", `📊 Poll: ${q}`, {
       pollQuestion: q,
-      pollOptions: opts.map((text) => ({
-        id: generateId(),
-        text,
-        votes: [],
-      })),
+      pollOptions: JSON.stringify(pollOpts),
     });
   }
 
@@ -564,7 +607,12 @@ export default function ChatDetailScreen() {
     recordingRef.current = null;
     setIsRecording(false);
     setRecordingDuration(0);
-    if (result) await handleSendAttachment(result);
+    if (result) {
+      await handleSendAttachment("voicenote", `🎤 Voice note (${formatDuration(result.audioDuration || 0)})`, {
+        audioUri: result.audioUri,
+        audioDuration: result.audioDuration,
+      });
+    }
   }
 
   async function handleCancelRecording() {
@@ -580,12 +628,11 @@ export default function ChatDetailScreen() {
   }
 
   function getSenderName(senderId: string): string | undefined {
-    if (!conversation?.isGroup || !conversation.groupMembers) return undefined;
-    const member = conversation.groupMembers.find((m) => m.phone === senderId || m.id === senderId);
-    return member?.name;
+    if (!isGroup || !chat?.participants) return undefined;
+    const participant = chat.participants.find((p) => p.id === senderId);
+    return participant ? getDisplayName(participant) : undefined;
   }
 
-  const messages = conversation?.messages || [];
   const reversedMessages = [...messages].reverse();
   const webTopInset = Platform.OS === "web" ? 67 : 0;
 
@@ -605,47 +652,49 @@ export default function ChatDetailScreen() {
         <Pressable onPress={() => router.back()} style={styles.backButton}>
           <Ionicons name="chevron-back" size={28} color={Colors.text} />
         </Pressable>
-        {conversation && (
+        {chat && (
           <Pressable
             style={styles.headerCenter}
             onPress={() => {
-              if (!conversation.isGroup && conversation.contactId) {
+              if (!isGroup && otherParticipant) {
                 router.push({
                   pathname: "/user-profile/[id]",
                   params: {
-                    id: conversation.contactId,
-                    name: conversation.contactName || "Unknown",
-                    avatarColor: conversation.contactAvatarColor || "#F7DC6F",
+                    id: otherParticipant.id,
+                    name: chatName || "Unknown",
+                    avatarColor: avatarColor || "#F7DC6F",
                   },
                 });
               }
             }}
           >
-            <View style={[styles.avatar, { backgroundColor: conversation.contactAvatarColor }]}>
-              {conversation.isGroup ? (
+            <View style={[styles.avatar, { backgroundColor: avatarColor }]}>
+              {profilePhoto ? (
+                <Image source={{ uri: profilePhoto }} style={{ width: 36, height: 36, borderRadius: 18 }} />
+              ) : isGroup ? (
                 <Ionicons name="people" size={16} color="#fff" />
               ) : (
                 <Text style={styles.avatarText}>
-                  {conversation.contactName.split(" ").map((w) => w[0]).join("").substring(0, 2).toUpperCase()}
+                  {chatName.split(" ").map((w) => w[0]).join("").substring(0, 2).toUpperCase()}
                 </Text>
               )}
             </View>
             <View>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                <Text style={styles.headerName} numberOfLines={1}>{conversation.contactName}</Text>
-                {isLekkerpreneur && !conversation.isGroup && (
+                <Text style={styles.headerName} numberOfLines={1}>{chatName}</Text>
+                {isVerified && !isGroup && (
                   <Ionicons name="checkmark-circle" size={16} color={Colors.primary} />
                 )}
               </View>
-              {conversation.isGroup && conversation.groupMembers && (
+              {isGroup && chat.participants && (
                 <Text style={styles.headerMembers} numberOfLines={1}>
-                  {conversation.groupMembers.map((m) => m.name.split(" ")[0]).join(", ")}
+                  {chat.participants.map((p) => p.firstName || p.username).join(", ")}
                 </Text>
               )}
             </View>
           </Pressable>
         )}
-        {conversation && !conversation.isGroup ? (
+        {chat && !isGroup ? (
           <Pressable onPress={handleToggleBlock} style={styles.backButton}>
             <Ionicons
               name={isBlocked ? "ban" : "ban-outline"}
@@ -664,11 +713,11 @@ export default function ChatDetailScreen() {
         renderItem={({ item }) => (
           <MessageBubble
             message={item}
-            isMe={item.senderId === "me"}
-            isGroup={conversation?.isGroup}
+            isMe={item.senderId === myUserId}
+            isGroup={isGroup}
             senderName={getSenderName(item.senderId)}
-            conversationId={id || ""}
-            onReload={loadConversation}
+            myUserId={myUserId}
+            onReload={loadMessages}
           />
         )}
         inverted
@@ -846,6 +895,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     alignItems: "center",
     justifyContent: "center",
+    overflow: "hidden",
   },
   avatarText: { fontFamily: "Poppins_600SemiBold", fontSize: 13, color: "#fff" },
   headerName: { fontFamily: "Poppins_600SemiBold", fontSize: fontScale(17), color: Colors.text },

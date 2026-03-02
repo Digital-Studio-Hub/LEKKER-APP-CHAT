@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   View,
   Text,
@@ -18,7 +18,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
-import { storage } from "@/lib/storage";
+import { useAuth } from "@/lib/auth-context";
+import { searchUsers, createP2PChat, SearchUser } from "@/lib/chat-api";
 import { getApiUrl } from "@/lib/query-client";
 
 interface MatchedContact {
@@ -48,20 +49,45 @@ function normalizePhone(phone: string): string {
 
 export default function NewChatScreen() {
   const insets = useSafeAreaInsets();
-  const [name, setName] = useState("");
-  const [phone, setPhone] = useState("");
+  const { user } = useAuth();
   const [matchedContacts, setMatchedContacts] = useState<MatchedContact[]>([]);
   const [otherContacts, setOtherContacts] = useState<MatchedContact[]>([]);
   const [isLoadingContacts, setIsLoadingContacts] = useState(false);
   const [permissionDenied, setPermissionDenied] = useState(false);
   const [searchText, setSearchText] = useState("");
   const [startingChat, setStartingChat] = useState<string | null>(null);
+  const [searchResults, setSearchResults] = useState<SearchUser[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
 
   const webTopInset = Platform.OS === "web" ? 67 : 0;
 
   useEffect(() => {
     loadContacts();
   }, []);
+
+  useEffect(() => {
+    if (searchText.trim().length < 2) {
+      setSearchResults([]);
+      setIsSearching(false);
+      return;
+    }
+
+    const timeout = setTimeout(async () => {
+      setIsSearching(true);
+      try {
+        const results = await searchUsers(searchText.trim());
+        const filtered = user ? results.filter(u => u.id !== user.id) : results;
+        setSearchResults(filtered);
+      } catch (e) {
+        console.error("Search error:", e);
+        setSearchResults([]);
+      } finally {
+        setIsSearching(false);
+      }
+    }, 300);
+
+    return () => clearTimeout(timeout);
+  }, [searchText, user]);
 
   async function loadContacts() {
     if (Platform.OS === "web") {
@@ -165,6 +191,27 @@ export default function NewChatScreen() {
     }
   }
 
+  async function handleStartChatWithUser(searchUser: SearchUser) {
+    setStartingChat(searchUser.id);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    try {
+      const chat = await createP2PChat(searchUser.id);
+      if (chat) {
+        router.back();
+        setTimeout(() => {
+          router.push({ pathname: "/chat/[id]", params: { id: chat.id } });
+        }, 100);
+      } else {
+        Alert.alert("Error", "Could not start chat. Please try again.");
+      }
+    } catch (e) {
+      console.error("Start chat error:", e);
+      Alert.alert("Error", "Could not start chat. Please try again.");
+    } finally {
+      setStartingChat(null);
+    }
+  }
+
   async function handleStartChat(contact: MatchedContact) {
     if (!contact.isLekkerpreneur) {
       handleInvite(contact);
@@ -173,13 +220,21 @@ export default function NewChatScreen() {
     setStartingChat(contact.id);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
-      const conversation = await storage.addConversation(contact.name, contact.id || contact.phone, contact.avatarColor);
-      router.back();
-      setTimeout(() => {
-        router.push({ pathname: "/chat/[id]", params: { id: conversation.id } });
-      }, 100);
+      const results = await searchUsers(contact.phone);
+      if (results.length > 0) {
+        const chat = await createP2PChat(results[0].id);
+        if (chat) {
+          router.back();
+          setTimeout(() => {
+            router.push({ pathname: "/chat/[id]", params: { id: chat.id } });
+          }, 100);
+          return;
+        }
+      }
+      Alert.alert("Not Found", "This user is not registered on Lekker Chat yet.");
     } catch (e) {
       console.error("Start chat error:", e);
+      Alert.alert("Error", "Could not start chat. Please try again.");
     } finally {
       setStartingChat(null);
     }
@@ -243,16 +298,6 @@ export default function NewChatScreen() {
     }
   }
 
-  async function handleManualCreate() {
-    if (!name.trim() || !phone.trim()) return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    const conversation = await storage.addConversation(name.trim(), phone.trim());
-    router.back();
-    setTimeout(() => {
-      router.push({ pathname: "/chat/[id]", params: { id: conversation.id } });
-    }, 100);
-  }
-
   const filteredMatched = searchText
     ? matchedContacts.filter((c) => c.name.toLowerCase().includes(searchText.toLowerCase()) || c.phone.includes(searchText))
     : matchedContacts;
@@ -261,10 +306,17 @@ export default function NewChatScreen() {
     ? otherContacts.filter((c) => c.name.toLowerCase().includes(searchText.toLowerCase()) || c.phone.includes(searchText))
     : otherContacts;
 
-  const sections = [
-    ...(filteredMatched.length > 0 ? [{ title: "Lekkerpreneurs", data: filteredMatched }] : []),
-    ...(filteredOthers.length > 0 ? [{ title: "Contacts", data: filteredOthers }] : []),
+  type SectionItem = { _isSearchUser: boolean } & Record<string, any>;
+
+  const sections: { title: string; data: SectionItem[] }[] = [
+    ...(searchResults.length > 0 ? [{ title: "Lekker Chat Users", data: searchResults.map(u => ({ ...u, _isSearchUser: true })) as SectionItem[] }] : []),
+    ...(filteredMatched.length > 0 ? [{ title: "Lekkerpreneurs", data: filteredMatched.map(c => ({ ...c, _isSearchUser: false })) as SectionItem[] }] : []),
+    ...(filteredOthers.length > 0 ? [{ title: "Contacts", data: filteredOthers.map(c => ({ ...c, _isSearchUser: false })) as SectionItem[] }] : []),
   ];
+
+  function getSearchUserDisplayName(u: SearchUser): string {
+    return `${u.firstName} ${u.lastName}`.trim() || u.username;
+  }
 
   return (
     <View style={[styles.container, { paddingTop: insets.top + webTopInset }]}>
@@ -280,12 +332,13 @@ export default function NewChatScreen() {
         <Ionicons name="search" size={18} color={Colors.textMuted} />
         <TextInput
           style={styles.searchInput}
-          placeholder="Search contacts..."
+          placeholder="Search users or contacts..."
           placeholderTextColor={Colors.textMuted}
           value={searchText}
           onChangeText={setSearchText}
         />
-        {searchText.length > 0 && (
+        {isSearching && <ActivityIndicator size="small" color={Colors.primary} />}
+        {searchText.length > 0 && !isSearching && (
           <Pressable onPress={() => setSearchText("")}>
             <Ionicons name="close-circle" size={18} color={Colors.textMuted} />
           </Pressable>
@@ -313,42 +366,75 @@ export default function NewChatScreen() {
       ) : (
         <SectionList
           sections={sections}
-          keyExtractor={(item) => item.id}
+          keyExtractor={(item) => item._isSearchUser ? (item as any).id : (item as any).id}
           renderSectionHeader={({ section }) => (
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>{section.title}</Text>
               <Text style={styles.sectionCount}>{section.data.length}</Text>
             </View>
           )}
-          renderItem={({ item }) => (
-            <Pressable
-              style={({ pressed }) => [styles.contactItem, pressed && { backgroundColor: Colors.cardElevated }]}
-              onPress={() => handleStartChat(item)}
-              disabled={startingChat === item.id}
-            >
-              <Avatar name={item.name} color={item.avatarColor} />
-              <View style={styles.contactInfo}>
-                <View style={styles.contactNameRow}>
-                  <Text style={styles.contactName} numberOfLines={1}>{item.name}</Text>
-                  {item.isLekkerpreneur && (
-                    <Ionicons name="checkmark-circle" size={16} color={Colors.primary} />
+          renderItem={({ item }) => {
+            if (item._isSearchUser) {
+              const su = item as unknown as SearchUser & { _isSearchUser: true };
+              const displayName = getSearchUserDisplayName(su);
+              return (
+                <Pressable
+                  style={({ pressed }) => [styles.contactItem, pressed && { backgroundColor: Colors.cardElevated }]}
+                  onPress={() => handleStartChatWithUser(su)}
+                  disabled={startingChat === su.id}
+                >
+                  <Avatar name={displayName} color={su.avatarColor || "#F5B800"} />
+                  <View style={styles.contactInfo}>
+                    <View style={styles.contactNameRow}>
+                      <Text style={styles.contactName} numberOfLines={1}>{displayName}</Text>
+                      {su.isVerifiedLekkerpreneur && (
+                        <Ionicons name="checkmark-circle" size={16} color={Colors.primary} />
+                      )}
+                    </View>
+                    <Text style={styles.contactPhone}>@{su.username}{su.businessName ? ` · ${su.businessName}` : ""}</Text>
+                  </View>
+                  {startingChat === su.id ? (
+                    <ActivityIndicator size="small" color={Colors.primary} />
+                  ) : (
+                    <View style={styles.chatIcon}>
+                      <Ionicons name="chatbubble" size={16} color={Colors.background} />
+                    </View>
                   )}
+                </Pressable>
+              );
+            }
+
+            const contact = item as unknown as MatchedContact & { _isSearchUser: false };
+            return (
+              <Pressable
+                style={({ pressed }) => [styles.contactItem, pressed && { backgroundColor: Colors.cardElevated }]}
+                onPress={() => handleStartChat(contact)}
+                disabled={startingChat === contact.id}
+              >
+                <Avatar name={contact.name} color={contact.avatarColor} />
+                <View style={styles.contactInfo}>
+                  <View style={styles.contactNameRow}>
+                    <Text style={styles.contactName} numberOfLines={1}>{contact.name}</Text>
+                    {contact.isLekkerpreneur && (
+                      <Ionicons name="checkmark-circle" size={16} color={Colors.primary} />
+                    )}
+                  </View>
+                  <Text style={styles.contactPhone}>{contact.phone}</Text>
                 </View>
-                <Text style={styles.contactPhone}>{item.phone}</Text>
-              </View>
-              {startingChat === item.id ? (
-                <ActivityIndicator size="small" color={Colors.primary} />
-              ) : item.isLekkerpreneur ? (
-                <View style={styles.chatIcon}>
-                  <Ionicons name="chatbubble" size={16} color={Colors.background} />
-                </View>
-              ) : (
-                <View style={styles.inviteIcon}>
-                  <Ionicons name="paper-plane" size={14} color={Colors.primary} />
-                </View>
-              )}
-            </Pressable>
-          )}
+                {startingChat === contact.id ? (
+                  <ActivityIndicator size="small" color={Colors.primary} />
+                ) : contact.isLekkerpreneur ? (
+                  <View style={styles.chatIcon}>
+                    <Ionicons name="chatbubble" size={16} color={Colors.background} />
+                  </View>
+                ) : (
+                  <View style={styles.inviteIcon}>
+                    <Ionicons name="paper-plane" size={14} color={Colors.primary} />
+                  </View>
+                )}
+              </Pressable>
+            );
+          }}
           contentContainerStyle={[
             styles.listContent,
             Platform.OS === "web" ? { paddingBottom: 84 } : undefined,
@@ -357,43 +443,19 @@ export default function NewChatScreen() {
             <View style={styles.manualSection}>
               <View style={styles.divider}>
                 <View style={styles.dividerLine} />
-                <Text style={styles.dividerText}>or enter manually</Text>
+                <Text style={styles.dividerText}>find people</Text>
                 <View style={styles.dividerLine} />
               </View>
-              <View style={styles.form}>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Contact name"
-                  placeholderTextColor={Colors.textMuted}
-                  value={name}
-                  onChangeText={setName}
-                  autoCapitalize="words"
-                />
-                <TextInput
-                  style={styles.input}
-                  placeholder="+27 XX XXX XXXX"
-                  placeholderTextColor={Colors.textMuted}
-                  value={phone}
-                  onChangeText={setPhone}
-                  keyboardType="phone-pad"
-                />
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.createButton,
-                    pressed && { opacity: 0.8 },
-                    (!name.trim() || !phone.trim()) && styles.createButtonDisabled,
-                  ]}
-                  onPress={handleManualCreate}
-                  disabled={!name.trim() || !phone.trim()}
-                >
-                  <Ionicons name="chatbubble" size={16} color={Colors.background} />
-                  <Text style={styles.createButtonText}>Start Chat</Text>
-                </Pressable>
+              <View style={styles.searchNote}>
+                <Ionicons name="search-outline" size={20} color={Colors.textMuted} />
+                <Text style={styles.searchNoteText}>
+                  Search for registered users above by name, username, phone, or email
+                </Text>
               </View>
             </View>
           }
           ListEmptyComponent={
-            filteredMatched.length === 0 && filteredOthers.length === 0 ? (
+            searchResults.length === 0 && filteredMatched.length === 0 && filteredOthers.length === 0 ? (
               <View style={styles.emptyState}>
                 <Ionicons name="people-outline" size={48} color={Colors.textMuted} />
                 <Text style={styles.emptyText}>
@@ -542,35 +604,22 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     paddingHorizontal: 12,
   },
-  form: {
-    gap: 10,
-  },
-  input: {
-    backgroundColor: Colors.inputBackground,
+  searchNote: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: Colors.card,
     borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    fontSize: 15,
-    color: Colors.text,
-    fontFamily: "Poppins_400Regular",
+    padding: 16,
+    gap: 12,
     borderWidth: 1,
     borderColor: Colors.border,
   },
-  createButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: Colors.primary,
-    borderRadius: 12,
-    paddingVertical: 12,
-    gap: 8,
-    marginTop: 4,
-  },
-  createButtonDisabled: { opacity: 0.4 },
-  createButtonText: {
-    fontFamily: "Poppins_600SemiBold",
-    fontSize: 15,
-    color: Colors.background,
+  searchNoteText: {
+    flex: 1,
+    fontFamily: "Poppins_400Regular",
+    fontSize: 13,
+    color: Colors.textSecondary,
+    lineHeight: 18,
   },
   permissionBanner: {
     flexDirection: "row",

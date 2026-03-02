@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -14,16 +14,17 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
-import { storage, GroupMember } from "@/lib/storage";
 import { useAuth } from "@/lib/auth-context";
-import { getApiUrl } from "@/lib/query-client";
+import { searchUsers, createGroupChat, SearchUser } from "@/lib/chat-api";
 
-interface SelectableContact {
+interface SelectableUser {
   id: string;
   name: string;
-  phone: string;
+  username: string;
   avatarColor: string;
-  isLekkerpreneur: boolean;
+  isVerified: boolean;
+  profilePhoto: string | null;
+  businessName: string | null;
   selected: boolean;
 }
 
@@ -40,117 +41,101 @@ export default function NewGroupScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const [step, setStep] = useState<"select" | "name">("select");
-  const [contacts, setContacts] = useState<SelectableContact[]>([]);
+  const [users, setUsers] = useState<SelectableUser[]>([]);
   const [searchText, setSearchText] = useState("");
   const [groupName, setGroupName] = useState("");
-  const [isLoading, setIsLoading] = useState(true);
+  const [isSearching, setIsSearching] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
 
   const webTopInset = Platform.OS === "web" ? 67 : 0;
-  const selectedCount = contacts.filter((c) => c.selected).length;
+  const selectedUsers = users.filter((u) => u.selected);
+  const selectedCount = selectedUsers.length;
 
-  useEffect(() => {
-    loadContacts();
-  }, []);
-
-  async function loadContacts() {
-    setIsLoading(true);
-    try {
-      const url = new URL("/api/directory", getApiUrl());
-      const res = await fetch(url.toString());
-      const data = await res.json();
-      const entries: SelectableContact[] = data.entries.map((e: any) => ({
-        id: e.phone,
-        name: e.name,
-        phone: e.phone,
-        avatarColor: e.avatarColor,
-        isLekkerpreneur: true,
-        selected: false,
-      }));
-
-      if (Platform.OS !== "web") {
-        try {
-          const Contacts = await import("expo-contacts");
-          const { status } = await Contacts.requestPermissionsAsync();
-          if (status === "granted") {
-            const { data: phoneContacts } = await Contacts.getContactsAsync({
-              fields: [Contacts.Fields.PhoneNumbers, Contacts.Fields.Name],
-            });
-            const dirPhones = new Set(entries.map((e) => e.phone));
-            const seen = new Set<string>();
-            for (const c of phoneContacts) {
-              if (!c.phoneNumbers || !c.name) continue;
-              for (const pn of c.phoneNumbers) {
-                if (!pn.number) continue;
-                const normalized = normalizePhone(pn.number);
-                if (dirPhones.has(normalized) || seen.has(normalized)) continue;
-                seen.add(normalized);
-                entries.push({
-                  id: normalized,
-                  name: c.name,
-                  phone: normalized,
-                  avatarColor: randomColor(),
-                  isLekkerpreneur: false,
-                  selected: false,
-                });
-              }
-            }
-          }
-        } catch (e) {}
+  const handleSearch = useCallback(async (query: string) => {
+    setSearchText(query);
+    if (query.trim().length < 2) {
+      if (query.trim().length === 0) {
+        setUsers((prev) => prev.filter((u) => u.selected));
+        setHasSearched(false);
       }
-
-      entries.sort((a, b) => {
-        if (a.isLekkerpreneur !== b.isLekkerpreneur) return a.isLekkerpreneur ? -1 : 1;
-        return a.name.localeCompare(b.name);
-      });
-      setContacts(entries);
-    } catch (e) {
-      console.error("Error loading contacts:", e);
-    } finally {
-      setIsLoading(false);
+      return;
     }
+    setIsSearching(true);
+    setHasSearched(true);
+    try {
+      const results = await searchUsers(query);
+      const filtered = results.filter((r) => r.id !== user?.id);
+      setUsers((prev) => {
+        const selectedMap = new Map(prev.filter((u) => u.selected).map((u) => [u.id, u]));
+        const merged: SelectableUser[] = [];
+        const seen = new Set<string>();
+
+        for (const [id, sel] of selectedMap) {
+          merged.push(sel);
+          seen.add(id);
+        }
+
+        for (const r of filtered) {
+          if (seen.has(r.id)) continue;
+          seen.add(r.id);
+          merged.push(mapSearchUser(r));
+        }
+
+        return merged;
+      });
+    } catch (e) {
+      console.error("Search error:", e);
+    } finally {
+      setIsSearching(false);
+    }
+  }, [user?.id]);
+
+  function mapSearchUser(r: SearchUser): SelectableUser {
+    return {
+      id: r.id,
+      name: `${r.firstName} ${r.lastName}`.trim() || r.username,
+      username: r.username,
+      avatarColor: r.avatarColor || "#F5B800",
+      isVerified: r.isVerifiedLekkerpreneur ?? false,
+      profilePhoto: r.profilePhoto,
+      businessName: r.businessName,
+      selected: false,
+    };
   }
 
-  function toggleContact(id: string) {
+  function toggleUser(id: string) {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setContacts((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, selected: !c.selected } : c)),
+    setUsers((prev) =>
+      prev.map((u) => (u.id === id ? { ...u, selected: !u.selected } : u)),
     );
   }
 
   async function handleCreate() {
-    if (!groupName.trim() || selectedCount < 1) return;
+    if (!groupName.trim() || selectedCount < 1 || isCreating) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setIsCreating(true);
 
-    const members: GroupMember[] = contacts
-      .filter((c) => c.selected)
-      .map((c) => ({
-        id: c.id,
-        name: c.name,
-        phone: c.phone,
-        avatarColor: c.avatarColor,
-      }));
+    try {
+      const participantIds = selectedUsers.map((u) => u.id);
+      const chat = await createGroupChat(groupName.trim(), participantIds);
 
-    if (user) {
-      members.push({
-        id: user.id,
-        name: user.displayName,
-        phone: user.phoneNumber,
-        avatarColor: user.avatarColor,
-      });
+      if (chat) {
+        router.back();
+        setTimeout(() => {
+          router.push({ pathname: "/chat/[id]", params: { id: chat.id } });
+        }, 100);
+      }
+    } catch (e) {
+      console.error("Failed to create group:", e);
+    } finally {
+      setIsCreating(false);
     }
-
-    const conversation = await storage.createGroupConversation(groupName.trim(), members);
-    router.back();
-    setTimeout(() => {
-      router.push({ pathname: "/chat/[id]", params: { id: conversation.id } });
-    }, 100);
   }
 
-  const filtered = searchText
-    ? contacts.filter((c) => c.name.toLowerCase().includes(searchText.toLowerCase()) || c.phone.includes(searchText))
-    : contacts;
-
-  const selectedContacts = contacts.filter((c) => c.selected);
+  const displayList = searchText.trim().length >= 2
+    ? users
+    : users.filter((u) => u.selected);
 
   if (step === "name") {
     return (
@@ -179,9 +164,9 @@ export default function NewGroupScreen() {
           <Text style={styles.membersLabel}>{selectedCount} member{selectedCount !== 1 ? "s" : ""} selected</Text>
 
           <View style={styles.selectedChips}>
-            {selectedContacts.map((c) => (
-              <View key={c.id} style={styles.chip}>
-                <Text style={styles.chipText} numberOfLines={1}>{c.name.split(" ")[0]}</Text>
+            {selectedUsers.map((u) => (
+              <View key={u.id} style={styles.chip}>
+                <Text style={styles.chipText} numberOfLines={1}>{u.name.split(" ")[0]}</Text>
               </View>
             ))}
           </View>
@@ -190,13 +175,19 @@ export default function NewGroupScreen() {
             style={({ pressed }) => [
               styles.createButton,
               pressed && { opacity: 0.8 },
-              !groupName.trim() && styles.createButtonDisabled,
+              (!groupName.trim() || isCreating) && styles.createButtonDisabled,
             ]}
             onPress={handleCreate}
-            disabled={!groupName.trim()}
+            disabled={!groupName.trim() || isCreating}
           >
-            <Ionicons name="chatbubbles" size={18} color={Colors.background} />
-            <Text style={styles.createButtonText}>Create Group</Text>
+            {isCreating ? (
+              <ActivityIndicator size="small" color={Colors.background} />
+            ) : (
+              <>
+                <Ionicons name="chatbubbles" size={18} color={Colors.background} />
+                <Text style={styles.createButtonText}>Create Group</Text>
+              </>
+            )}
           </Pressable>
         </View>
       </View>
@@ -223,13 +214,13 @@ export default function NewGroupScreen() {
         <View style={styles.selectionBar}>
           <Text style={styles.selectionText}>{selectedCount} selected</Text>
           <FlatList
-            data={selectedContacts}
+            data={selectedUsers}
             keyExtractor={(item) => item.id}
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.selectedList}
             renderItem={({ item }) => (
-              <Pressable onPress={() => toggleContact(item.id)} style={styles.selectedItem}>
+              <Pressable onPress={() => toggleUser(item.id)} style={styles.selectedItem}>
                 <Avatar name={item.name} color={item.avatarColor} size={36} />
                 <View style={styles.removeIcon}>
                   <Ionicons name="close-circle" size={16} color={Colors.danger} />
@@ -244,41 +235,41 @@ export default function NewGroupScreen() {
         <Ionicons name="search" size={18} color={Colors.textMuted} />
         <TextInput
           style={styles.searchInput}
-          placeholder="Search contacts..."
+          placeholder="Search registered users..."
           placeholderTextColor={Colors.textMuted}
           value={searchText}
-          onChangeText={setSearchText}
+          onChangeText={handleSearch}
         />
         {searchText.length > 0 && (
-          <Pressable onPress={() => setSearchText("")}>
+          <Pressable onPress={() => handleSearch("")}>
             <Ionicons name="close-circle" size={18} color={Colors.textMuted} />
           </Pressable>
         )}
       </View>
 
-      {isLoading ? (
+      {isSearching ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={Colors.primary} />
         </View>
       ) : (
         <FlatList
-          data={filtered}
+          data={displayList}
           keyExtractor={(item) => item.id}
           contentContainerStyle={[styles.listContent, Platform.OS === "web" ? { paddingBottom: 84 } : undefined]}
           renderItem={({ item }) => (
             <Pressable
               style={({ pressed }) => [styles.contactItem, pressed && { backgroundColor: Colors.cardElevated }]}
-              onPress={() => toggleContact(item.id)}
+              onPress={() => toggleUser(item.id)}
             >
               <Avatar name={item.name} color={item.avatarColor} />
               <View style={styles.contactInfo}>
                 <View style={styles.contactNameRow}>
                   <Text style={styles.contactName} numberOfLines={1}>{item.name}</Text>
-                  {item.isLekkerpreneur && (
+                  {item.isVerified && (
                     <Ionicons name="checkmark-circle" size={16} color={Colors.primary} />
                   )}
                 </View>
-                <Text style={styles.contactPhone}>{item.phone}</Text>
+                <Text style={styles.contactPhone}>@{item.username}</Text>
               </View>
               <View style={[styles.checkbox, item.selected && styles.checkboxSelected]}>
                 {item.selected && <Ionicons name="checkmark" size={16} color={Colors.background} />}
@@ -287,26 +278,15 @@ export default function NewGroupScreen() {
           )}
           ListEmptyComponent={
             <View style={styles.emptyState}>
-              <Text style={styles.emptyText}>No contacts found</Text>
+              <Text style={styles.emptyText}>
+                {hasSearched ? "No users found" : "Search for registered users to add to the group"}
+              </Text>
             </View>
           }
         />
       )}
     </View>
   );
-}
-
-function normalizePhone(phone: string): string {
-  const digits = phone.replace(/\D/g, "");
-  if (digits.startsWith("27") && digits.length >= 11) return `+${digits}`;
-  if (digits.startsWith("0") && digits.length >= 10) return `+27${digits.slice(1)}`;
-  if (digits.length >= 10) return `+${digits}`;
-  return phone;
-}
-
-const AVATAR_COLORS = ["#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4", "#FFEAA7", "#DDA0DD", "#98D8C8", "#F7DC6F", "#BB8FCE", "#85C1E9"];
-function randomColor() {
-  return AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)];
 }
 
 const styles = StyleSheet.create({
