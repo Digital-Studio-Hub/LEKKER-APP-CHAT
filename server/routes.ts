@@ -531,6 +531,78 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  const externalApiKeyAuth = (req: Request, res: Response, next: Function) => {
+    const apiKey = req.headers["x-api-key"] as string;
+    const expectedKey = process.env.LEKKER_NETWORK_API_KEY;
+    if (!apiKey || !expectedKey || apiKey !== expectedKey) {
+      return res.status(401).json({ success: false, message: "Invalid or missing API key" });
+    }
+    next();
+  };
+
+  app.post("/api/v1/verify-user", externalApiKeyAuth, async (req: Request, res: Response) => {
+    try {
+      const { email, phone } = req.body;
+
+      if (!email && !phone) {
+        return res.status(400).json({
+          success: false,
+          matched: false,
+          message: "At least one of 'email' or 'phone' is required.",
+        });
+      }
+
+      let user = null;
+
+      if (email && typeof email === "string") {
+        user = await storage.getUserByEmail(email.toLowerCase().trim());
+      }
+
+      if (!user && phone && typeof phone === "string") {
+        const normalizedPhone = phone.replace(/[^\d+]/g, "");
+        const phoneLookup = normalizedPhone.startsWith("0") && normalizedPhone.length === 10
+          ? "+27" + normalizedPhone.substring(1)
+          : normalizedPhone.startsWith("+") ? normalizedPhone : "+" + normalizedPhone;
+        user = await storage.getUserByPhone(phoneLookup);
+      }
+
+      if (!user) {
+        return res.json({
+          success: true,
+          matched: false,
+          message: "No matching Lekker Chat user found.",
+        });
+      }
+
+      await storage.logAuthEvent("external_verify", user.id, req.ip, undefined, `Verified by Lekker Network via ${email ? "email" : "phone"}`);
+
+      res.json({
+        success: true,
+        matched: true,
+        user: {
+          id: user.id,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          username: user.username,
+          businessName: user.businessName,
+          tradingName: user.tradingName,
+          businessCategory: user.businessCategory,
+          businessWebsite: user.businessWebsite,
+          businessProvince: user.businessProvince,
+          businessCountry: user.businessCountry,
+          isVerifiedLekkerpreneur: user.isVerifiedLekkerpreneur,
+          lekkerNetworkId: user.lekkerNetworkId,
+          profilePhoto: user.profilePhoto,
+          presence: user.presence,
+          memberSince: user.createdAt,
+        },
+      });
+    } catch (error) {
+      console.error("External verify-user error:", error);
+      res.status(500).json({ success: false, message: "Internal server error" });
+    }
+  });
+
   app.post("/api/auth/sync-lekker", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const user = await storage.getUser(req.user!.userId);
