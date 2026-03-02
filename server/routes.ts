@@ -2,8 +2,9 @@ import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "node:http";
 import OpenAI from "openai";
 import rateLimit, { type Options } from "express-rate-limit";
-import { registerSchema, loginSchema, updateProfileSchema } from "@shared/schema";
-import { storage } from "./storage";
+import { registerSchema, loginSchema, updateProfileSchema, users } from "@shared/schema";
+import { storage, db } from "./storage";
+import { sql, or, and, ne } from "drizzle-orm";
 import {
   hashPassword,
   verifyPassword,
@@ -245,6 +246,265 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/auth/logout", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     await storage.logAuthEvent("logout", req.user!.userId, req.ip, req.headers["user-agent"]?.toString());
     res.json({ message: "Logged out successfully" });
+  });
+
+  app.post("/api/chats", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { participantId, type, name } = req.body;
+      const userId = req.user!.userId;
+      const chatType = type || "p2p";
+
+      if (chatType === "p2p") {
+        if (!participantId) {
+          return res.status(400).json({ message: "participantId is required for P2P chat" });
+        }
+        if (participantId === userId) {
+          return res.status(400).json({ message: "Cannot create chat with yourself" });
+        }
+        const otherUser = await storage.getUser(participantId);
+        if (!otherUser) {
+          return res.status(404).json({ message: "User not found" });
+        }
+        const existing = await storage.findExistingP2PChat(userId, participantId);
+        if (existing) {
+          const participants = await storage.getChatParticipants(existing.id);
+          return res.json({ chat: { ...existing, participants } });
+        }
+        const chat = await storage.createChat("p2p", userId);
+        await storage.addChatParticipant(chat.id, userId, "owner");
+        await storage.addChatParticipant(chat.id, participantId, "member");
+        const participants = await storage.getChatParticipants(chat.id);
+        return res.status(201).json({ chat: { ...chat, participants } });
+      }
+
+      if (chatType === "group") {
+        const { participantIds } = req.body;
+        if (!participantIds || !Array.isArray(participantIds) || participantIds.length < 1) {
+          return res.status(400).json({ message: "At least one participant is required for group chat" });
+        }
+        const chat = await storage.createChat("group", userId, name || "Group Chat");
+        await storage.addChatParticipant(chat.id, userId, "owner");
+        for (const pid of participantIds) {
+          if (pid !== userId) {
+            await storage.addChatParticipant(chat.id, pid, "member");
+          }
+        }
+        const participants = await storage.getChatParticipants(chat.id);
+        return res.status(201).json({ chat: { ...chat, participants } });
+      }
+
+      return res.status(400).json({ message: "Invalid chat type" });
+    } catch (error) {
+      console.error("Create chat error:", error);
+      res.status(500).json({ message: "Failed to create chat" });
+    }
+  });
+
+  app.get("/api/chats", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const userId = req.user!.userId;
+      const chatList = await storage.getUserChats(userId);
+
+      const enriched = [];
+      for (const chat of chatList) {
+        const participantIds = chat.participants.map(p => p.userId);
+        const userIds = participantIds.filter(id => id !== userId);
+        const participantUsers = [];
+        for (const uid of userIds) {
+          const u = await storage.getUser(uid);
+          if (u) {
+            participantUsers.push({
+              id: u.id,
+              firstName: u.firstName,
+              lastName: u.lastName,
+              username: u.username,
+              avatarColor: u.avatarColor,
+              profilePhoto: u.profilePhoto,
+              isVerifiedLekkerpreneur: u.isVerifiedLekkerpreneur,
+              businessName: u.businessName,
+              presence: u.presence,
+            });
+          }
+        }
+
+        enriched.push({
+          id: chat.id,
+          type: chat.type,
+          name: chat.name,
+          createdAt: chat.createdAt,
+          updatedAt: chat.updatedAt,
+          participants: participantUsers,
+          lastMessage: chat.lastMessage ? {
+            id: chat.lastMessage.id,
+            senderId: chat.lastMessage.senderId,
+            content: chat.lastMessage.content,
+            type: chat.lastMessage.type,
+            status: chat.lastMessage.status,
+            createdAt: chat.lastMessage.createdAt,
+          } : null,
+          unreadCount: chat.unreadCount,
+        });
+      }
+
+      res.json({ chats: enriched });
+    } catch (error) {
+      console.error("Get chats error:", error);
+      res.status(500).json({ message: "Failed to fetch chats" });
+    }
+  });
+
+  app.get("/api/chats/:chatId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { chatId } = req.params;
+      const userId = req.user!.userId;
+
+      const isParticipant = await storage.isUserInChat(chatId, userId);
+      if (!isParticipant) {
+        return res.status(403).json({ message: "Access denied. You are not a participant in this chat." });
+      }
+
+      const chat = await storage.getChat(chatId);
+      if (!chat) {
+        return res.status(404).json({ message: "Chat not found" });
+      }
+
+      const participants = await storage.getChatParticipants(chatId);
+      res.json({ chat: { ...chat, participants } });
+    } catch (error) {
+      console.error("Get chat error:", error);
+      res.status(500).json({ message: "Failed to fetch chat" });
+    }
+  });
+
+  app.get("/api/chats/:chatId/messages", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { chatId } = req.params;
+      const userId = req.user!.userId;
+
+      const isParticipant = await storage.isUserInChat(chatId, userId);
+      if (!isParticipant) {
+        return res.status(403).json({ message: "Access denied. You are not a participant in this chat." });
+      }
+
+      const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 50));
+      const before = req.query.before as string | undefined;
+
+      const messages = await storage.getChatMessages(chatId, limit, before);
+      res.json({ messages });
+    } catch (error) {
+      console.error("Get messages error:", error);
+      res.status(500).json({ message: "Failed to fetch messages" });
+    }
+  });
+
+  app.post("/api/chats/:chatId/messages", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { chatId } = req.params;
+      const userId = req.user!.userId;
+
+      const isParticipant = await storage.isUserInChat(chatId, userId);
+      if (!isParticipant) {
+        return res.status(403).json({ message: "Access denied. You are not a participant in this chat." });
+      }
+
+      const { content, type, ...extras } = req.body;
+      const msgType = type || "text";
+
+      if (msgType === "text" && (!content || typeof content !== "string" || !content.trim())) {
+        return res.status(400).json({ message: "Message content is required" });
+      }
+
+      const message = await storage.sendMessage(chatId, userId, content || null, msgType, extras);
+
+      const participants = await storage.getChatParticipants(chatId);
+      for (const p of participants) {
+        if (p.userId !== userId) {
+          const otherUser = await storage.getUser(p.userId);
+          if (otherUser?.autoReplyEnabled && otherUser.autoReplyMessage) {
+            await storage.sendMessage(chatId, p.userId, otherUser.autoReplyMessage, "text");
+          }
+        }
+      }
+
+      res.status(201).json({ message });
+    } catch (error) {
+      console.error("Send message error:", error);
+      res.status(500).json({ message: "Failed to send message" });
+    }
+  });
+
+  app.post("/api/chats/:chatId/read", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { chatId } = req.params;
+      const userId = req.user!.userId;
+
+      const isParticipant = await storage.isUserInChat(chatId, userId);
+      if (!isParticipant) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      await storage.markMessagesRead(chatId, userId);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Mark read error:", error);
+      res.status(500).json({ message: "Failed to mark messages as read" });
+    }
+  });
+
+  app.delete("/api/chats/:chatId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { chatId } = req.params;
+      const userId = req.user!.userId;
+
+      const isParticipant = await storage.isUserInChat(chatId, userId);
+      if (!isParticipant) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      await storage.deleteChat(chatId);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Delete chat error:", error);
+      res.status(500).json({ message: "Failed to delete chat" });
+    }
+  });
+
+  app.get("/api/users/search", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const query = (req.query.q as string || "").trim().toLowerCase();
+      if (query.length < 2) {
+        return res.json({ users: [] });
+      }
+
+      const userId = req.user!.userId;
+      const results = await db.select({
+        id: users.id,
+        firstName: users.firstName,
+        lastName: users.lastName,
+        username: users.username,
+        avatarColor: users.avatarColor,
+        profilePhoto: users.profilePhoto,
+        isVerifiedLekkerpreneur: users.isVerifiedLekkerpreneur,
+        businessName: users.businessName,
+        presence: users.presence,
+      }).from(users).where(
+        and(
+          ne(users.id, userId),
+          or(
+            sql`LOWER(${users.firstName}) LIKE ${`%${query}%`}`,
+            sql`LOWER(${users.lastName}) LIKE ${`%${query}%`}`,
+            sql`LOWER(${users.username}) LIKE ${`%${query}%`}`,
+            sql`LOWER(${users.email}) LIKE ${`%${query}%`}`,
+            sql`${users.phone} LIKE ${`%${query}%`}`
+          )
+        )
+      ).limit(20);
+
+      res.json({ users: results });
+    } catch (error) {
+      console.error("User search error:", error);
+      res.status(500).json({ message: "Failed to search users" });
+    }
   });
 
   const uploadLimiter = rateLimit({

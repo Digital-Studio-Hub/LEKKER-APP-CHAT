@@ -16,11 +16,19 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/lib/auth-context";
-import { storage, Conversation, BlockedUser } from "@/lib/storage";
-import { fetchDirectoryCached } from "@/lib/query-client";
+import { storage, BlockedUser } from "@/lib/storage";
+import {
+  fetchChats,
+  deleteServerChat,
+  getChatDisplayName,
+  getChatAvatarColor,
+  getChatProfilePhoto,
+  getOtherParticipant,
+  type ServerChat,
+} from "@/lib/chat-api";
 import { isSmallScreen, fontScale, responsivePadding, responsiveAvatarSize } from "@/lib/responsive";
 
-function Avatar({ name, color, size = 50, photo, isGroup }: { name: string; color: string; size?: number; photo?: string; isGroup?: boolean }) {
+function Avatar({ name, color, size = 50, photo, isGroup }: { name: string; color: string; size?: number; photo?: string | null; isGroup?: boolean }) {
   if (photo) {
     return <Image source={{ uri: photo }} style={{ width: size, height: size, borderRadius: size / 2 }} />;
   }
@@ -58,10 +66,9 @@ function formatTime(dateStr: string): string {
   return date.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
-function ReceiptIcon({ conversation }: { conversation: Conversation }) {
-  const lastMsg = conversation.messages[conversation.messages.length - 1];
-  if (!lastMsg || lastMsg.senderId !== "me") return null;
-  const status = lastMsg.status;
+function ReceiptIcon({ chat, myUserId }: { chat: ServerChat; myUserId: string }) {
+  if (!chat.lastMessage || chat.lastMessage.senderId !== myUserId) return null;
+  const status = chat.lastMessage.status;
   if (!status || status === "sent") {
     return <Ionicons name="checkmark" size={14} color={Colors.textMuted} />;
   }
@@ -74,83 +81,76 @@ function ReceiptIcon({ conversation }: { conversation: Conversation }) {
 export default function ChatsScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [lekkerPhones, setLekkerPhones] = useState<Set<string>>(new Set());
-  const [blockedPhones, setBlockedPhones] = useState<Set<string>>(new Set());
+  const [chats, setChats] = useState<ServerChat[]>([]);
+  const [blockedIds, setBlockedIds] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState("");
 
-  const filteredConversations = useMemo(() => {
-    if (!searchQuery.trim()) return conversations;
+  const filteredChats = useMemo(() => {
+    if (!searchQuery.trim()) return chats;
     const q = searchQuery.toLowerCase().trim();
-    return conversations.filter((c) => {
-      if (c.contactName.toLowerCase().includes(q)) return true;
-      if (c.lastMessage.toLowerCase().includes(q)) return true;
-      return c.messages.some((m) => m.content.toLowerCase().includes(q));
+    return chats.filter((c) => {
+      const name = getChatDisplayName(c, user?.id || "");
+      if (name.toLowerCase().includes(q)) return true;
+      if (c.lastMessage?.content?.toLowerCase().includes(q)) return true;
+      return false;
     });
-  }, [conversations, searchQuery]);
+  }, [chats, searchQuery, user?.id]);
 
   useFocusEffect(
     useCallback(() => {
-      loadConversations();
-      loadLekkerPhones();
+      loadChats();
       loadBlockedUsers();
-      const interval = setInterval(loadConversations, 5000);
+      const interval = setInterval(loadChats, 5000);
       return () => clearInterval(interval);
     }, []),
   );
 
-  async function loadConversations() {
-    const convs = await storage.getConversations();
-    setConversations(convs);
-  }
-
-  async function loadLekkerPhones() {
-    try {
-      const data = await fetchDirectoryCached();
-      const phones = new Set<string>(data.entries.map((e: any) => e.phone));
-      setLekkerPhones(phones);
-    } catch (e) {
-      console.error("Failed to load directory phones:", e);
-    }
+  async function loadChats() {
+    const serverChats = await fetchChats();
+    setChats(serverChats);
   }
 
   async function loadBlockedUsers() {
     const blocked = await storage.getBlockedUsers();
-    setBlockedPhones(new Set(blocked.map((b) => b.phone)));
+    setBlockedIds(new Set(blocked.map((b) => b.id)));
   }
 
-  async function handleBlockUser(item: Conversation) {
-    const isBlocked = blockedPhones.has(item.contactId);
+  async function handleBlockUser(chat: ServerChat) {
+    const other = getOtherParticipant(chat, user?.id || "");
+    if (!other) return;
+    const isBlocked = blockedIds.has(other.id);
     if (isBlocked) {
-      await storage.unblockUser(item.contactId);
+      await storage.unblockUser(other.id);
     } else {
-      await storage.blockUser(item.contactName, item.contactId);
+      await storage.blockUser(getDisplayNameForChat(chat), other.id);
     }
     loadBlockedUsers();
-    loadConversations();
   }
 
-  function handleChatActions(item: Conversation) {
+  function getDisplayNameForChat(chat: ServerChat): string {
+    return getChatDisplayName(chat, user?.id || "");
+  }
+
+  function handleChatActions(chat: ServerChat) {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    const isBlocked = blockedPhones.has(item.contactId);
-    const blockOption = item.isGroup ? [] : [
+    const other = getOtherParticipant(chat, user?.id || "");
+    const isBlocked = other ? blockedIds.has(other.id) : false;
+    const name = getDisplayNameForChat(chat);
+
+    const blockOption = chat.type === "group" ? [] : [
       {
         text: isBlocked ? "Unblock User" : "Block User",
         style: (isBlocked ? "default" : "destructive") as "default" | "destructive",
         onPress: () => {
           if (isBlocked) {
-            handleBlockUser(item);
+            handleBlockUser(chat);
           } else {
             Alert.alert(
-              "Block " + item.contactName + "?",
+              "Block " + name + "?",
               "Blocked users cannot send you messages. You can unblock them later from Settings.",
               [
                 { text: "Cancel", style: "cancel" },
-                {
-                  text: "Block",
-                  style: "destructive",
-                  onPress: () => handleBlockUser(item),
-                },
+                { text: "Block", style: "destructive", onPress: () => handleBlockUser(chat) },
               ],
             );
           }
@@ -159,34 +159,25 @@ export default function ChatsScreen() {
     ];
 
     Alert.alert(
-      item.contactName,
+      name,
       isBlocked ? "This user is blocked" : "",
       [
         { text: "Cancel", style: "cancel" },
-        {
-          text: item.pinned ? "Unpin Chat" : "Pin Chat",
-          onPress: () => handlePinToggle(item.id),
-        },
         ...blockOption,
         {
           text: "Delete Chat",
           style: "destructive",
           onPress: async () => {
-            await storage.deleteConversation(item.id);
-            loadConversations();
+            await deleteServerChat(chat.id);
+            loadChats();
           },
         },
       ],
     );
   }
 
-  async function handlePinToggle(id: string) {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    await storage.togglePinConversation(id);
-    loadConversations();
-  }
-
   const webTopInset = Platform.OS === "web" ? 67 : 0;
+  const myUserId = user?.id || "";
 
   return (
     <View style={[styles.container, { paddingTop: insets.top + webTopInset }]}>
@@ -242,7 +233,7 @@ export default function ChatsScreen() {
       </View>
 
       <FlatList
-        data={filteredConversations}
+        data={filteredChats}
         keyExtractor={(item) => item.id}
         contentContainerStyle={[
           styles.listContent,
@@ -253,51 +244,58 @@ export default function ChatsScreen() {
         windowSize={5}
         removeClippedSubviews={Platform.OS !== "web"}
         initialNumToRender={15}
-        renderItem={({ item }) => (
-          <Pressable
-            style={({ pressed }) => [styles.chatItem, pressed && styles.chatItemPressed]}
-            onPress={() => router.push({ pathname: "/chat/[id]", params: { id: item.id } })}
-            onLongPress={() => handleChatActions(item)}
-          >
-            <Avatar name={item.contactName} color={item.contactAvatarColor} isGroup={item.isGroup} />
-            <View style={styles.chatInfo}>
-              <View style={styles.chatTopRow}>
-                <View style={styles.nameRow}>
-                  {item.pinned && (
-                    <Ionicons name="pin" size={12} color={Colors.primary} style={{ transform: [{ rotate: "45deg" }] }} />
-                  )}
-                  <Text style={styles.chatName} numberOfLines={1}>
-                    {item.contactName}
+        renderItem={({ item }) => {
+          const chatName = getDisplayNameForChat(item);
+          const avatarColor = getChatAvatarColor(item, myUserId);
+          const photo = getChatProfilePhoto(item, myUserId);
+          const other = getOtherParticipant(item, myUserId);
+          const isBlocked = other ? blockedIds.has(other.id) : false;
+          const isVerified = other?.isVerifiedLekkerpreneur || false;
+
+          return (
+            <Pressable
+              style={({ pressed }) => [styles.chatItem, pressed && styles.chatItemPressed]}
+              onPress={() => router.push({ pathname: "/chat/[id]", params: { id: item.id } })}
+              onLongPress={() => handleChatActions(item)}
+              testID={`chat-item-${item.id}`}
+            >
+              <Avatar name={chatName} color={avatarColor} photo={photo} isGroup={item.type === "group"} />
+              <View style={styles.chatInfo}>
+                <View style={styles.chatTopRow}>
+                  <View style={styles.nameRow}>
+                    <Text style={styles.chatName} numberOfLines={1}>
+                      {chatName}
+                    </Text>
+                    {isBlocked && (
+                      <Ionicons name="ban-outline" size={14} color={Colors.danger} />
+                    )}
+                    {!isBlocked && isVerified && (
+                      <View style={styles.verifiedBadge}>
+                        <Ionicons name="checkmark-circle" size={16} color={Colors.primary} />
+                      </View>
+                    )}
+                  </View>
+                  <Text style={styles.chatTime}>
+                    {item.lastMessage?.createdAt ? formatTime(item.lastMessage.createdAt) : ""}
                   </Text>
-                  {!item.isGroup && blockedPhones.has(item.contactId) && (
-                    <Ionicons name="ban-outline" size={14} color={Colors.danger} />
-                  )}
-                  {!item.isGroup && !blockedPhones.has(item.contactId) && lekkerPhones.has(item.contactId) && (
-                    <View style={styles.verifiedBadge}>
-                      <Ionicons name="checkmark-circle" size={16} color={Colors.primary} />
+                </View>
+                <View style={styles.chatBottomRow}>
+                  <View style={styles.lastMessageRow}>
+                    <ReceiptIcon chat={item} myUserId={myUserId} />
+                    <Text style={styles.chatLastMessage} numberOfLines={1}>
+                      {item.lastMessage?.content || "Start a conversation"}
+                    </Text>
+                  </View>
+                  {item.unreadCount > 0 && (
+                    <View style={styles.unreadBadge}>
+                      <Text style={styles.unreadText}>{item.unreadCount}</Text>
                     </View>
                   )}
                 </View>
-                <Text style={styles.chatTime}>
-                  {item.lastMessageTime ? formatTime(item.lastMessageTime) : ""}
-                </Text>
               </View>
-              <View style={styles.chatBottomRow}>
-                <View style={styles.lastMessageRow}>
-                  <ReceiptIcon conversation={item} />
-                  <Text style={styles.chatLastMessage} numberOfLines={1}>
-                    {item.lastMessage || "Start a conversation"}
-                  </Text>
-                </View>
-                {item.unreadCount > 0 && (
-                  <View style={styles.unreadBadge}>
-                    <Text style={styles.unreadText}>{item.unreadCount}</Text>
-                  </View>
-                )}
-              </View>
-            </View>
-          </Pressable>
-        )}
+            </Pressable>
+          );
+        }}
         keyboardShouldPersistTaps="handled"
         ListEmptyComponent={
           searchQuery.trim() ? (

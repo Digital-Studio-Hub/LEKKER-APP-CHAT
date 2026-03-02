@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, boolean, timestamp, integer, index } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, boolean, timestamp, integer, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -59,6 +59,61 @@ export const authAuditLogs = pgTable("auth_audit_logs", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const chats = pgTable("chats", {
+  id: varchar("id", { length: 36 })
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  type: varchar("type", { length: 10 }).notNull().default("p2p"),
+  name: varchar("name", { length: 255 }),
+  createdBy: varchar("created_by", { length: 36 }).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const chatParticipants = pgTable("chat_participants", {
+  id: varchar("id", { length: 36 })
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  chatId: varchar("chat_id", { length: 36 }).notNull(),
+  userId: varchar("user_id", { length: 36 }).notNull(),
+  role: varchar("role", { length: 20 }).notNull().default("member"),
+  joinedAt: timestamp("joined_at").defaultNow().notNull(),
+  lastReadAt: timestamp("last_read_at"),
+}, (table) => [
+  uniqueIndex("idx_chat_participant_unique").on(table.chatId, table.userId),
+  index("idx_chat_participants_user").on(table.userId),
+  index("idx_chat_participants_chat").on(table.chatId),
+]);
+
+export const chatMessages = pgTable("chat_messages", {
+  id: varchar("id", { length: 36 })
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  chatId: varchar("chat_id", { length: 36 }).notNull(),
+  senderId: varchar("sender_id", { length: 36 }).notNull(),
+  content: text("content"),
+  type: varchar("type", { length: 20 }).notNull().default("text"),
+  status: varchar("status", { length: 20 }).notNull().default("sent"),
+  imageUri: text("image_uri"),
+  fileUri: text("file_uri"),
+  fileName: varchar("file_name", { length: 255 }),
+  fileSize: integer("file_size"),
+  audioUri: text("audio_uri"),
+  audioDuration: integer("audio_duration"),
+  latitude: text("latitude"),
+  longitude: text("longitude"),
+  locationName: varchar("location_name", { length: 255 }),
+  pollQuestion: varchar("poll_question", { length: 500 }),
+  pollOptions: text("poll_options"),
+  sharedContactName: varchar("shared_contact_name", { length: 255 }),
+  sharedContactPhone: varchar("shared_contact_phone", { length: 50 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("idx_chat_messages_chat").on(table.chatId),
+  index("idx_chat_messages_chat_created").on(table.chatId, table.createdAt),
+  index("idx_chat_messages_sender").on(table.senderId),
+]);
+
 export const passwordSchema = z.string()
   .min(8, "Password must be at least 8 characters")
   .regex(/[A-Z]/, "Password must contain at least one uppercase letter")
@@ -117,3 +172,6 @@ export const insertUserSchema = createInsertSchema(users).omit({
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 export type AuthAuditLog = typeof authAuditLogs.$inferSelect;
+export type Chat = typeof chats.$inferSelect;
+export type ChatParticipant = typeof chatParticipants.$inferSelect;
+export type ChatMessage = typeof chatMessages.$inferSelect;
