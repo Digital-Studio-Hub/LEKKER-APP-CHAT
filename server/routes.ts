@@ -1,6 +1,17 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "node:http";
 import OpenAI from "openai";
+import rateLimit, { type Options } from "express-rate-limit";
+import { registerSchema, loginSchema, updateProfileSchema } from "@shared/schema";
+import { storage } from "./storage";
+import {
+  hashPassword,
+  verifyPassword,
+  generateToken,
+  authMiddleware,
+  optionalAuthMiddleware,
+  type AuthenticatedRequest,
+} from "./auth";
 
 const openrouter = new OpenAI({
   baseURL: process.env.AI_INTEGRATIONS_OPENROUTER_BASE_URL,
@@ -41,7 +52,162 @@ const DIRECTORY_DATA: DirectoryEntry[] = [
 const SERVICE_TYPES = [...new Set(DIRECTORY_DATA.map((d) => d.serviceType))].sort();
 const PROVINCES = [...new Set(DIRECTORY_DATA.map((d) => d.province))].sort();
 
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many login attempts. Please try again in 15 minutes." },
+  validate: { xForwardedForHeader: false },
+});
+
+const registerLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many registration attempts. Please try again later." },
+  validate: { xForwardedForHeader: false },
+});
+
+function sanitizeUser(user: any) {
+  const { passwordHash, ...safe } = user;
+  return safe;
+}
+
 export async function registerRoutes(app: Express): Promise<Server> {
+
+  app.post("/api/auth/register", registerLimiter, async (req: Request, res: Response) => {
+    try {
+      const parsed = registerSchema.safeParse(req.body);
+      if (!parsed.success) {
+        const errors = parsed.error.errors.map(e => ({ field: e.path.join("."), message: e.message }));
+        return res.status(400).json({ message: "Validation failed", errors });
+      }
+
+      const { phone, email, username, firstName, lastName, password } = parsed.data;
+
+      const existingEmail = await storage.getUserByEmail(email);
+      if (existingEmail) {
+        return res.status(409).json({ message: "An account with this email already exists", field: "email" });
+      }
+
+      const existingPhone = await storage.getUserByPhone(phone);
+      if (existingPhone) {
+        return res.status(409).json({ message: "An account with this phone number already exists", field: "phone" });
+      }
+
+      const existingUsername = await storage.getUserByUsername(username);
+      if (existingUsername) {
+        return res.status(409).json({ message: "This username is already taken", field: "username" });
+      }
+
+      const passwordHash = await hashPassword(password);
+
+      const AVATAR_COLORS = ["#4ECDC4", "#FF6B6B", "#45B7D1", "#96CEB4", "#FFEAA7", "#DDA0DD", "#85C1E9", "#F7DC6F", "#BB8FCE", "#98D8C8"];
+      const randomColor = AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)];
+
+      const user = await storage.createUser({
+        phone,
+        email,
+        username,
+        firstName,
+        lastName,
+        passwordHash,
+        avatarColor: randomColor,
+        role: "user",
+        emailVerified: false,
+        phoneVerified: false,
+        lekkerNetworkAccess: false,
+        autoReplyEnabled: false,
+        notificationsEnabled: true,
+        locationEnabled: false,
+        presence: "online",
+      });
+
+      const token = generateToken({ userId: user.id, email: user.email, role: user.role });
+
+      await storage.logAuthEvent("register", user.id, req.ip, req.headers["user-agent"]?.toString());
+
+      res.status(201).json({ user: sanitizeUser(user), token });
+    } catch (error: any) {
+      console.error("Registration error:", error);
+      if (error?.code === "23505") {
+        return res.status(409).json({ message: "An account with these details already exists" });
+      }
+      res.status(500).json({ message: "Registration failed. Please try again." });
+    }
+  });
+
+  app.post("/api/auth/login", loginLimiter, async (req: Request, res: Response) => {
+    try {
+      const parsed = loginSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Please provide your email/phone and password" });
+      }
+
+      const { identifier, password } = parsed.data;
+
+      const user = await storage.getUserByIdentifier(identifier);
+      if (!user) {
+        await storage.logAuthEvent("login_failed", undefined, req.ip, req.headers["user-agent"]?.toString(), `identifier: ${identifier}`);
+        return res.status(401).json({ message: "Invalid credentials" });
+      }
+
+      const isValid = await verifyPassword(password, user.passwordHash);
+      if (!isValid) {
+        await storage.logAuthEvent("login_failed", user.id, req.ip, req.headers["user-agent"]?.toString());
+        return res.status(401).json({ message: "Invalid credentials" });
+      }
+
+      const token = generateToken({ userId: user.id, email: user.email, role: user.role });
+
+      await storage.logAuthEvent("login_success", user.id, req.ip, req.headers["user-agent"]?.toString());
+
+      res.json({ user: sanitizeUser(user), token });
+    } catch (error) {
+      console.error("Login error:", error);
+      res.status(500).json({ message: "Login failed. Please try again." });
+    }
+  });
+
+  app.get("/api/auth/me", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const user = await storage.getUser(req.user!.userId);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      res.json({ user: sanitizeUser(user) });
+    } catch (error) {
+      console.error("Get profile error:", error);
+      res.status(500).json({ message: "Failed to fetch profile" });
+    }
+  });
+
+  app.put("/api/auth/profile", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const parsed = updateProfileSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid profile data" });
+      }
+
+      const user = await storage.updateUser(req.user!.userId, parsed.data);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      res.json({ user: sanitizeUser(user) });
+    } catch (error) {
+      console.error("Update profile error:", error);
+      res.status(500).json({ message: "Failed to update profile" });
+    }
+  });
+
+  app.post("/api/auth/logout", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    await storage.logAuthEvent("logout", req.user!.userId, req.ip, req.headers["user-agent"]?.toString());
+    res.json({ message: "Logged out successfully" });
+  });
+
   app.get("/api/directory", (req: Request, res: Response) => {
     const { serviceType, province, search } = req.query;
 

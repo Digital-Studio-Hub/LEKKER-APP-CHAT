@@ -5,14 +5,16 @@ A business messaging app for Lekker Network - connecting Lekkerpreneurs with the
 ## Stack
 - **Frontend**: Expo React Native (Router v6, SDK 54)
 - **Backend**: Express.js with TypeScript
+- **Database**: PostgreSQL via Drizzle ORM
+- **Auth**: JWT (jsonwebtoken) + bcrypt password hashing (12 rounds)
 - **AI**: OpenRouter (xAI Grok 3 Mini) via Replit AI Integrations for CledwynAI assistant
-- **Storage**: AsyncStorage for local data persistence
+- **Storage**: AsyncStorage for local data, SecureStore for auth tokens (native), PostgreSQL for users/auth
 - **Font**: Poppins (Google Fonts)
 
 ## Architecture
 
 ### Frontend (Expo)
-- `app/index.tsx` - Login screen (phone number + name)
+- `app/index.tsx` - Login/Register screen (email+password login, multi-field registration)
 - `app/(tabs)/` - Main tab navigation
   - `index.tsx` - Chats list (WhatsApp-style conversations with pin, receipts, group support)
   - `cledwyn.tsx` - CledwynAI chat with streaming
@@ -28,22 +30,47 @@ A business messaging app for Lekker Network - connecting Lekkerpreneurs with the
 - `app/new-post.tsx` - Create feed post
 - `app/post-comments.tsx` - View/add comments on posts
 - `lib/storage.ts` - AsyncStorage data layer (conversations, messages, groups, pins, receipts)
-- `lib/auth-context.tsx` - Authentication context
-- `lib/query-client.ts` - React Query + API helpers
+- `lib/auth-context.tsx` - Server-backed authentication context (JWT + SecureStore)
+- `lib/auth-token.ts` - Singleton auth token accessor (breaks circular dependency)
+- `lib/query-client.ts` - React Query + API helpers with Authorization headers
 - `lib/notifications.ts` - Push notification service (expo-notifications)
 - `lib/location.ts` - Location services (expo-location)
 - `lib/chat-attachments.ts` - Chat attachment utilities (image, camera, file, voicenote, location, poll, contact)
 
 ### Backend (Express)
 - `server/routes.ts` - API endpoints:
+  - `/api/auth/register` - Account registration (phone, email, username, firstName, lastName, password)
+  - `/api/auth/login` - Login via email/phone + password, returns JWT
+  - `/api/auth/me` - Get current user profile (protected)
+  - `/api/auth/profile` - Update user profile (protected)
+  - `/api/auth/logout` - Logout with audit logging (protected)
   - `/api/cledwyn/chat` - CledwynAI streaming chat
   - `/api/directory` - Lekkerpreneur directory with filters (serviceType, province, search)
   - `/api/directory/:id` - Single directory entry
+- `server/auth.ts` - JWT + bcrypt auth utilities, authMiddleware
+- `server/storage.ts` - PostgreSQL storage via Drizzle ORM (PgStorage class)
 - `server/index.ts` - Express server setup
 - Port 5000
 
+### Database (PostgreSQL)
+- `shared/schema.ts` - Drizzle schema definitions
+  - `users` table - Full user profile with auth fields (phone, email, username, passwordHash, etc.)
+  - `auth_audit_logs` table - Auth event logging (login, logout, failed attempts)
+  - Zod validation schemas: registerSchema, loginSchema, updateProfileSchema, passwordSchema
+- Unique constraints on phone, email, username
+
+## Auth System
+- Registration: phone + email + username + firstName + lastName + password (with strength validation)
+- Login: email/phone identifier + password
+- JWT tokens signed with SESSION_SECRET env var (required, no fallback)
+- Token expiry: 7 days
+- Password requirements: min 8 chars, 1 uppercase, 1 number, 1 special char
+- Rate limiting: 10 login attempts / 15 min, 5 register attempts / hour
+- Token storage: expo-secure-store on native (Keychain/Keystore), AsyncStorage on web
+- Auth audit logging for all auth events
+
 ## Features
-- Phone number login with verification flow
+- Production auth with registration and login
 - WhatsApp-style chat conversations (P2P and group)
 - Group chat creation with member selection and naming
 - Pin chats to top (long-press menu with pin/unpin/delete)
@@ -76,7 +103,7 @@ A business messaging app for Lekker Network - connecting Lekkerpreneurs with the
 - Black & yellow Lekker branding
 
 ## Data Types
-- `UserProfile` - id, phoneNumber, displayName, status, presence, avatarColor, profilePhoto, lekkerNetworkAccess, autoReplyEnabled, autoReplyMessage, notificationsEnabled, locationEnabled, lastLatitude, lastLongitude, locationCity, locationRegion
+- `AuthUser` (server-backed) - id, phone, email, username, firstName, lastName, role, avatarColor, profilePhoto, bio, businessName, status, presence, lekkerNetworkAccess, autoReplyEnabled, autoReplyMessage, notificationsEnabled, locationEnabled, lastLatitude, lastLongitude, locationCity, locationRegion, emailVerified, phoneVerified, createdAt, updatedAt + enriched: displayName, phoneNumber
 - `Conversation` - id, contactId, contactName, messages[], pinned, isGroup, groupMembers[]
 - `ChatMessage` - id, senderId, content, timestamp, read, status (sent/delivered/seen), type (text/image/file/voicenote/location/poll/contact), imageUri, fileUri, fileName, fileSize, audioUri, audioDuration, latitude, longitude, locationName, pollQuestion, pollOptions[], sharedContactName, sharedContactPhone
 - `PollOption` - id, text, votes[]
@@ -105,6 +132,12 @@ A business messaging app for Lekker Network - connecting Lekkerpreneurs with the
 - Accessibility: `accessibilityLabel`, `accessibilityHint`, `accessibilityRole`, `testID` on key form inputs and buttons
 - Web platform insets: 67px top, 34px bottom (handled in each screen)
 - `supportsTablet: true` in app.json
+
+## Environment Variables
+- `SESSION_SECRET` - Required. Used for JWT token signing. Must be set before server starts.
+- `DATABASE_URL` - PostgreSQL connection string (auto-provisioned by Replit)
+- `AI_INTEGRATIONS_OPENROUTER_BASE_URL` - OpenRouter API base URL
+- `AI_INTEGRATIONS_OPENROUTER_API_KEY` - OpenRouter API key
 
 ## Colors
 - Primary: #F5B800 (Lekker Yellow)
