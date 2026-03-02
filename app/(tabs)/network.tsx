@@ -136,7 +136,7 @@ function DirectoryView() {
     setStartingChat(entry.id);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
-      const conversation = await storage.addConversation(entry.name, entry.phone);
+      const conversation = await storage.addConversation(entry.name, entry.id, entry.avatarColor);
       router.push({ pathname: "/chat/[id]", params: { id: conversation.id } });
     } catch (e) {
       console.error("Start chat error:", e);

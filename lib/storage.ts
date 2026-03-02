@@ -208,19 +208,23 @@ export const storage = {
 
   async addConversation(
     contactName: string,
-    contactPhone: string,
+    contactIdentifier: string,
+    contactAvatarColor?: string,
   ): Promise<Conversation> {
     const conversations = await this.getConversations();
-    const existing = conversations.find(
-      (c) => c.contactId === contactPhone,
-    );
-    if (existing) return existing;
+    if (contactIdentifier) {
+      const existing = conversations.find(
+        (c) => c.contactId === contactIdentifier,
+      );
+      if (existing) return existing;
+    }
 
+    const conversationId = generateId();
     const conversation: Conversation = {
-      id: generateId(),
-      contactId: contactPhone,
+      id: conversationId,
+      contactId: contactIdentifier || conversationId,
       contactName,
-      contactAvatarColor: randomAvatarColor(),
+      contactAvatarColor: contactAvatarColor || randomAvatarColor(),
       lastMessage: "",
       lastMessageTime: new Date().toISOString(),
       unreadCount: 0,

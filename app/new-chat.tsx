@@ -173,7 +173,7 @@ export default function NewChatScreen() {
     setStartingChat(contact.id);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
-      const conversation = await storage.addConversation(contact.name, contact.phone);
+      const conversation = await storage.addConversation(contact.name, contact.id || contact.phone, contact.avatarColor);
       router.back();
       setTimeout(() => {
         router.push({ pathname: "/chat/[id]", params: { id: conversation.id } });
