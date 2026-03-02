@@ -93,16 +93,6 @@ export async function findLekkerpreneurByPhoneOrEmail(
   const normalizedPhone = normalizePhone(phone);
   const normalizedEmail = email.toLowerCase().trim();
 
-  if (normalizedPhone) {
-    const phoneResult = await fetchFromApi({ search: normalizedPhone, limit: "10" });
-    if (phoneResult?.data?.length) {
-      const phoneMatch = phoneResult.data.find(
-        (entry) => normalizePhone(entry.phone) === normalizedPhone
-      );
-      if (phoneMatch) return phoneMatch;
-    }
-  }
-
   if (normalizedEmail && normalizedEmail.includes("@")) {
     const emailResult = await fetchFromApi({ search: normalizedEmail, limit: "10" });
     if (emailResult?.data?.length) {
@@ -110,6 +100,16 @@ export async function findLekkerpreneurByPhoneOrEmail(
         (entry) => entry.email?.toLowerCase().trim() === normalizedEmail
       );
       if (emailMatch) return emailMatch;
+    }
+  }
+
+  if (normalizedPhone) {
+    const phoneResult = await fetchFromApi({ search: normalizedPhone, limit: "10" });
+    if (phoneResult?.data?.length) {
+      const phoneMatch = phoneResult.data.find(
+        (entry) => normalizePhone(entry.phone) === normalizedPhone
+      );
+      if (phoneMatch) return phoneMatch;
     }
   }
 
