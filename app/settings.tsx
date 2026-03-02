@@ -80,6 +80,7 @@ export default function SettingsScreen() {
   const [fieldError, setFieldError] = useState("");
   const [isSavingField, setIsSavingField] = useState(false);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [isSyncingLekker, setIsSyncingLekker] = useState(false);
 
   useEffect(() => {
     async function loadPermissions() {
@@ -284,6 +285,25 @@ export default function SettingsScreen() {
     }
   }
 
+  async function handleSyncLekkerNetwork() {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setIsSyncingLekker(true);
+    try {
+      const res = await apiRequest("POST", "/api/auth/sync-lekker");
+      const data = await res.json();
+      if (data.matched && data.user) {
+        await updateProfile(data.user);
+        Alert.alert("Verified!", `Your account has been linked to ${data.user.businessName || "your Lekkerpreneur profile"} on the Lekker Network.`);
+      } else {
+        Alert.alert("No Match Found", data.message || "We couldn't find a matching Lekkerpreneur profile for your phone number or email. Make sure you're registered on lekker.network.");
+      }
+    } catch (e: any) {
+      Alert.alert("Sync Failed", "Could not connect to the Lekker Network. Please try again later.");
+    } finally {
+      setIsSyncingLekker(false);
+    }
+  }
+
   async function handleLogout() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
     if (Platform.OS === "web") {
@@ -410,6 +430,71 @@ export default function SettingsScreen() {
               <Text style={styles.infoValue}>{user?.phone || user?.phoneNumber || ""}</Text>
             </View>
           </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Lekkerpreneur Verification</Text>
+          <View style={styles.sectionCard}>
+            {user?.isVerifiedLekkerpreneur ? (
+              <>
+                <View style={styles.infoRow}>
+                  <Ionicons name="checkmark-circle" size={18} color={Colors.primary} />
+                  <Text style={[styles.infoLabel, { color: Colors.primary }]}>Verified Lekkerpreneur</Text>
+                </View>
+                {user.businessName ? (
+                  <View style={styles.infoRow}>
+                    <Ionicons name="business-outline" size={18} color={Colors.textSecondary} />
+                    <Text style={styles.infoLabel}>Business</Text>
+                    <Text style={styles.infoValue}>{user.businessName}</Text>
+                  </View>
+                ) : null}
+                {user.businessCategory ? (
+                  <View style={styles.infoRow}>
+                    <Ionicons name="pricetag-outline" size={18} color={Colors.textSecondary} />
+                    <Text style={styles.infoLabel}>Category</Text>
+                    <Text style={styles.infoValue}>{user.businessCategory}</Text>
+                  </View>
+                ) : null}
+                {user.businessProvince ? (
+                  <View style={styles.infoRow}>
+                    <Ionicons name="location-outline" size={18} color={Colors.textSecondary} />
+                    <Text style={styles.infoLabel}>Province</Text>
+                    <Text style={styles.infoValue}>{user.businessProvince}</Text>
+                  </View>
+                ) : null}
+                {user.businessWebsite ? (
+                  <View style={styles.infoRow}>
+                    <Ionicons name="globe-outline" size={18} color={Colors.textSecondary} />
+                    <Text style={styles.infoLabel}>Website</Text>
+                    <Text style={styles.infoValue} numberOfLines={1}>{user.businessWebsite}</Text>
+                  </View>
+                ) : null}
+              </>
+            ) : (
+              <View style={styles.infoRow}>
+                <Ionicons name="shield-outline" size={18} color={Colors.textMuted} />
+                <Text style={[styles.infoLabel, { color: Colors.textMuted }]}>Not verified yet</Text>
+              </View>
+            )}
+          </View>
+          <Pressable
+            style={({ pressed }) => [styles.syncButton, pressed && { opacity: 0.8 }, isSyncingLekker && { opacity: 0.6 }]}
+            onPress={handleSyncLekkerNetwork}
+            disabled={isSyncingLekker}
+            testID="sync-lekker-btn"
+          >
+            {isSyncingLekker ? (
+              <ActivityIndicator size="small" color={Colors.background} />
+            ) : (
+              <Ionicons name="sync" size={18} color={Colors.background} />
+            )}
+            <Text style={styles.syncButtonText}>
+              {user?.isVerifiedLekkerpreneur ? "Re-sync with Lekker Network" : "Verify with Lekker Network"}
+            </Text>
+          </Pressable>
+          <Text style={styles.toggleHint}>
+            Match your phone or email with your lekker.network profile to verify your Lekkerpreneur status
+          </Text>
         </View>
 
         <View style={styles.section}>
@@ -819,6 +904,18 @@ const styles = StyleSheet.create({
     paddingTop: 8,
   },
   locationText: { fontFamily: "Poppins_400Regular", fontSize: 13, color: Colors.primary },
+  syncButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: Colors.primary,
+    borderRadius: 10,
+    paddingVertical: 12,
+    gap: 8,
+    marginTop: 10,
+    marginHorizontal: 4,
+  },
+  syncButtonText: { fontFamily: "Poppins_600SemiBold", fontSize: 14, color: Colors.background },
   logoutButton: {
     flexDirection: "row",
     alignItems: "center",

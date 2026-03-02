@@ -14,6 +14,7 @@ import {
 } from "./auth";
 import { ObjectStorageService, ObjectNotFoundError } from "./objectStorage";
 import { ObjectPermission } from "./objectAcl";
+import { findLekkerpreneurByPhoneOrEmail, fetchDirectory as fetchLekkerDirectory, fetchLekkerpreneurById, extractLekkerpreneurProfile, type LekkerNetworkEntry } from "./lekkerNetwork";
 
 const openrouter = new OpenAI({
   baseURL: process.env.AI_INTEGRATIONS_OPENROUTER_BASE_URL,
@@ -131,7 +132,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       await storage.logAuthEvent("register", user.id, req.ip, req.headers["user-agent"]?.toString());
 
-      res.status(201).json({ user: sanitizeUser(user), token });
+      let finalUser = user;
+      try {
+        const lekkerMatch = await findLekkerpreneurByPhoneOrEmail(phone, email);
+        if (lekkerMatch) {
+          const profileData = extractLekkerpreneurProfile(lekkerMatch);
+          const updated = await storage.updateUser(user.id, profileData);
+          if (updated) finalUser = updated;
+          await storage.logAuthEvent("lekker_network_match", user.id, req.ip, undefined, `Matched Lekkerpreneur: ${lekkerMatch.businessName} (${lekkerMatch.id})`);
+        }
+      } catch (e) {
+        console.error("Lekker Network lookup on register (non-fatal):", e);
+      }
+
+      res.status(201).json({ user: sanitizeUser(finalUser), token });
     } catch (error: any) {
       console.error("Registration error:", error);
       if (error?.code === "23505") {
@@ -166,7 +180,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       await storage.logAuthEvent("login_success", user.id, req.ip, req.headers["user-agent"]?.toString());
 
-      res.json({ user: sanitizeUser(user), token });
+      let finalUser = user;
+      if (!user.lekkerNetworkId) {
+        try {
+          const lekkerMatch = await findLekkerpreneurByPhoneOrEmail(user.phone, user.email);
+          if (lekkerMatch) {
+            const profileData = extractLekkerpreneurProfile(lekkerMatch);
+            const updated = await storage.updateUser(user.id, profileData);
+            if (updated) finalUser = updated;
+            await storage.logAuthEvent("lekker_network_match", user.id, req.ip, undefined, `Matched Lekkerpreneur: ${lekkerMatch.businessName} (${lekkerMatch.id})`);
+          }
+        } catch (e) {
+          console.error("Lekker Network lookup on login (non-fatal):", e);
+        }
+      }
+
+      res.json({ user: sanitizeUser(finalUser), token });
     } catch (error) {
       console.error("Login error:", error);
       res.status(500).json({ message: "Login failed. Please try again." });
@@ -332,11 +361,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/directory", (req: Request, res: Response) => {
-    const { serviceType, province, search } = req.query;
+  app.get("/api/directory", async (req: Request, res: Response) => {
+    const { serviceType, province, search, page, limit: limitParam, sort } = req.query;
+
+    try {
+      const apiResult = await fetchLekkerDirectory({
+        page: page ? Number(page) : 1,
+        limit: limitParam ? Math.min(Number(limitParam), 100) : 20,
+        search: typeof search === "string" ? search : undefined,
+        location: typeof province === "string" ? province : undefined,
+        category: typeof serviceType === "string" ? serviceType : undefined,
+        sort: typeof sort === "string" ? sort : undefined,
+      });
+
+      if (apiResult?.success && apiResult.data) {
+        const entries = apiResult.data.map((d) => ({
+          id: d.id,
+          name: d.ownerName,
+          businessName: d.businessName,
+          tradingName: d.tradingName || "",
+          serviceType: d.category || "",
+          location: d.location?.province || "",
+          province: d.location?.province || "",
+          phone: d.phone,
+          email: d.email,
+          bio: "",
+          avatarColor: "#F5B800",
+          website: d.website || "",
+          logoUrl: d.logoUrl || "",
+          isVerified: d.isVerified,
+        }));
+
+        return res.json({
+          entries,
+          total: apiResult.total,
+          page: apiResult.page,
+          limit: apiResult.limit,
+          filters: { serviceTypes: SERVICE_TYPES, provinces: PROVINCES },
+          source: "lekker_network",
+        });
+      }
+    } catch (e) {
+      console.error("Lekker Network directory fetch error (falling back):", e);
+    }
 
     let results = [...DIRECTORY_DATA];
-
     if (serviceType && typeof serviceType === "string") {
       results = results.filter((d) => d.serviceType === serviceType);
     }
@@ -353,41 +422,97 @@ export async function registerRoutes(app: Express): Promise<Server> {
           d.location.toLowerCase().includes(q),
       );
     }
-
-    res.json({ entries: results, filters: { serviceTypes: SERVICE_TYPES, provinces: PROVINCES } });
+    res.json({ entries: results, filters: { serviceTypes: SERVICE_TYPES, provinces: PROVINCES }, source: "fallback" });
   });
 
-  app.get("/api/directory/:id", (req: Request, res: Response) => {
+  app.get("/api/directory/:id", async (req: Request, res: Response) => {
+    try {
+      const apiEntry = await fetchLekkerpreneurById(req.params.id);
+      if (apiEntry) {
+        return res.json({
+          id: apiEntry.id,
+          name: apiEntry.ownerName,
+          businessName: apiEntry.businessName,
+          tradingName: apiEntry.tradingName || "",
+          serviceType: apiEntry.category || "",
+          location: apiEntry.location?.province || "",
+          province: apiEntry.location?.province || "",
+          phone: apiEntry.phone,
+          email: apiEntry.email,
+          bio: "",
+          avatarColor: "#F5B800",
+          website: apiEntry.website || "",
+          logoUrl: apiEntry.logoUrl || "",
+          isVerified: apiEntry.isVerified,
+          source: "lekker_network",
+        });
+      }
+    } catch (e) {
+      console.error("Lekker Network directory/:id error (falling back):", e);
+    }
+
     const entry = DIRECTORY_DATA.find((d) => d.id === req.params.id);
     if (!entry) return res.status(404).json({ error: "Not found" });
     res.json(entry);
   });
 
-  app.post("/api/verify-lekkerpreneur", (req: Request, res: Response) => {
+  app.post("/api/verify-lekkerpreneur", async (req: Request, res: Response) => {
     const { phoneNumber } = req.body;
     if (!phoneNumber) {
       return res.status(400).json({ verified: false, error: "Phone number required" });
     }
-    const entry = DIRECTORY_DATA.find((d) => d.phone === phoneNumber);
-    if (entry) {
+
+    try {
+      const match = await findLekkerpreneurByPhoneOrEmail(phoneNumber, "");
+      if (match) {
+        return res.json({
+          verified: true,
+          businessName: match.businessName,
+          website: match.website || "",
+          verifiedLinks: match.website ? [match.website] : [],
+          name: match.ownerName,
+          phone: match.phone,
+          isVerified: match.isVerified,
+          logoUrl: match.logoUrl || "",
+        });
+      }
+    } catch (e) {
+      console.error("Lekker Network verify error (falling back):", e);
+    }
+
+    const fallback = DIRECTORY_DATA.find((d) => d.phone === phoneNumber);
+    if (fallback) {
       res.json({
         verified: true,
-        businessName: entry.businessName,
-        website: entry.website,
-        verifiedLinks: [entry.website],
-        name: entry.name,
-        phone: entry.phone,
+        businessName: fallback.businessName,
+        website: fallback.website,
+        verifiedLinks: [fallback.website],
+        name: fallback.name,
+        phone: fallback.phone,
       });
     } else {
       res.json({ verified: false });
     }
   });
 
-  app.post("/api/verify-link", (req: Request, res: Response) => {
+  app.post("/api/verify-link", async (req: Request, res: Response) => {
     const { phoneNumber, link } = req.body;
     if (!phoneNumber || !link) {
       return res.status(400).json({ verified: false });
     }
+
+    try {
+      const match = await findLekkerpreneurByPhoneOrEmail(phoneNumber, "");
+      if (match && match.website) {
+        const linkDomain = new URL(link).hostname.replace("www.", "");
+        const entryDomain = new URL(match.website).hostname.replace("www.", "");
+        const isVerified = linkDomain === entryDomain;
+        return res.json({ verified: isVerified, reason: isVerified ? undefined : "Link does not match your verified business website" });
+      }
+    } catch (e) {
+      console.error("Lekker Network verify-link error (falling back):", e);
+    }
+
     const entry = DIRECTORY_DATA.find((d) => d.phone === phoneNumber);
     if (!entry) {
       return res.json({ verified: false, reason: "Not a verified Lekkerpreneur" });
@@ -399,6 +524,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ verified: isVerified, reason: isVerified ? undefined : "Link does not match your verified business website" });
     } catch {
       res.json({ verified: false, reason: "Invalid URL format" });
+    }
+  });
+
+  app.post("/api/auth/sync-lekker", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const user = await storage.getUser(req.user!.userId);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const match = await findLekkerpreneurByPhoneOrEmail(user.phone, user.email);
+      if (!match) {
+        return res.json({ matched: false, message: "No matching Lekkerpreneur found for your phone or email." });
+      }
+
+      const profileData = extractLekkerpreneurProfile(match);
+      const updated = await storage.updateUser(user.id, profileData);
+
+      await storage.logAuthEvent("lekker_network_sync", user.id, req.ip, undefined, `Synced with: ${match.businessName} (${match.id})`);
+
+      res.json({ matched: true, user: sanitizeUser(updated || user) });
+    } catch (error) {
+      console.error("Lekker Network sync error:", error);
+      res.status(500).json({ message: "Failed to sync with Lekker Network" });
     }
   });
 

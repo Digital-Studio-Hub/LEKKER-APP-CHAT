@@ -43,6 +43,15 @@ export interface AuthUser {
   profilePhoto: string | null;
   bio: string | null;
   businessName: string | null;
+  tradingName: string | null;
+  lekkerNetworkId: string | null;
+  isVerifiedLekkerpreneur: boolean;
+  businessCategory: string | null;
+  businessWebsite: string | null;
+  businessLogoUrl: string | null;
+  businessProvince: string | null;
+  businessCountry: string | null;
+  lekkerVerifiedAt: string | null;
   status: string | null;
   presence: string | null;
   lekkerNetworkAccess: boolean;

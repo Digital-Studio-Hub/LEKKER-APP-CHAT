@@ -49,11 +49,13 @@ A business messaging app for Lekker Network - connecting Lekkerpreneurs with the
   - `/api/user/profile-image` - Set/remove profile image via object storage (protected, rate-limited)
   - `/objects/*` - Serve objects from storage (public ACL checked)
   - `/public-objects/*` - Serve public objects from storage
+  - `/api/auth/sync-lekker` - Manual sync with Lekker Network API (protected)
   - `/api/cledwyn/chat` - CledwynAI streaming chat
   - `/api/directory` - Lekkerpreneur directory with filters (serviceType, province, search)
   - `/api/directory/:id` - Single directory entry
 - `server/auth.ts` - JWT + bcrypt auth utilities, authMiddleware
 - `server/storage.ts` - PostgreSQL storage via Drizzle ORM (PgStorage class)
+- `server/lekkerNetwork.ts` - Lekker Network API client (directory fetch, user matching by phone/email, profile extraction)
 - `server/objectStorage.ts` - Object Storage service (upload URLs, ACL, file serving)
 - `server/objectAcl.ts` - Object ACL management (owner, visibility policies)
 - `server/index.ts` - Express server setup
@@ -77,6 +79,7 @@ A business messaging app for Lekker Network - connecting Lekkerpreneurs with the
 - Auth audit logging for all auth events
 
 ## Features
+- Lekker Network API integration: matches users by phone/email on register/login, auto-populates business data for verified Lekkerpreneurs, manual sync via Settings
 - Production auth with registration and login
 - WhatsApp-style chat conversations (P2P and group)
 - Group chat creation with member selection and naming
@@ -110,7 +113,7 @@ A business messaging app for Lekker Network - connecting Lekkerpreneurs with the
 - Black & yellow Lekker branding
 
 ## Data Types
-- `AuthUser` (server-backed) - id, phone, email, username, firstName, lastName, role, avatarColor, profilePhoto, bio, businessName, status, presence, lekkerNetworkAccess, autoReplyEnabled, autoReplyMessage, notificationsEnabled, locationEnabled, lastLatitude, lastLongitude, locationCity, locationRegion, emailVerified, phoneVerified, createdAt, updatedAt + enriched: displayName, phoneNumber
+- `AuthUser` (server-backed) - id, phone, email, username, firstName, lastName, role, avatarColor, profilePhoto, bio, businessName, tradingName, lekkerNetworkId, isVerifiedLekkerpreneur, businessCategory, businessWebsite, businessLogoUrl, businessProvince, businessCountry, lekkerVerifiedAt, status, presence, lekkerNetworkAccess, autoReplyEnabled, autoReplyMessage, notificationsEnabled, locationEnabled, lastLatitude, lastLongitude, locationCity, locationRegion, emailVerified, phoneVerified, createdAt, updatedAt + enriched: displayName, phoneNumber
 - `Conversation` - id, contactId, contactName, messages[], pinned, isGroup, groupMembers[]
 - `ChatMessage` - id, senderId, content, timestamp, read, status (sent/delivered/seen), type (text/image/file/voicenote/location/poll/contact), imageUri, fileUri, fileName, fileSize, audioUri, audioDuration, latitude, longitude, locationName, pollQuestion, pollOptions[], sharedContactName, sharedContactPhone
 - `PollOption` - id, text, votes[]
@@ -148,6 +151,8 @@ A business messaging app for Lekker Network - connecting Lekkerpreneurs with the
 - `DEFAULT_OBJECT_STORAGE_BUCKET_ID` - Replit Object Storage bucket ID (auto-provisioned)
 - `PUBLIC_OBJECT_SEARCH_PATHS` - Public object search paths (auto-provisioned)
 - `PRIVATE_OBJECT_DIR` - Private object directory (auto-provisioned)
+- `LEKKER_NETWORK_API_KEY` - API key for lekker.network Lekkerpreneur directory API
+- `LEKKER_NETWORK_API_URL` - Base URL for Lekker Network API (default: https://lekker.network/api/v1/lekkerpreneurs)
 
 ## Colors
 - Primary: #F5B800 (Lekker Yellow)
