@@ -69,3 +69,8 @@ task = "shell.exec"
 args = "npm run expo:dev"
 waitForPort = 8081
 ensurePreviewReachable = "/status"
+
+[userenv]
+
+[userenv.shared]
+LEKKER_NETWORK_API_URL = "https://lekker.network/api/v1/lekkerpreneurs"

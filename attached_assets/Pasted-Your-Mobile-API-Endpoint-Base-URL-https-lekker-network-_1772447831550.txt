@@ -1,0 +1,63 @@
+Your Mobile API Endpoint
+Base URL
+
+https://lekker.network/api/v1/lekkerpreneurs
+Your API Key (copy this — store it securely in your mobile app, never in client-side code)
+
+lkr_925976c3afdc4e3049d669a50431d1ef9ed731fcfd8abef2686b49a9d4d97455
+How to Call It
+Every request must include this header:
+
+X-API-Key: lkr_925976c3afdc4e3049d669a50431d1ef9ed731fcfd8abef2686b49a9d4d97455
+React Native / Fetch example:
+
+const response = await fetch(
+  "https://lekker.network/api/v1/lekkerpreneurs?page=1&limit=20",
+  {
+    headers: {
+      "X-API-Key": "lkr_925976c3afdc4e3049d669a50431d1ef9ed731fcfd8abef2686b49a9d4d97455",
+      "Content-Type": "application/json"
+    }
+  }
+);
+const result = await response.json();
+Query Parameters
+Parameter	Example	Description
+page	?page=1	Page number (default: 1)
+limit	?limit=20	Results per page (max 100, default: 20)
+search	?search=bakery	Search by business name
+location	?location=Gauteng	Filter by province
+category	?category=micro	Filter by business size
+sort	?sort=createdAt_desc	Sort order: createdAt_desc, createdAt_asc, businessName_asc, businessName_desc
+Response Shape
+{
+  "success": true,
+  "total": 42,
+  "page": 1,
+  "limit": 20,
+  "data": [
+    {
+      "id": "uuid",
+      "businessName": "My Business",
+      "tradingName": "Trading As Name",
+      "ownerName": "John Doe",
+      "phone": "+27821234567",
+      "email": "business@email.com",
+      "logoUrl": "https://...",
+      "category": "micro",
+      "website": "https://example.com",
+      "location": {
+        "province": "Gauteng",
+        "country": "South Africa"
+      },
+      "isVerified": true,
+      "createdAt": "2026-03-02T10:00:00Z"
+    }
+  ]
+}
+Security Summary
+HTTPS enforced at deployment level (all traffic is encrypted in transit)
+API Key required on every request via X-API-Key header — reject all requests without it
+Rate Limited to 100 requests per 15 minutes per IP
+CORS enabled for mobile clients
+No passwords, bank details, VAT numbers, or internal data are ever returned
