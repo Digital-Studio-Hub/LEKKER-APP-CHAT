@@ -14,8 +14,11 @@
       "backgroundColor": "#0D0D0D"
     },
     "ios": {
-      "supportsTablet": false,
-      "bundleIdentifier": "com.lekker.chat"
+      "supportsTablet": true,
+      "bundleIdentifier": "com.lekker.chat",
+      "infoPlist": {
+        "UIRequiresFullScreen": false
+      }
     },
     "android": {
       "package": "com.lekker.chat",

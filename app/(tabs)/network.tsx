@@ -16,6 +16,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
+import { fontScale } from "@/lib/responsive";
 import { getApiUrl } from "@/lib/query-client";
 import { storage } from "@/lib/storage";
 import { useAuth } from "@/lib/auth-context";
@@ -653,7 +654,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontFamily: "Poppins_700Bold",
-    fontSize: 28,
+    fontSize: fontScale(28),
     color: Colors.text,
   },
   tabBar: {

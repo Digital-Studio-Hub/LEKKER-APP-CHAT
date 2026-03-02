@@ -93,6 +93,19 @@ A business messaging app for Lekker Network - connecting Lekkerpreneurs with the
 - React Query: retry 2 with exponential backoff (1s, 2s, 4s max 10s)
 - Directory network tab: 15s fetch timeout with 2 auto-retries on failure
 
+## Device Compatibility & Responsive Design
+- Expo SDK 54 minimum: iOS 15.1+, Android 6.0+ (Marshmallow)
+- `lib/responsive.ts` - Responsive scaling utilities based on 375pt reference width
+  - Exports: `scale`, `moderateScale`, `fontScale`, `isSmallScreen` (<360pt), `isMediumScreen`, `isLargeScreen`, `responsivePadding`, `responsiveAvatarSize`, `responsiveMaxBubbleWidth`, `screenWidth`, `screenHeight`
+- Applied across all screens: login, chats list, chat detail, cledwyn AI, network/directory, feed, settings, profile
+- Minimum touch targets: 44×44pt on all interactive elements
+- Font scaling via `fontScale()` for readability on small screens
+- Chat bubble max width adapts to screen size via `responsiveMaxBubbleWidth()`
+- Image attachments scale down on small screens (160×160 vs 200×200)
+- Accessibility: `accessibilityLabel`, `accessibilityHint`, `accessibilityRole`, `testID` on key form inputs and buttons
+- Web platform insets: 67px top, 34px bottom (handled in each screen)
+- `supportsTablet: true` in app.json
+
 ## Colors
 - Primary: #F5B800 (Lekker Yellow)
 - Background: #0D0D0D (Near Black)

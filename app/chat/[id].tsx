@@ -22,6 +22,7 @@ import Colors from "@/constants/colors";
 import { useAuth } from "@/lib/auth-context";
 import { storage, Conversation, ChatMessage, MessageStatus, PollOption } from "@/lib/storage";
 import { fetchDirectoryCached } from "@/lib/query-client";
+import { isSmallScreen, fontScale, responsivePadding } from "@/lib/responsive";
 import {
   pickImage,
   takePhoto,
@@ -109,7 +110,7 @@ function VoiceNotePlayer({ uri, duration, isMe }: { uri: string; duration?: numb
 }
 
 const vnStyles = StyleSheet.create({
-  container: { flexDirection: "row", alignItems: "center", gap: 8, minWidth: 160 },
+  container: { flexDirection: "row", alignItems: "center", gap: 8, minWidth: isSmallScreen ? 120 : 160 },
   playBtn: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center" },
   progressTrack: { flex: 1, height: 4, backgroundColor: "rgba(255,255,255,0.2)", borderRadius: 2, overflow: "hidden" },
   progressFill: { height: 4, borderRadius: 2 },
@@ -199,7 +200,7 @@ function MessageBubbleInner({
             {message.imageUri && (
               <Image
                 source={{ uri: message.imageUri }}
-                style={{ width: 200, height: 200, borderRadius: 12, marginBottom: 4 }}
+                style={{ width: isSmallScreen ? 160 : 200, height: isSmallScreen ? 160 : 200, borderRadius: 12, marginBottom: 4 }}
                 resizeMode="cover"
               />
             )}
@@ -334,18 +335,18 @@ function MessageBubbleInner({
 const MessageBubble = React.memo(MessageBubbleInner);
 
 const bubbleStyles = StyleSheet.create({
-  wrapper: { paddingHorizontal: 16, paddingVertical: 2 },
+  wrapper: { paddingHorizontal: isSmallScreen ? 10 : 16, paddingVertical: 2 },
   meWrapper: { alignItems: "flex-end" },
   themWrapper: { alignItems: "flex-start" },
-  bubble: { maxWidth: "78%", borderRadius: 18, paddingHorizontal: 14, paddingVertical: 8 },
+  bubble: { maxWidth: isSmallScreen ? "85%" : "78%", borderRadius: 18, paddingHorizontal: isSmallScreen ? 10 : 14, paddingVertical: 8 },
   meBubble: { backgroundColor: Colors.primary, borderBottomRightRadius: 4 },
   themBubble: { backgroundColor: Colors.card, borderBottomLeftRadius: 4 },
-  senderName: { fontFamily: "Poppins_600SemiBold", fontSize: 12, color: Colors.primary, marginBottom: 2 },
-  text: { fontFamily: "Poppins_400Regular", fontSize: 15, lineHeight: 22 },
+  senderName: { fontFamily: "Poppins_600SemiBold", fontSize: fontScale(12), color: Colors.primary, marginBottom: 2 },
+  text: { fontFamily: "Poppins_400Regular", fontSize: fontScale(15), lineHeight: fontScale(22) },
   meText: { color: Colors.background },
   themText: { color: Colors.text },
   metaRow: { flexDirection: "row", alignItems: "center", gap: 4, alignSelf: "flex-end", marginTop: 2 },
-  time: { fontFamily: "Poppins_400Regular", fontSize: 10 },
+  time: { fontFamily: "Poppins_400Regular", fontSize: fontScale(10) },
   meTime: { color: "rgba(0,0,0,0.4)" },
   themTime: { color: Colors.textMuted },
 });
@@ -837,8 +838,8 @@ const styles = StyleSheet.create({
     borderBottomWidth: 0.5,
     borderBottomColor: Colors.border,
   },
-  backButton: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
-  headerCenter: { flexDirection: "row", alignItems: "center", gap: 10, flex: 1, justifyContent: "center" },
+  backButton: { width: 44, height: 44, minWidth: 44, minHeight: 44, alignItems: "center", justifyContent: "center" },
+  headerCenter: { flexDirection: "row", alignItems: "center", gap: isSmallScreen ? 6 : 10, flex: 1, justifyContent: "center" },
   avatar: {
     width: 36,
     height: 36,
@@ -847,8 +848,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   avatarText: { fontFamily: "Poppins_600SemiBold", fontSize: 13, color: "#fff" },
-  headerName: { fontFamily: "Poppins_600SemiBold", fontSize: 17, color: Colors.text },
-  headerMembers: { fontFamily: "Poppins_400Regular", fontSize: 11, color: Colors.textMuted, maxWidth: 200 },
+  headerName: { fontFamily: "Poppins_600SemiBold", fontSize: fontScale(17), color: Colors.text },
+  headerMembers: { fontFamily: "Poppins_400Regular", fontSize: fontScale(11), color: Colors.textMuted, maxWidth: isSmallScreen ? 150 : 200 },
   messageList: { paddingVertical: 8 },
   emptyListContent: { flexGrow: 1, justifyContent: "center" },
   attachMenu: {
@@ -892,8 +893,10 @@ const styles = StyleSheet.create({
     borderTopColor: Colors.border,
   },
   attachButton: {
-    width: 40,
-    height: 40,
+    width: 44,
+    height: 44,
+    minWidth: 44,
+    minHeight: 44,
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 2,
@@ -902,20 +905,23 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.inputBackground,
     borderRadius: 22,
-    paddingHorizontal: 18,
+    paddingHorizontal: isSmallScreen ? 14 : 18,
     paddingTop: 12,
     paddingBottom: 12,
-    fontSize: 15,
+    fontSize: fontScale(15),
     color: Colors.text,
     fontFamily: "Poppins_400Regular",
     maxHeight: 120,
+    minHeight: 44,
     borderWidth: 1,
     borderColor: Colors.border,
   },
   sendButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    minWidth: 44,
+    minHeight: 44,
+    borderRadius: 22,
     backgroundColor: Colors.primary,
     alignItems: "center",
     justifyContent: "center",

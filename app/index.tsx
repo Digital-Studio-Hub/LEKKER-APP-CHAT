@@ -14,6 +14,7 @@ import { useAuth } from "@/lib/auth-context";
 import { Image } from "expo-image";
 import Colors from "@/constants/colors";
 import * as Haptics from "expo-haptics";
+import { isSmallScreen, responsivePadding, fontScale } from "@/lib/responsive";
 
 const lekkerLogo = require("../assets/images/lekker-logo.png");
 
@@ -96,6 +97,9 @@ export default function LoginScreen() {
               onChangeText={setPhoneNumber}
               keyboardType="phone-pad"
               autoFocus
+              accessibilityLabel="Phone number"
+              accessibilityHint="Enter your South African phone number"
+              testID="phone-input"
             />
           </>
         ) : (
@@ -106,6 +110,9 @@ export default function LoginScreen() {
               style={styles.input}
               placeholder="Your name"
               placeholderTextColor={Colors.textMuted}
+              accessibilityLabel="Display name"
+              accessibilityHint="Enter what you want to be called"
+              testID="name-input"
               value={displayName}
               onChangeText={setDisplayName}
               autoCapitalize="words"
@@ -126,6 +133,9 @@ export default function LoginScreen() {
               ? phoneNumber.length < 6
               : displayName.trim().length < 2)
           }
+          accessibilityRole="button"
+          accessibilityLabel={step === "phone" ? "Continue" : "Get Started"}
+          testID="submit-button"
         >
           {isSubmitting ? (
             <ActivityIndicator color={Colors.background} />
@@ -156,26 +166,26 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
     alignItems: "center",
     justifyContent: "flex-start",
-    paddingHorizontal: 32,
+    paddingHorizontal: isSmallScreen ? 20 : 32,
   },
   logoContainer: {
     alignItems: "center",
-    marginBottom: 48,
+    marginBottom: isSmallScreen ? 32 : 48,
   },
   logo: {
-    width: 200,
-    height: 80,
+    width: isSmallScreen ? 160 : 200,
+    height: isSmallScreen ? 64 : 80,
     marginBottom: 12,
   },
   appName: {
     fontFamily: "Poppins_700Bold",
-    fontSize: 28,
+    fontSize: fontScale(28),
     color: Colors.text,
     marginBottom: 4,
   },
   tagline: {
     fontFamily: "Poppins_400Regular",
-    fontSize: 14,
+    fontSize: fontScale(14),
     color: Colors.primary,
   },
   formContainer: {
@@ -184,27 +194,30 @@ const styles = StyleSheet.create({
   },
   label: {
     fontFamily: "Poppins_500Medium",
-    fontSize: 16,
+    fontSize: fontScale(16),
     color: Colors.text,
     marginBottom: 12,
   },
   input: {
     backgroundColor: Colors.inputBackground,
     borderRadius: 14,
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    fontSize: 18,
+    paddingHorizontal: isSmallScreen ? 16 : 20,
+    paddingVertical: isSmallScreen ? 14 : 16,
+    fontSize: fontScale(18),
     color: Colors.text,
     fontFamily: "Poppins_400Regular",
     marginBottom: 20,
     borderWidth: 1,
     borderColor: Colors.border,
+    minHeight: 48,
   },
   button: {
     backgroundColor: Colors.primary,
     borderRadius: 14,
-    paddingVertical: 16,
+    paddingVertical: isSmallScreen ? 14 : 16,
     alignItems: "center" as const,
+    minHeight: 48,
+    justifyContent: "center" as const,
   },
   buttonPressed: {
     opacity: 0.8,
@@ -215,24 +228,26 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     fontFamily: "Poppins_600SemiBold",
-    fontSize: 16,
+    fontSize: fontScale(16),
     color: Colors.background,
   },
   backLink: {
     alignItems: "center" as const,
     marginTop: 16,
     padding: 8,
+    minHeight: 44,
+    justifyContent: "center" as const,
   },
   backLinkText: {
     fontFamily: "Poppins_400Regular",
-    fontSize: 14,
+    fontSize: fontScale(14),
     color: Colors.primary,
   },
   footer: {
     position: "absolute" as const,
     bottom: 40,
     fontFamily: "Poppins_400Regular",
-    fontSize: 12,
+    fontSize: fontScale(12),
     color: Colors.textMuted,
   },
 });

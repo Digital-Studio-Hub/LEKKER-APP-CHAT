@@ -15,6 +15,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { fetch } from "expo/fetch";
 import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
+import { isSmallScreen, fontScale, responsiveMaxBubbleWidth } from "@/lib/responsive";
 import { getApiUrl } from "@/lib/query-client";
 import { storage, CledwynMessage } from "@/lib/storage";
 import { useAuth } from "@/lib/auth-context";
@@ -84,10 +85,10 @@ const bubbleStyles = StyleSheet.create({
     justifyContent: "center",
     alignSelf: "flex-end",
   },
-  bubble: { maxWidth: "75%", borderRadius: 18, paddingHorizontal: 16, paddingVertical: 10 },
+  bubble: { maxWidth: responsiveMaxBubbleWidth(), borderRadius: 18, paddingHorizontal: isSmallScreen ? 12 : 16, paddingVertical: 10 },
   userBubble: { backgroundColor: Colors.primary, borderBottomRightRadius: 4 },
   assistantBubble: { backgroundColor: Colors.card, borderBottomLeftRadius: 4 },
-  text: { fontFamily: "Poppins_400Regular", fontSize: 15, lineHeight: 22 },
+  text: { fontFamily: "Poppins_400Regular", fontSize: fontScale(15), lineHeight: fontScale(22) },
   userText: { color: Colors.background },
   assistantText: { color: Colors.text },
 });
@@ -337,12 +338,12 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontFamily: "Poppins_600SemiBold",
-    fontSize: 18,
+    fontSize: fontScale(18),
     color: Colors.text,
   },
   headerSubtitle: {
     fontFamily: "Poppins_400Regular",
-    fontSize: 12,
+    fontSize: fontScale(12),
     color: Colors.textSecondary,
   },
   clearButton: {
@@ -371,20 +372,23 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.inputBackground,
     borderRadius: 22,
-    paddingHorizontal: 18,
+    paddingHorizontal: isSmallScreen ? 14 : 18,
     paddingTop: 12,
     paddingBottom: 12,
-    fontSize: 15,
+    fontSize: fontScale(15),
     color: Colors.text,
     fontFamily: "Poppins_400Regular",
     maxHeight: 120,
+    minHeight: 44,
     borderWidth: 1,
     borderColor: Colors.border,
   },
   sendButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    minWidth: 44,
+    minHeight: 44,
+    borderRadius: 22,
     backgroundColor: Colors.primary,
     alignItems: "center",
     justifyContent: "center",
@@ -410,13 +414,13 @@ const styles = StyleSheet.create({
   },
   emptyTitle: {
     fontFamily: "Poppins_700Bold",
-    fontSize: 24,
+    fontSize: fontScale(24),
     color: Colors.primary,
     marginBottom: 8,
   },
   emptySubtitle: {
     fontFamily: "Poppins_400Regular",
-    fontSize: 14,
+    fontSize: fontScale(14),
     color: Colors.textSecondary,
     textAlign: "center",
     lineHeight: 22,

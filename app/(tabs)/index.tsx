@@ -18,6 +18,7 @@ import Colors from "@/constants/colors";
 import { useAuth } from "@/lib/auth-context";
 import { storage, Conversation, BlockedUser } from "@/lib/storage";
 import { fetchDirectoryCached } from "@/lib/query-client";
+import { isSmallScreen, fontScale, responsivePadding, responsiveAvatarSize } from "@/lib/responsive";
 
 function Avatar({ name, color, size = 50, photo, isGroup }: { name: string; color: string; size?: number; photo?: string; isGroup?: boolean }) {
   if (photo) {
@@ -338,12 +339,12 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingHorizontal: 20,
+    paddingHorizontal: responsivePadding(),
     paddingVertical: 12,
   },
   headerTitle: {
     fontFamily: "Poppins_700Bold",
-    fontSize: 28,
+    fontSize: fontScale(28),
     color: Colors.text,
   },
   headerActions: {
@@ -355,23 +356,26 @@ const styles = StyleSheet.create({
     height: 44,
     alignItems: "center",
     justifyContent: "center",
+    minWidth: 44,
+    minHeight: 44,
   },
   searchContainer: {
     flexDirection: "row",
     alignItems: "center",
-    marginHorizontal: 16,
+    marginHorizontal: isSmallScreen ? 12 : 16,
     marginBottom: 8,
     backgroundColor: Colors.inputBackground,
     borderRadius: 12,
     paddingHorizontal: 12,
     height: 40,
+    minHeight: 40,
     gap: 8,
     borderWidth: 1,
     borderColor: Colors.border,
   },
   searchInput: {
     flex: 1,
-    fontSize: 15,
+    fontSize: fontScale(15),
     color: Colors.text,
     fontFamily: "Poppins_400Regular",
     paddingVertical: 0,
@@ -380,7 +384,7 @@ const styles = StyleSheet.create({
     padding: 2,
   },
   listContent: {
-    paddingHorizontal: 16,
+    paddingHorizontal: isSmallScreen ? 12 : 16,
   },
   chatItem: {
     flexDirection: "row",
@@ -389,7 +393,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
     borderBottomWidth: 0.5,
     borderBottomColor: Colors.border,
-    gap: 14,
+    gap: isSmallScreen ? 10 : 14,
+    minHeight: 64,
   },
   chatItemPressed: {
     backgroundColor: Colors.card,
@@ -421,7 +426,7 @@ const styles = StyleSheet.create({
   },
   chatName: {
     fontFamily: "Poppins_600SemiBold",
-    fontSize: 16,
+    fontSize: fontScale(16),
     color: Colors.text,
     flexShrink: 1,
   },
@@ -430,7 +435,7 @@ const styles = StyleSheet.create({
   },
   chatTime: {
     fontFamily: "Poppins_400Regular",
-    fontSize: 12,
+    fontSize: fontScale(12),
     color: Colors.textMuted,
   },
   chatBottomRow: {
@@ -447,7 +452,7 @@ const styles = StyleSheet.create({
   },
   chatLastMessage: {
     fontFamily: "Poppins_400Regular",
-    fontSize: 14,
+    fontSize: fontScale(14),
     color: Colors.textSecondary,
     flex: 1,
   },

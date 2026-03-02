@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
+import { fontScale } from "@/lib/responsive";
 import { useAuth } from "@/lib/auth-context";
 import { requestNotificationPermissions, areNotificationsEnabled, disableNotifications, canAskForNotifications } from "@/lib/notifications";
 import { requestLocationPermissions, isLocationEnabled, getLastLocation, disableLocation, UserLocation } from "@/lib/location";
@@ -482,7 +483,7 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   backButton: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
-  headerTitle: { fontFamily: "Poppins_600SemiBold", fontSize: 18, color: Colors.text },
+  headerTitle: { fontFamily: "Poppins_600SemiBold", fontSize: fontScale(18), color: Colors.text },
   content: { padding: 16, paddingBottom: 40 },
   profileCard: {
     flexDirection: "row",
@@ -500,9 +501,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  profileAvatarText: { fontFamily: "Poppins_700Bold", fontSize: 20, color: "#fff" },
+  profileAvatarText: { fontFamily: "Poppins_700Bold", fontSize: fontScale(20), color: "#fff" },
   profileInfo: { flex: 1 },
-  profileName: { fontFamily: "Poppins_600SemiBold", fontSize: 18, color: Colors.text },
+  profileName: { fontFamily: "Poppins_600SemiBold", fontSize: fontScale(18), color: Colors.text },
   profileStatus: { fontFamily: "Poppins_400Regular", fontSize: 13, color: Colors.textSecondary, marginTop: 2 },
   section: { marginBottom: 24 },
   sectionTitle: {

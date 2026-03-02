@@ -17,6 +17,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import Colors from "@/constants/colors";
+import { fontScale } from "@/lib/responsive";
 import { useAuth } from "@/lib/auth-context";
 import { storage, FeedPost } from "@/lib/storage";
 
@@ -291,7 +292,7 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: Colors.background,
   },
-  name: { fontFamily: "Poppins_700Bold", fontSize: 24, color: Colors.text, marginBottom: 4 },
+  name: { fontFamily: "Poppins_700Bold", fontSize: fontScale(24), color: Colors.text, marginBottom: 4 },
   phone: { fontFamily: "Poppins_400Regular", fontSize: 14, color: Colors.textMuted, marginBottom: 8 },
   status: { fontFamily: "Poppins_400Regular", fontSize: 14, color: Colors.textSecondary, fontStyle: "italic" as const },
   editRow: {

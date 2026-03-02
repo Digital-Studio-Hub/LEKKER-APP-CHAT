@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
+import { fontScale } from "@/lib/responsive";
 import { useAuth } from "@/lib/auth-context";
 import { storage, FeedPost } from "@/lib/storage";
 
@@ -311,7 +312,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 12,
   },
-  headerTitle: { fontFamily: "Poppins_700Bold", fontSize: 28, color: Colors.text },
+  headerTitle: { fontFamily: "Poppins_700Bold", fontSize: fontScale(28), color: Colors.text },
   newPostButton: {
     width: 40,
     height: 40,
