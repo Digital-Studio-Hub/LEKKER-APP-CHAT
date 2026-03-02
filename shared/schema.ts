@@ -31,6 +31,7 @@ export const users = pgTable("users", {
   lastLongitude: text("last_longitude"),
   locationCity: varchar("location_city", { length: 100 }),
   locationRegion: varchar("location_region", { length: 100 }),
+  profileImageUpdatedAt: timestamp("profile_image_updated_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -71,6 +72,7 @@ export const loginSchema = z.object({
 export const updateProfileSchema = z.object({
   firstName: z.string().min(1).max(100).optional(),
   lastName: z.string().min(1).max(100).optional(),
+  username: z.string().min(3).max(50).regex(/^[a-zA-Z0-9_]+$/, "Letters, numbers, and underscores only").optional(),
   bio: z.string().max(500).optional(),
   businessName: z.string().max(255).optional(),
   status: z.string().max(200).optional(),

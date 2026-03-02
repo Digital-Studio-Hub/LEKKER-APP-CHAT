@@ -12,6 +12,8 @@ import {
   optionalAuthMiddleware,
   type AuthenticatedRequest,
 } from "./auth";
+import { ObjectStorageService, ObjectNotFoundError } from "./objectStorage";
+import { ObjectPermission } from "./objectAcl";
 
 const openrouter = new OpenAI({
   baseURL: process.env.AI_INTEGRATIONS_OPENROUTER_BASE_URL,
@@ -191,6 +193,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Invalid profile data" });
       }
 
+      if (parsed.data.username) {
+        const existing = await storage.getUserByUsername(parsed.data.username.toLowerCase());
+        if (existing && existing.id !== req.user!.userId) {
+          return res.status(409).json({ message: "Username is already taken" });
+        }
+        parsed.data.username = parsed.data.username.toLowerCase();
+      }
+
       const user = await storage.updateUser(req.user!.userId, parsed.data);
       if (!user) {
         return res.status(404).json({ message: "User not found" });
@@ -206,6 +216,120 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/auth/logout", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     await storage.logAuthEvent("logout", req.user!.userId, req.ip, req.headers["user-agent"]?.toString());
     res.json({ message: "Logged out successfully" });
+  });
+
+  const uploadLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { message: "Too many upload attempts. Please try again later." },
+    validate: { xForwardedForHeader: false },
+  });
+
+  app.post("/api/objects/upload", authMiddleware, uploadLimiter, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const objectStorageService = new ObjectStorageService();
+      const uploadURL = await objectStorageService.getObjectEntityUploadURL();
+      res.json({ uploadURL });
+    } catch (error) {
+      console.error("Upload URL generation error:", error);
+      res.status(500).json({ message: "Failed to generate upload URL" });
+    }
+  });
+
+  app.post("/api/user/profile-image", authMiddleware, uploadLimiter, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { imageURL } = req.body;
+      if (!imageURL || typeof imageURL !== "string") {
+        return res.status(400).json({ message: "imageURL is required" });
+      }
+
+      if (!imageURL.startsWith("https://") && !imageURL.startsWith("http://")) {
+        return res.status(400).json({ message: "Invalid image URL" });
+      }
+
+      const objectStorageService = new ObjectStorageService();
+      const objectPath = await objectStorageService.trySetObjectEntityAclPolicy(
+        imageURL,
+        {
+          owner: req.user!.userId,
+          visibility: "public",
+        },
+      );
+
+      const user = await storage.updateUser(req.user!.userId, {
+        profilePhoto: objectPath,
+        profileImageUpdatedAt: new Date(),
+      });
+
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      await storage.logAuthEvent("profile_image_update", req.user!.userId, req.ip, req.headers["user-agent"]?.toString());
+
+      res.json({ user: sanitizeUser(user) });
+    } catch (error) {
+      console.error("Profile image update error:", error);
+      res.status(500).json({ message: "Failed to update profile image" });
+    }
+  });
+
+  app.delete("/api/user/profile-image", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const user = await storage.updateUser(req.user!.userId, {
+        profilePhoto: null,
+        profileImageUpdatedAt: new Date(),
+      });
+
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      await storage.logAuthEvent("profile_image_delete", req.user!.userId, req.ip, req.headers["user-agent"]?.toString());
+
+      res.json({ user: sanitizeUser(user) });
+    } catch (error) {
+      console.error("Profile image delete error:", error);
+      res.status(500).json({ message: "Failed to remove profile image" });
+    }
+  });
+
+  app.get("/objects/*objectPath", async (req: Request, res: Response) => {
+    const objectStorageService = new ObjectStorageService();
+    try {
+      const objectFile = await objectStorageService.getObjectEntityFile(req.path);
+      const canAccess = await objectStorageService.canAccessObjectEntity({
+        objectFile,
+        requestedPermission: ObjectPermission.READ,
+      });
+      if (!canAccess) {
+        return res.sendStatus(401);
+      }
+      objectStorageService.downloadObject(objectFile, res);
+    } catch (error) {
+      if (error instanceof ObjectNotFoundError) {
+        return res.sendStatus(404);
+      }
+      console.error("Object access error:", error);
+      return res.sendStatus(500);
+    }
+  });
+
+  app.get("/public-objects/*filePath", async (req: Request, res: Response) => {
+    const filePath = req.params.filePath;
+    const objectStorageService = new ObjectStorageService();
+    try {
+      const file = await objectStorageService.searchPublicObject(filePath);
+      if (!file) {
+        return res.status(404).json({ error: "File not found" });
+      }
+      objectStorageService.downloadObject(file, res);
+    } catch (error) {
+      console.error("Public object error:", error);
+      return res.status(500).json({ error: "Internal server error" });
+    }
   });
 
   app.get("/api/directory", (req: Request, res: Response) => {

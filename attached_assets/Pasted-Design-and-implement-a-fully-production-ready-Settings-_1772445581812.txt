@@ -1,0 +1,208 @@
+Design and implement a fully production-ready Settings Module that becomes accessible immediately after a user successfully completes registration and authentication.
+
+The Settings module must allow the authenticated user to configure and manage their profile, including securely uploading and managing a profile picture.
+
+1. Access & Security
+
+Settings must only be accessible to authenticated users with a valid access token.
+
+Enforce server-side authorization to ensure users can only modify their own profile.
+
+All profile update endpoints must require authentication middleware.
+
+Implement proper token validation and expiration handling.
+
+2. Settings Module Functional Scope
+Profile Management
+
+Allow users to:
+
+View their profile details
+
+Edit first name
+
+Edit last name
+
+Edit username (must remain unique)
+
+Update email (requires re-verification)
+
+Update phone number (requires OTP verification)
+
+All input fields must:
+
+Be validated client-side and server-side
+
+Enforce uniqueness where applicable
+
+Prevent injection or malformed input
+
+3. Profile Image Upload Feature
+
+Users must be able to:
+
+Upload a profile image
+
+Replace an existing profile image
+
+Preview image before saving
+
+Remove their profile image (optional)
+
+See upload progress indicator
+
+File Requirements
+
+Supported formats: JPEG, PNG, WebP
+
+Maximum file size: 5MB
+
+Images must be automatically:
+
+Resized to standardized dimensions (e.g., 256x256 and 512x512)
+
+Cropped to square format
+
+Compressed for optimization
+
+Stripped of metadata (EXIF removal)
+
+4. Mobile Platform Requirements
+iOS
+
+Use native image picker APIs.
+
+Respect system permission handling.
+
+Ensure proper safe-area layout and responsiveness.
+
+Android
+
+Use modern media picker APIs.
+
+Handle runtime permissions.
+
+Ensure compatibility with scoped storage policies.
+
+Cross-Platform
+
+Ensure consistent UI rendering across screen sizes.
+
+Maintain correct bottom padding so content is not obstructed by bottom navigation.
+
+Support portrait and landscape orientations.
+
+Ensure smooth performance on mid-range devices (2016 baseline compatibility).
+
+5. Backend Architecture
+API Endpoints
+
+Implement:
+
+GET /api/user/profile
+
+PUT /api/user/profile
+
+POST /api/user/profile-image
+
+DELETE /api/user/profile-image
+
+Storage Requirements
+
+Store images in secure object storage (private bucket).
+
+Store only the image URL and thumbnail URL in the database.
+
+Use signed URLs for secure access.
+
+Prevent public directory listing.
+
+Database Schema Updates
+
+Add:
+
+profile_image_url
+
+profile_image_thumbnail_url
+
+profile_image_updated_at
+
+6. Security Requirements
+
+Validate MIME type server-side.
+
+Reject executable or malicious files.
+
+Enforce rate limiting on upload endpoint.
+
+Use HTTPS exclusively.
+
+Log profile update actions for audit purposes.
+
+Follow OWASP mobile security best practices.
+
+Ensure POPIA compliance for personal data storage.
+
+7. Performance Optimization
+
+Use CDN for image delivery.
+
+Implement lazy loading for profile images.
+
+Avoid blocking UI thread during upload.
+
+Handle poor network conditions gracefully.
+
+8. Error Handling
+
+Handle and return controlled responses for:
+
+Invalid file type
+
+File too large
+
+Upload interruption
+
+Unauthorized request
+
+Expired token
+
+Storage failure
+
+Do not expose internal system details in error responses.
+
+9. Testing Requirements
+
+Validate:
+
+Successful upload and retrieval
+
+Replacement of profile image
+
+Deletion of profile image
+
+Upload under slow network
+
+Token expiration during upload
+
+Rendering across different screen densities
+
+Behavior on both iOS and Android devices (including 2016 models)
+
+10. Definition of Done
+
+The feature is considered production-ready when:
+
+Authentication is enforced
+
+Image uploads are secure and validated
+
+Storage is private and scalable
+
+UI is responsive and unobstructed
+
+Performance is stable on mid-range devices
+
+Security testing is completed
+
+All flows are fully tested across both platforms

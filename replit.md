@@ -21,7 +21,7 @@ A business messaging app for Lekker Network - connecting Lekkerpreneurs with the
   - `network.tsx` - Directory + WebView (toggle between Directory and Browse)
   - `feed.tsx` - Social feed with 24h rolling posts
 - `app/chat/[id].tsx` - Individual/group chat conversation with sent/delivered/seen receipts
-- `app/settings.tsx` - Settings (presence, privacy, auto-reply)
+- `app/settings.tsx` - Settings (profile photo upload, editable fields, presence, privacy, auto-reply)
 - `app/profile.tsx` - Own profile with posts
 - `app/user-profile/[id].tsx` - View another user's profile (name, bio, business info, posts)
 - `app/new-chat.tsx` - Create new conversation (contacts integration + directory matching)
@@ -36,6 +36,7 @@ A business messaging app for Lekker Network - connecting Lekkerpreneurs with the
 - `lib/notifications.ts` - Push notification service (expo-notifications)
 - `lib/location.ts` - Location services (expo-location)
 - `lib/chat-attachments.ts` - Chat attachment utilities (image, camera, file, voicenote, location, poll, contact)
+- `client/utils/objectStorageExpo.ts` - Presigned URL upload utility for Replit Object Storage
 
 ### Backend (Express)
 - `server/routes.ts` - API endpoints:
@@ -44,11 +45,17 @@ A business messaging app for Lekker Network - connecting Lekkerpreneurs with the
   - `/api/auth/me` - Get current user profile (protected)
   - `/api/auth/profile` - Update user profile (protected)
   - `/api/auth/logout` - Logout with audit logging (protected)
+  - `/api/objects/upload` - Get presigned upload URL (protected, rate-limited)
+  - `/api/user/profile-image` - Set/remove profile image via object storage (protected, rate-limited)
+  - `/objects/*` - Serve objects from storage (public ACL checked)
+  - `/public-objects/*` - Serve public objects from storage
   - `/api/cledwyn/chat` - CledwynAI streaming chat
   - `/api/directory` - Lekkerpreneur directory with filters (serviceType, province, search)
   - `/api/directory/:id` - Single directory entry
 - `server/auth.ts` - JWT + bcrypt auth utilities, authMiddleware
 - `server/storage.ts` - PostgreSQL storage via Drizzle ORM (PgStorage class)
+- `server/objectStorage.ts` - Object Storage service (upload URLs, ACL, file serving)
+- `server/objectAcl.ts` - Object ACL management (owner, visibility policies)
 - `server/index.ts` - Express server setup
 - Port 5000
 
@@ -138,6 +145,9 @@ A business messaging app for Lekker Network - connecting Lekkerpreneurs with the
 - `DATABASE_URL` - PostgreSQL connection string (auto-provisioned by Replit)
 - `AI_INTEGRATIONS_OPENROUTER_BASE_URL` - OpenRouter API base URL
 - `AI_INTEGRATIONS_OPENROUTER_API_KEY` - OpenRouter API key
+- `DEFAULT_OBJECT_STORAGE_BUCKET_ID` - Replit Object Storage bucket ID (auto-provisioned)
+- `PUBLIC_OBJECT_SEARCH_PATHS` - Public object search paths (auto-provisioned)
+- `PRIVATE_OBJECT_DIR` - Private object directory (auto-provisioned)
 
 ## Colors
 - Primary: #F5B800 (Lekker Yellow)
