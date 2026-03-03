@@ -529,6 +529,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/users/:userId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { userId } = req.params;
+      const result = await db.select({
+        id: users.id,
+        firstName: users.firstName,
+        lastName: users.lastName,
+        username: users.username,
+        avatarColor: users.avatarColor,
+        profilePhoto: users.profilePhoto,
+        isVerifiedLekkerpreneur: users.isVerifiedLekkerpreneur,
+        businessName: users.businessName,
+        presence: users.presence,
+        bio: users.bio,
+        phone: users.phone,
+        createdAt: users.createdAt,
+      }).from(users).where(eq(users.id, userId)).limit(1);
+
+      if (result.length === 0) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      res.json({ user: result[0] });
+    } catch (error) {
+      console.error("Get user error:", error);
+      res.status(500).json({ message: "Failed to get user" });
+    }
+  });
+
   const uploadLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 20,

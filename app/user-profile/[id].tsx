@@ -15,6 +15,7 @@ import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { storage, FeedPost } from "@/lib/storage";
 import { fetchDirectoryCached } from "@/lib/query-client";
+import { fetchUserProfile, getPresenceColor, getPresenceLabel } from "@/lib/chat-api";
 
 interface UserInfo {
   name: string;
@@ -28,6 +29,7 @@ interface UserInfo {
   isLekkerpreneur: boolean;
   isVerified?: boolean;
   memberSince?: string;
+  presence?: string | null;
 }
 
 function formatTimeAgo(dateStr: string): string {
@@ -68,31 +70,37 @@ export default function UserProfileScreen() {
     };
 
     try {
-      const data = await fetchDirectoryCached();
-      const entry = data.entries.find((e: any) => e.id === id || e.phone === id);
-      if (entry) {
+      const profile = await fetchUserProfile(id || "");
+      if (profile) {
+        const fullName = `${profile.firstName} ${profile.lastName}`.trim() || profile.username;
         info = {
-          name: entry.name,
-          phone: entry.phone,
-          avatarColor: entry.avatarColor || info.avatarColor,
-          businessName: entry.businessName,
-          serviceType: entry.serviceType,
-          location: entry.location,
-          province: entry.province,
-          bio: entry.bio,
-          isLekkerpreneur: true,
-          isVerified: entry.isVerified ?? false,
-          memberSince: entry.memberSince,
+          ...info,
+          name: fullName,
+          phone: profile.phone || info.phone,
+          avatarColor: profile.avatarColor || info.avatarColor,
+          businessName: profile.businessName || undefined,
+          bio: profile.bio || undefined,
+          isVerified: profile.isVerifiedLekkerpreneur,
+          isLekkerpreneur: profile.isVerifiedLekkerpreneur,
+          presence: profile.presence,
+          memberSince: profile.createdAt,
         };
       }
     } catch {}
 
-    const convs = await storage.getConversations();
-    const conv = convs.find((c) => c.contactId === id);
-    if (conv && !info.isLekkerpreneur) {
-      info.name = conv.contactName;
-      info.avatarColor = conv.contactAvatarColor;
-    }
+    try {
+      const data = await fetchDirectoryCached();
+      const entry = data.entries.find((e: any) => e.id === id || e.phone === id);
+      if (entry) {
+        info = {
+          ...info,
+          serviceType: entry.serviceType,
+          location: entry.location,
+          province: entry.province,
+          isLekkerpreneur: true,
+        };
+      }
+    } catch {}
 
     setUserInfo(info);
     setLoading(false);
@@ -163,6 +171,13 @@ export default function UserProfileScreen() {
               {userInfo?.isLekkerpreneur && (
                 <Ionicons name="checkmark-circle" size={20} color={Colors.primary} />
               )}
+            </View>
+
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 }}>
+              <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: getPresenceColor(userInfo?.presence) }} />
+              <Text style={{ fontFamily: "Poppins_400Regular", fontSize: 14, color: getPresenceColor(userInfo?.presence) }}>
+                {getPresenceLabel(userInfo?.presence)}
+              </Text>
             </View>
 
             {userInfo?.businessName && (

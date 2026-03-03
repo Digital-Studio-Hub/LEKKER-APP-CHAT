@@ -410,9 +410,21 @@ export default function SettingsScreen() {
           <View style={styles.sectionCard}>
             {renderEditableField("First Name", "firstName", editFirstName, setEditFirstName)}
             {renderEditableField("Last Name", "lastName", editLastName, setEditLastName)}
-            {renderEditableField("Username", "username", editUsername, setEditUsername)}
+            <View style={styles.editableRow}>
+              <View style={styles.editableHeader}>
+                <Text style={styles.editableLabel}>Username</Text>
+                <Ionicons name="lock-closed" size={14} color={Colors.textMuted} />
+              </View>
+              <Text style={styles.editableValue}>@{user?.username || "Not set"}</Text>
+            </View>
             {renderEditableField("Bio", "bio", editBio, setEditBio, { multiline: true, maxLength: 500 })}
-            {renderEditableField("Business Name", "businessName", editBusinessName, setEditBusinessName, { maxLength: 255 })}
+            <View style={styles.editableRow}>
+              <View style={styles.editableHeader}>
+                <Text style={styles.editableLabel}>Business Name</Text>
+                <Ionicons name="lock-closed" size={14} color={Colors.textMuted} />
+              </View>
+              <Text style={styles.editableValue}>{user?.businessName || "Not set"}</Text>
+            </View>
           </View>
         </View>
 

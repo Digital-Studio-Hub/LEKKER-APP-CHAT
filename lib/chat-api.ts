@@ -197,3 +197,52 @@ export function getChatProfilePhoto(chat: ServerChat, myUserId: string): string 
 export function getOtherParticipant(chat: ServerChat, myUserId: string): ChatParticipant | undefined {
   return chat.participants.find(p => p.id !== myUserId);
 }
+
+export interface UserProfile {
+  id: string;
+  firstName: string;
+  lastName: string;
+  username: string;
+  avatarColor: string | null;
+  profilePhoto: string | null;
+  isVerifiedLekkerpreneur: boolean;
+  businessName: string | null;
+  presence: string | null;
+  bio: string | null;
+  phone: string | null;
+  createdAt: string;
+}
+
+export async function fetchUserProfile(userId: string): Promise<UserProfile | null> {
+  try {
+    const res = await apiRequest("GET", `/api/users/${userId}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.user || null;
+  } catch (e) {
+    console.error("Failed to fetch user profile:", e);
+    return null;
+  }
+}
+
+const PRESENCE_COLORS: Record<string, string> = {
+  online: "#4CD964",
+  away: "#FF9500",
+  dnd: "#FF3B30",
+  offline: "#666666",
+};
+
+const PRESENCE_LABELS: Record<string, string> = {
+  online: "Online",
+  away: "Away",
+  dnd: "Do Not Disturb",
+  offline: "Offline",
+};
+
+export function getPresenceColor(presence: string | null | undefined): string {
+  return PRESENCE_COLORS[presence || "offline"] || PRESENCE_COLORS.offline;
+}
+
+export function getPresenceLabel(presence: string | null | undefined): string {
+  return PRESENCE_LABELS[presence || "offline"] || PRESENCE_LABELS.offline;
+}

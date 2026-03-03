@@ -46,6 +46,8 @@ import {
   getChatProfilePhoto,
   getOtherParticipant,
   getDisplayName,
+  getPresenceColor,
+  getPresenceLabel,
 } from "@/lib/chat-api";
 
 function ReceiptIcon({ status }: { status?: string }) {
@@ -690,6 +692,12 @@ export default function ChatDetailScreen() {
                 <Text style={styles.headerMembers} numberOfLines={1}>
                   {chat.participants.map((p) => p.firstName || p.username).join(", ")}
                 </Text>
+              )}
+              {!isGroup && otherParticipant && (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                  <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: getPresenceColor(otherParticipant.presence) }} />
+                  <Text style={styles.headerMembers}>{getPresenceLabel(otherParticipant.presence)}</Text>
+                </View>
               )}
             </View>
           </Pressable>

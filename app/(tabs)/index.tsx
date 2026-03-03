@@ -24,13 +24,36 @@ import {
   getChatAvatarColor,
   getChatProfilePhoto,
   getOtherParticipant,
+  getPresenceColor,
   type ServerChat,
 } from "@/lib/chat-api";
 import { isSmallScreen, fontScale, responsivePadding, responsiveAvatarSize } from "@/lib/responsive";
 
-function Avatar({ name, color, size = 50, photo, isGroup }: { name: string; color: string; size?: number; photo?: string | null; isGroup?: boolean }) {
+function Avatar({ name, color, size = 50, photo, isGroup, presence }: { name: string; color: string; size?: number; photo?: string | null; isGroup?: boolean; presence?: string | null }) {
+  const dotSize = Math.max(10, size * 0.24);
+  const showDot = !isGroup;
+
+  const dot = showDot ? (
+    <View style={{
+      position: "absolute",
+      bottom: 0,
+      right: 0,
+      width: dotSize,
+      height: dotSize,
+      borderRadius: dotSize / 2,
+      backgroundColor: getPresenceColor(presence),
+      borderWidth: 2,
+      borderColor: Colors.background,
+    }} />
+  ) : null;
+
   if (photo) {
-    return <Image source={{ uri: photo }} style={{ width: size, height: size, borderRadius: size / 2 }} />;
+    return (
+      <View style={{ width: size, height: size }}>
+        <Image source={{ uri: photo }} style={{ width: size, height: size, borderRadius: size / 2 }} />
+        {dot}
+      </View>
+    );
   }
   if (isGroup) {
     return (
@@ -47,8 +70,11 @@ function Avatar({ name, color, size = 50, photo, isGroup }: { name: string; colo
     .toUpperCase();
 
   return (
-    <View style={[styles.avatar, { width: size, height: size, borderRadius: size / 2, backgroundColor: color }]}>
-      <Text style={[styles.avatarText, { fontSize: size * 0.36 }]}>{initials}</Text>
+    <View style={{ width: size, height: size }}>
+      <View style={[styles.avatar, { width: size, height: size, borderRadius: size / 2, backgroundColor: color }]}>
+        <Text style={[styles.avatarText, { fontSize: size * 0.36 }]}>{initials}</Text>
+      </View>
+      {dot}
     </View>
   );
 }
@@ -259,7 +285,7 @@ export default function ChatsScreen() {
               onLongPress={() => handleChatActions(item)}
               testID={`chat-item-${item.id}`}
             >
-              <Avatar name={chatName} color={avatarColor} photo={photo} isGroup={item.type === "group"} />
+              <Avatar name={chatName} color={avatarColor} photo={photo} isGroup={item.type === "group"} presence={other?.presence} />
               <View style={styles.chatInfo}>
                 <View style={styles.chatTopRow}>
                   <View style={styles.nameRow}>
