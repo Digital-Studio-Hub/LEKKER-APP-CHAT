@@ -17,6 +17,28 @@ import { ObjectStorageService, ObjectNotFoundError } from "./objectStorage";
 import { ObjectPermission } from "./objectAcl";
 import { findLekkerpreneurByPhoneOrEmail, fetchDirectory as fetchLekkerDirectory, fetchLekkerpreneurById, extractLekkerpreneurProfile, buildSyncUserResponse, buildDirectoryEntry, type LekkerNetworkEntry } from "./lekkerNetwork";
 
+async function enrichParticipants(chatId: string) {
+  const rawParticipants = await storage.getChatParticipants(chatId);
+  const participantUsers = [];
+  for (const p of rawParticipants) {
+    const u = await storage.getUser(p.userId);
+    if (u) {
+      participantUsers.push({
+        id: u.id,
+        firstName: u.firstName,
+        lastName: u.lastName,
+        username: u.username,
+        avatarColor: u.avatarColor,
+        profilePhoto: u.profilePhoto,
+        isVerifiedLekkerpreneur: u.isVerifiedLekkerpreneur,
+        businessName: u.businessName,
+        presence: u.presence,
+      });
+    }
+  }
+  return participantUsers;
+}
+
 const openrouter = new OpenAI({
   baseURL: process.env.AI_INTEGRATIONS_OPENROUTER_BASE_URL,
   apiKey: process.env.AI_INTEGRATIONS_OPENROUTER_API_KEY,
@@ -267,13 +289,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
         const existing = await storage.findExistingP2PChat(userId, participantId);
         if (existing) {
-          const participants = await storage.getChatParticipants(existing.id);
+          const participants = await enrichParticipants(existing.id);
           return res.json({ chat: { ...existing, participants } });
         }
         const chat = await storage.createChat("p2p", userId);
         await storage.addChatParticipant(chat.id, userId, "owner");
         await storage.addChatParticipant(chat.id, participantId, "member");
-        const participants = await storage.getChatParticipants(chat.id);
+        const participants = await enrichParticipants(chat.id);
         return res.status(201).json({ chat: { ...chat, participants } });
       }
 
@@ -289,7 +311,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             await storage.addChatParticipant(chat.id, pid, "member");
           }
         }
-        const participants = await storage.getChatParticipants(chat.id);
+        const participants = await enrichParticipants(chat.id);
         return res.status(201).json({ chat: { ...chat, participants } });
       }
 
@@ -307,25 +329,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const enriched = [];
       for (const chat of chatList) {
-        const participantIds = chat.participants.map(p => p.userId);
-        const userIds = participantIds.filter(id => id !== userId);
-        const participantUsers = [];
-        for (const uid of userIds) {
-          const u = await storage.getUser(uid);
-          if (u) {
-            participantUsers.push({
-              id: u.id,
-              firstName: u.firstName,
-              lastName: u.lastName,
-              username: u.username,
-              avatarColor: u.avatarColor,
-              profilePhoto: u.profilePhoto,
-              isVerifiedLekkerpreneur: u.isVerifiedLekkerpreneur,
-              businessName: u.businessName,
-              presence: u.presence,
-            });
-          }
-        }
+        const participants = await enrichParticipants(chat.id);
 
         enriched.push({
           id: chat.id,
@@ -333,7 +337,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           name: chat.name,
           createdAt: chat.createdAt,
           updatedAt: chat.updatedAt,
-          participants: participantUsers,
+          participants,
           lastMessage: chat.lastMessage ? {
             id: chat.lastMessage.id,
             senderId: chat.lastMessage.senderId,
@@ -368,8 +372,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Chat not found" });
       }
 
-      const participants = await storage.getChatParticipants(chatId);
-      res.json({ chat: { ...chat, participants } });
+      const participantUsers = await enrichParticipants(chatId);
+      res.json({ chat: { ...chat, participants: participantUsers } });
     } catch (error) {
       console.error("Get chat error:", error);
       res.status(500).json({ message: "Failed to fetch chat" });
