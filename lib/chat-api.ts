@@ -33,6 +33,8 @@ export interface ServerMessage {
   pollOptions: string | null;
   sharedContactName: string | null;
   sharedContactPhone: string | null;
+  editedAt: string | null;
+  isDeleted: boolean;
   createdAt: string;
 }
 
@@ -143,6 +145,28 @@ export async function deleteServerChat(chatId: string): Promise<boolean> {
     return res.ok;
   } catch (e) {
     console.error("Failed to delete chat:", e);
+    return false;
+  }
+}
+
+export async function editMessage(chatId: string, messageId: string, content: string): Promise<ServerMessage | null> {
+  try {
+    const res = await apiRequest("PUT", `/api/chats/${chatId}/messages/${messageId}`, { content });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.message || null;
+  } catch (e) {
+    console.error("Failed to edit message:", e);
+    return null;
+  }
+}
+
+export async function deleteMessage(chatId: string, messageId: string): Promise<boolean> {
+  try {
+    const res = await apiRequest("DELETE", `/api/chats/${chatId}/messages/${messageId}`);
+    return res.ok;
+  } catch (e) {
+    console.error("Failed to delete message:", e);
     return false;
   }
 }

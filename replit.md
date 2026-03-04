@@ -85,6 +85,7 @@ A business messaging app for Lekker Network - connecting Lekkerpreneurs with the
 - Lekker Network API integration: matches users by phone/email on register/login, auto-populates business data for verified Lekkerpreneurs, manual sync via Settings, workspace data (currency, VAT, invoicing, address) returned in sync response
 - Production auth with registration and login
 - Server-backed real-time chat (P2P and group) via PostgreSQL
+- Message edit & delete: edit your sent text messages (shows "edited" label), delete messages for everyone (shows "This message was deleted")
 - Group chat creation with member selection and naming
 - Pin chats to top (long-press menu with pin/unpin/delete)
 - Sent/delivered/seen message receipts (single check → double check → green double check)

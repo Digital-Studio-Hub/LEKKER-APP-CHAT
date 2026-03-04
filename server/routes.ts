@@ -2,9 +2,9 @@ import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "node:http";
 import OpenAI from "openai";
 import rateLimit, { type Options } from "express-rate-limit";
-import { registerSchema, loginSchema, updateProfileSchema, users } from "@shared/schema";
+import { registerSchema, loginSchema, updateProfileSchema, users, chatMessages } from "@shared/schema";
 import { storage, db } from "./storage";
-import { sql, or, and, ne } from "drizzle-orm";
+import { sql, or, and, ne, eq } from "drizzle-orm";
 import {
   hashPassword,
   verifyPassword,
@@ -452,6 +452,80 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Mark read error:", error);
       res.status(500).json({ message: "Failed to mark messages as read" });
+    }
+  });
+
+  app.put("/api/chats/:chatId/messages/:messageId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { chatId, messageId } = req.params;
+      const userId = req.user!.userId;
+      const { content } = req.body;
+
+      if (!content || typeof content !== "string" || content.trim().length === 0) {
+        return res.status(400).json({ message: "Content is required" });
+      }
+
+      const isParticipant = await storage.isUserInChat(chatId, userId);
+      if (!isParticipant) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const [msg] = await db.select().from(chatMessages).where(
+        and(eq(chatMessages.id, messageId), eq(chatMessages.chatId, chatId))
+      ).limit(1);
+
+      if (!msg) {
+        return res.status(404).json({ message: "Message not found" });
+      }
+      if (msg.senderId !== userId) {
+        return res.status(403).json({ message: "You can only edit your own messages" });
+      }
+      if (msg.isDeleted) {
+        return res.status(400).json({ message: "Cannot edit a deleted message" });
+      }
+
+      const [updated] = await db.update(chatMessages)
+        .set({ content: content.trim(), editedAt: new Date() })
+        .where(eq(chatMessages.id, messageId))
+        .returning();
+
+      res.json({ message: updated });
+    } catch (error) {
+      console.error("Edit message error:", error);
+      res.status(500).json({ message: "Failed to edit message" });
+    }
+  });
+
+  app.delete("/api/chats/:chatId/messages/:messageId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { chatId, messageId } = req.params;
+      const userId = req.user!.userId;
+
+      const isParticipant = await storage.isUserInChat(chatId, userId);
+      if (!isParticipant) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const [msg] = await db.select().from(chatMessages).where(
+        and(eq(chatMessages.id, messageId), eq(chatMessages.chatId, chatId))
+      ).limit(1);
+
+      if (!msg) {
+        return res.status(404).json({ message: "Message not found" });
+      }
+      if (msg.senderId !== userId) {
+        return res.status(403).json({ message: "You can only delete your own messages" });
+      }
+
+      const [updated] = await db.update(chatMessages)
+        .set({ isDeleted: true, content: null, imageUri: null, fileUri: null, audioUri: null })
+        .where(eq(chatMessages.id, messageId))
+        .returning();
+
+      res.json({ message: updated });
+    } catch (error) {
+      console.error("Delete message error:", error);
+      res.status(500).json({ message: "Failed to delete message" });
     }
   });
 

@@ -11,6 +11,7 @@ import {
   Image,
   Modal,
   Linking,
+  ActionSheetIOS,
 } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { router, useLocalSearchParams, useFocusEffect } from "expo-router";
@@ -48,6 +49,8 @@ import {
   getDisplayName,
   getPresenceColor,
   getPresenceLabel,
+  editMessage,
+  deleteMessage,
 } from "@/lib/chat-api";
 
 function ReceiptIcon({ status }: { status?: string }) {
@@ -201,6 +204,8 @@ function MessageBubbleInner({
   senderName,
   myUserId,
   onReload,
+  onEdit,
+  onDelete,
 }: {
   message: ServerMessage;
   isMe: boolean;
@@ -208,7 +213,10 @@ function MessageBubbleInner({
   senderName?: string;
   myUserId: string;
   onReload: () => void;
+  onEdit: (msg: ServerMessage) => void;
+  onDelete: (msg: ServerMessage) => void;
 }) {
+  const [showMenu, setShowMenu] = useState(false);
   const time = new Date(message.createdAt).toLocaleTimeString([], {
     hour: "2-digit",
     minute: "2-digit",
@@ -216,6 +224,33 @@ function MessageBubbleInner({
   const msgType = message.type || "text";
   const tColor = isMe ? Colors.background : Colors.text;
   const mColor = isMe ? "rgba(0,0,0,0.5)" : Colors.textMuted;
+
+  function handleToggleMenu() {
+    if (!isMe || message.isDeleted) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setShowMenu(!showMenu);
+  }
+
+  if (message.isDeleted) {
+    return (
+      <View style={[bubbleStyles.wrapper, isMe ? bubbleStyles.meWrapper : bubbleStyles.themWrapper]}>
+        <View style={[bubbleStyles.bubble, { backgroundColor: "transparent", borderWidth: 1, borderColor: Colors.border }]}>
+          {isGroup && !isMe && senderName && (
+            <Text style={bubbleStyles.senderName}>{senderName}</Text>
+          )}
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+            <Ionicons name="ban-outline" size={14} color={Colors.textMuted} />
+            <Text style={{ fontFamily: "Poppins_400Regular", fontSize: fontScale(13), color: Colors.textMuted, fontStyle: "italic" }}>
+              This message was deleted
+            </Text>
+          </View>
+          <View style={bubbleStyles.metaRow}>
+            <Text style={[bubbleStyles.time, bubbleStyles.themTime]}>{time}</Text>
+          </View>
+        </View>
+      </View>
+    );
+  }
 
   function renderContent() {
     switch (msgType) {
@@ -340,20 +375,57 @@ function MessageBubbleInner({
   }
 
   return (
-    <View style={[bubbleStyles.wrapper, isMe ? bubbleStyles.meWrapper : bubbleStyles.themWrapper]}>
-      <View style={[bubbleStyles.bubble, isMe ? bubbleStyles.meBubble : bubbleStyles.themBubble]}>
-        {isGroup && !isMe && senderName && (
-          <Text style={bubbleStyles.senderName}>{senderName}</Text>
+    <Pressable
+      onLongPress={isMe ? handleToggleMenu : undefined}
+      style={[bubbleStyles.wrapper, isMe ? bubbleStyles.meWrapper : bubbleStyles.themWrapper]}
+    >
+      <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 4 }}>
+        {isMe && (
+          <Pressable onPress={handleToggleMenu} style={bubbleStyles.msgOptionsBtn} testID={`msg-options-${message.id}`}>
+            <Ionicons name="ellipsis-vertical" size={14} color={Colors.textMuted} />
+          </Pressable>
         )}
-        {renderContent()}
-        <View style={bubbleStyles.metaRow}>
-          <Text style={[bubbleStyles.time, isMe ? bubbleStyles.meTime : bubbleStyles.themTime]}>
-            {time}
-          </Text>
-          {isMe && <ReceiptIcon status={message.status} />}
+        <View style={[bubbleStyles.bubble, isMe ? bubbleStyles.meBubble : bubbleStyles.themBubble]}>
+          {isGroup && !isMe && senderName && (
+            <Text style={bubbleStyles.senderName}>{senderName}</Text>
+          )}
+          {renderContent()}
+          <View style={bubbleStyles.metaRow}>
+            {message.editedAt && (
+              <Text style={[bubbleStyles.time, isMe ? bubbleStyles.meTime : bubbleStyles.themTime, { fontStyle: "italic" }]}>
+                edited
+              </Text>
+            )}
+            <Text style={[bubbleStyles.time, isMe ? bubbleStyles.meTime : bubbleStyles.themTime]}>
+              {time}
+            </Text>
+            {isMe && <ReceiptIcon status={message.status} />}
+          </View>
         </View>
       </View>
-    </View>
+      {showMenu && (
+        <View style={bubbleStyles.msgMenu}>
+          {msgType === "text" && (
+            <Pressable
+              style={bubbleStyles.msgMenuItem}
+              onPress={() => { setShowMenu(false); onEdit(message); }}
+              testID="edit-message-btn"
+            >
+              <Ionicons name="pencil-outline" size={16} color={Colors.primary} />
+              <Text style={bubbleStyles.msgMenuText}>Edit</Text>
+            </Pressable>
+          )}
+          <Pressable
+            style={bubbleStyles.msgMenuItem}
+            onPress={() => { setShowMenu(false); onDelete(message); }}
+            testID="delete-message-btn"
+          >
+            <Ionicons name="trash-outline" size={16} color={Colors.danger} />
+            <Text style={[bubbleStyles.msgMenuText, { color: Colors.danger }]}>Delete</Text>
+          </Pressable>
+        </View>
+      )}
+    </Pressable>
   );
 }
 
@@ -374,6 +446,27 @@ const bubbleStyles = StyleSheet.create({
   time: { fontFamily: "Poppins_400Regular", fontSize: fontScale(10) },
   meTime: { color: "rgba(0,0,0,0.4)" },
   themTime: { color: Colors.textMuted },
+  msgOptionsBtn: { paddingTop: 8, paddingHorizontal: 2, opacity: 0.6 },
+  msgMenu: {
+    flexDirection: "row",
+    alignSelf: "flex-end",
+    backgroundColor: Colors.cardElevated,
+    borderRadius: 10,
+    marginTop: 4,
+    overflow: "hidden",
+  },
+  msgMenuItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  msgMenuText: {
+    fontFamily: "Poppins_500Medium",
+    fontSize: 13,
+    color: Colors.text,
+  },
 });
 
 function generateId(): string {
@@ -395,6 +488,7 @@ export default function ChatDetailScreen() {
   const [showPollModal, setShowPollModal] = useState(false);
   const [pollQuestion, setPollQuestion] = useState("");
   const [pollOptions, setPollOptions] = useState(["", ""]);
+  const [editingMessage, setEditingMessage] = useState<ServerMessage | null>(null);
   const inputRef = useRef<TextInput>(null);
   const refreshIntervalRef = useRef<ReturnType<typeof setInterval>>();
   const recordingRef = useRef<Audio.Recording | null>(null);
@@ -487,12 +581,56 @@ export default function ChatDetailScreen() {
   }
 
   async function handleSend() {
+    if (editingMessage) {
+      const text = inputText.trim();
+      if (!text || !id) return;
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      setInputText("");
+      setEditingMessage(null);
+      await editMessage(id, editingMessage.id, text);
+      await loadMessages();
+      return;
+    }
     const text = inputText.trim();
     if (!text || !id || isBlocked) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setInputText("");
     await sendChatMessage(id, text, "text");
     await loadMessages();
+  }
+
+  function handleEditMessage(msg: ServerMessage) {
+    setEditingMessage(msg);
+    setInputText(msg.content || "");
+    inputRef.current?.focus();
+  }
+
+  async function handleDeleteMessage(msg: ServerMessage) {
+    if (Platform.OS === "web") {
+      const confirmed = window.confirm("This message will be deleted for everyone. This action cannot be undone.");
+      if (!confirmed || !id) return;
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      await deleteMessage(id, msg.id);
+      await loadMessages();
+    } else {
+      Alert.alert(
+        "Delete Message",
+        "This message will be deleted for everyone. This action cannot be undone.",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Delete",
+            style: "destructive",
+            onPress: async () => {
+              if (!id) return;
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              await deleteMessage(id, msg.id);
+              await loadMessages();
+            },
+          },
+        ]
+      );
+    }
   }
 
   async function handleSendAttachment(type: string, content: string, extras: Record<string, any>) {
@@ -726,6 +864,8 @@ export default function ChatDetailScreen() {
             senderName={getSenderName(item.senderId)}
             myUserId={myUserId}
             onReload={loadMessages}
+            onEdit={handleEditMessage}
+            onDelete={handleDeleteMessage}
           />
         )}
         inverted
@@ -785,7 +925,22 @@ export default function ChatDetailScreen() {
           </Pressable>
         </View>
       ) : (
-        <View style={[styles.inputContainer, { paddingBottom: Math.max(insets.bottom, 8) }]}>
+        <View>
+          {editingMessage && (
+            <View style={styles.editBanner}>
+              <View style={styles.editBannerLeft}>
+                <Ionicons name="pencil" size={16} color={Colors.primary} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.editBannerTitle}>Editing message</Text>
+                  <Text style={styles.editBannerText} numberOfLines={1}>{editingMessage.content}</Text>
+                </View>
+              </View>
+              <Pressable onPress={() => { setEditingMessage(null); setInputText(""); }} style={styles.editBannerClose}>
+                <Ionicons name="close" size={20} color={Colors.textMuted} />
+              </Pressable>
+            </View>
+          )}
+          <View style={[styles.inputContainer, { paddingBottom: Math.max(insets.bottom, 8) }]}>
           <Pressable
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -823,6 +978,7 @@ export default function ChatDetailScreen() {
           >
             <Ionicons name="send" size={18} color={Colors.background} />
           </Pressable>
+        </View>
         </View>
       )}
 
@@ -940,6 +1096,35 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: Colors.textSecondary,
     textAlign: "center",
+  },
+  editBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderTopWidth: 0.5,
+    borderTopColor: Colors.border,
+    backgroundColor: Colors.card,
+  },
+  editBannerLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    flex: 1,
+  },
+  editBannerTitle: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 12,
+    color: Colors.primary,
+  },
+  editBannerText: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12,
+    color: Colors.textSecondary,
+  },
+  editBannerClose: {
+    padding: 4,
   },
   inputContainer: {
     flexDirection: "row",

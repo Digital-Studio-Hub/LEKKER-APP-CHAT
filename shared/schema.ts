@@ -107,6 +107,8 @@ export const chatMessages = pgTable("chat_messages", {
   pollOptions: text("poll_options"),
   sharedContactName: varchar("shared_contact_name", { length: 255 }),
   sharedContactPhone: varchar("shared_contact_phone", { length: 50 }),
+  editedAt: timestamp("edited_at"),
+  isDeleted: boolean("is_deleted").default(false).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => [
   index("idx_chat_messages_chat").on(table.chatId),
