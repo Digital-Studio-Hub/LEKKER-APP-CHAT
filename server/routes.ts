@@ -1063,13 +1063,62 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/cledwyn/chat", async (req: Request, res: Response) => {
+  app.post("/api/cledwyn/chat", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { messages, lekkerNetworkAccess } = req.body;
+      const userId = req.user!.userId;
 
-      const systemPrompt = lekkerNetworkAccess
-        ? `You are CledwynAI, a smart and friendly AI assistant for Lekker Network - a business platform for entrepreneurs (Lekkerpreneurs). You help with business advice, product recommendations, service quotes, marketing strategies, and general business operations. You are knowledgeable, professional yet approachable, and always aim to help entrepreneurs succeed. Keep responses concise and actionable. When asked about products or services, suggest checking the Lekker Marketplace.`
-        : `You are a helpful, friendly, and knowledgeable AI assistant. You can help with any topic — general knowledge, creative writing, coding, math, science, daily life tips, recommendations, and more. You are conversational, concise, and always aim to be useful. Keep your tone warm and approachable.`;
+      const userProfile = await storage.getUser(userId);
+
+      let workspaceContext = "";
+      if (userProfile && userProfile.lekkerNetworkId) {
+        try {
+          const lekkerEntry = await fetchLekkerpreneurById(userProfile.lekkerNetworkId);
+          if (lekkerEntry?.workspace) {
+            const ws = lekkerEntry.workspace;
+            const parts: string[] = [];
+            if (ws.businessName) parts.push(`Business Name: ${ws.businessName}`);
+            if (ws.tradingName) parts.push(`Trading Name: ${ws.tradingName}`);
+            if (ws.category) parts.push(`Industry/Category: ${ws.category}`);
+            if (ws.businessAddress) parts.push(`Business Address: ${ws.businessAddress}`);
+            if (ws.province) parts.push(`Province: ${ws.province}`);
+            if (ws.businessPhone) parts.push(`Business Phone: ${ws.businessPhone}`);
+            if (ws.businessEmail) parts.push(`Business Email: ${ws.businessEmail}`);
+            if (ws.businessWebsite || ws.websiteUrl) parts.push(`Website: ${ws.businessWebsite || ws.websiteUrl}`);
+            if (ws.currency) parts.push(`Currency: ${ws.currency}`);
+            if (ws.isVatVendor) parts.push(`VAT Vendor: Yes`);
+            if (ws.invoiceNumberPrefix) parts.push(`Invoice Prefix: ${ws.invoiceNumberPrefix}`);
+            if (ws.quoteNumberPrefix) parts.push(`Quote Prefix: ${ws.quoteNumberPrefix}`);
+            if (ws.shippingEnabled) parts.push(`Shipping: Enabled`);
+            if (ws.paymentUrl) parts.push(`Payment URL: ${ws.paymentUrl}`);
+            if (ws.financialYearEndMonth) parts.push(`Financial Year End: Month ${ws.financialYearEndMonth}`);
+            if (parts.length > 0) {
+              workspaceContext = `\n\nThis user's Lekker Network workspace data:\n${parts.join("\n")}`;
+            }
+          }
+        } catch (e) {
+          console.warn("Failed to fetch workspace data for CledwynAI context:", e);
+        }
+      }
+
+      let userContext = "";
+      if (userProfile) {
+        const uParts: string[] = [];
+        uParts.push(`Name: ${userProfile.firstName} ${userProfile.lastName}`);
+        if (userProfile.businessName) uParts.push(`Business: ${userProfile.businessName}`);
+        if (userProfile.tradingName) uParts.push(`Trading As: ${userProfile.tradingName}`);
+        if (userProfile.businessCategory) uParts.push(`Category: ${userProfile.businessCategory}`);
+        if (userProfile.businessProvince) uParts.push(`Province: ${userProfile.businessProvince}`);
+        if (userProfile.businessCountry) uParts.push(`Country: ${userProfile.businessCountry}`);
+        if (userProfile.isVerifiedLekkerpreneur) uParts.push(`Status: Verified Lekkerpreneur`);
+        userContext = `\n\nYou are speaking with: ${uParts.join(", ")}`;
+      }
+
+      const basePrompt = lekkerNetworkAccess
+        ? `You are CledwynAI, a smart and friendly AI business assistant for Lekker Network - a business platform for South African entrepreneurs (Lekkerpreneurs). You have access to this user's business workspace data and should use it to give personalized, contextual business advice. You help with business advice, product recommendations, service quotes, marketing strategies, invoicing guidance, VAT compliance, and general business operations. You are knowledgeable about the South African business landscape, professional yet approachable, and always aim to help entrepreneurs succeed. Keep responses concise and actionable. When asked about products or services, suggest checking the Lekker Marketplace. Use the workspace data to tailor your advice — reference their specific business name, industry, location, and financial setup when relevant.`
+        : `You are CledwynAI, a helpful, friendly, and knowledgeable AI assistant. You can help with any topic — general knowledge, creative writing, coding, math, science, daily life tips, recommendations, and more. You are conversational, concise, and always aim to be useful. Keep your tone warm and approachable.`;
+
+      const systemPrompt = basePrompt + userContext + workspaceContext;
 
       const systemMessage = {
         role: "system" as const,

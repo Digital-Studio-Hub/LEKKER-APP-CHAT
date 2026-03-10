@@ -92,7 +92,7 @@ A business messaging app for Lekker Network - connecting Lekkerpreneurs with the
 - Auto-reply with customizable message and presets (Settings > Auto Reply)
 - Device contacts integration (expo-contacts) with directory matching
 - Invite non-users via SMS or WhatsApp
-- CledwynAI assistant powered by Grok (streaming SSE)
+- CledwynAI assistant powered by Grok (streaming SSE) with personalized user/workspace context from Lekker Network
 - Lekkerpreneur Directory with location/service filters and direct chat start
 - Lekkerpreneur verification badge (yellow checkmark) in chats and directory
 - Lekker Network workspace WebView with persistent cookies

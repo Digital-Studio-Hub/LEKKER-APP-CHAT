@@ -13,6 +13,7 @@ import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { fetch } from "expo/fetch";
+import { getAuthToken } from "@/lib/auth-token";
 import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { isSmallScreen, fontScale, responsiveMaxBubbleWidth } from "@/lib/responsive";
@@ -138,11 +139,13 @@ export default function CledwynScreen() {
         { role: "user", content: text },
       ];
 
+      const token = getAuthToken();
       const response = await fetch(`${baseUrl}api/cledwyn/chat`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Accept: "text/event-stream",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({ messages: chatHistory, lekkerNetworkAccess: !!user?.lekkerNetworkAccess }),
       });
