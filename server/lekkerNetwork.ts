@@ -1,6 +1,7 @@
-const LEKKER_API_BASE = "https://lekker.network";
+const LEKKER_API_BASE = process.env.LEKKER_API_BASE_URL || (process.env.NODE_ENV === "production" ? "https://lekker.network" : "https://ba8f68e4-7053-4a89-92cd-ae1a588f2a0c-00-2ocng4z2k42dj.spock.replit.dev");
 const LEKKER_API_URL = `${LEKKER_API_BASE}/api/v1/lekkerpreneurs`;
 const LEKKER_SYNC_URL = `${LEKKER_API_BASE}/api/auth/sync-lekker`;
+const LEKKER_WORKSPACES_URL = `${LEKKER_API_BASE}/api/v1/workspaces`;
 const LEKKER_API_KEY = process.env.LEKKER_NETWORK_API_KEY || "";
 
 export interface LekkerWorkspace {
@@ -28,8 +29,41 @@ export interface LekkerWorkspace {
   isVerified?: boolean;
 }
 
+export interface WorkspaceListItem {
+  workspaceId: string;
+  workspaceName: string;
+  businessName: string;
+  tradingName: string | null;
+  ownerName: string | null;
+  phone: string | null;
+  email: string | null;
+  website: string | null;
+  address: string | null;
+  logoUrl: string | null;
+  category: string | null;
+  province: string | null;
+  currency: string;
+  shippingEnabled: boolean;
+  paymentUrl: string | null;
+  isVatVendor: boolean;
+  financialYearEndMonth: number | null;
+  isVerified: boolean;
+  plan: string;
+  billingStatus: string;
+  createdAt: string;
+}
+
+export interface WorkspaceDetail extends WorkspaceListItem {
+  trialEndsAt: string | null;
+  planExpiresAt: string | null;
+  verifiedDomains: string[];
+  teamSize: number;
+  activeServices: { serviceType: string; status: string }[];
+}
+
 export interface LekkerNetworkEntry {
   id: string;
+  workspaceId?: string;
   name?: string;
   businessName: string;
   tradingName?: string;
@@ -62,10 +96,24 @@ interface LekkerNetworkResponse {
   data: LekkerNetworkEntry[];
 }
 
+interface WorkspacesResponse {
+  success: boolean;
+  total: number;
+  page: number;
+  limit: number;
+  data: WorkspaceListItem[];
+}
+
+interface WorkspaceDetailResponse {
+  success: boolean;
+  workspace: WorkspaceDetail;
+}
+
 interface LekkerSyncResponse {
   matched: boolean;
   message?: string;
   user?: LekkerNetworkEntry & {
+    workspaceId?: string;
     workspace?: LekkerWorkspace;
   };
 }
@@ -81,26 +129,23 @@ function normalizePhone(phone: string): string {
   return digits;
 }
 
-async function fetchFromApi(params: Record<string, string>): Promise<LekkerNetworkResponse | null> {
+async function apiFetch<T>(url: string, options?: RequestInit): Promise<T | null> {
   if (!LEKKER_API_KEY) {
     console.warn("LEKKER_NETWORK_API_KEY not set, skipping Lekker Network API call");
     return null;
   }
 
-  const url = new URL(LEKKER_API_URL);
-  for (const [key, value] of Object.entries(params)) {
-    url.searchParams.set(key, value);
-  }
-
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
 
-    const response = await fetch(url.toString(), {
+    const response = await fetch(url, {
+      ...options,
       headers: {
         "X-API-Key": LEKKER_API_KEY,
         "Content-Type": "application/json",
         "Accept": "application/json",
+        ...(options?.headers || {}),
       },
       signal: controller.signal,
     });
@@ -108,78 +153,47 @@ async function fetchFromApi(params: Record<string, string>): Promise<LekkerNetwo
     clearTimeout(timeout);
 
     if (!response.ok) {
-      console.error(`Lekker Network API error: ${response.status} ${response.statusText}`);
+      console.error(`Lekker Network API error: ${response.status} ${response.statusText} — ${url}`);
       return null;
     }
 
     const contentType = response.headers.get("content-type") || "";
     if (!contentType.includes("application/json")) {
-      console.warn(`Lekker Network API returned non-JSON content-type: ${contentType}. API may not be live yet.`);
+      console.warn(`Lekker Network API returned non-JSON: ${contentType}`);
       return null;
     }
 
-    return await response.json() as LekkerNetworkResponse;
+    return await response.json() as T;
   } catch (error: any) {
     if (error.name === "AbortError") {
-      console.error("Lekker Network API request timed out");
+      console.error(`Lekker Network API request timed out — ${url}`);
     } else {
-      console.error("Lekker Network API error:", error.message);
+      console.error(`Lekker Network API error: ${error.message}`);
     }
     return null;
   }
 }
 
+async function fetchFromApi(params: Record<string, string>): Promise<LekkerNetworkResponse | null> {
+  const url = new URL(LEKKER_API_URL);
+  for (const [key, value] of Object.entries(params)) {
+    url.searchParams.set(key, value);
+  }
+  return apiFetch<LekkerNetworkResponse>(url.toString());
+}
+
 async function syncWithLekkerNetwork(email: string, phone: string): Promise<LekkerSyncResponse | null> {
-  if (!LEKKER_API_KEY) {
-    console.warn("LEKKER_NETWORK_API_KEY not set, skipping sync");
-    return null;
+  const body: Record<string, string> = {};
+  if (email && email.includes("@")) {
+    body.email = email.toLowerCase().trim();
   }
-
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
-
-    const body: Record<string, string> = {};
-    if (email && email.includes("@")) {
-      body.email = email.toLowerCase().trim();
-    }
-    if (phone) {
-      body.phone = normalizePhone(phone);
-    }
-
-    const response = await fetch(LEKKER_SYNC_URL, {
-      method: "POST",
-      headers: {
-        "X-API-Key": LEKKER_API_KEY,
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-
-    clearTimeout(timeout);
-
-    if (!response.ok) {
-      console.error(`Lekker sync API error: ${response.status} ${response.statusText}`);
-      return null;
-    }
-
-    const contentType = response.headers.get("content-type") || "";
-    if (!contentType.includes("application/json")) {
-      console.warn(`Lekker sync API returned non-JSON: ${contentType}`);
-      return null;
-    }
-
-    return await response.json() as LekkerSyncResponse;
-  } catch (error: any) {
-    if (error.name === "AbortError") {
-      console.error("Lekker sync API request timed out");
-    } else {
-      console.error("Lekker sync API error:", error.message);
-    }
-    return null;
+  if (phone) {
+    body.phone = normalizePhone(phone);
   }
+  return apiFetch<LekkerSyncResponse>(LEKKER_SYNC_URL, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
 }
 
 export async function findLekkerpreneurByPhoneOrEmail(
@@ -249,6 +263,29 @@ export async function fetchLekkerpreneurById(id: string): Promise<LekkerNetworkE
   return null;
 }
 
+export async function fetchWorkspaces(params: {
+  page?: number;
+  limit?: number;
+  search?: string;
+  province?: string;
+  category?: string;
+  sort?: string;
+}): Promise<WorkspacesResponse | null> {
+  const url = new URL(LEKKER_WORKSPACES_URL);
+  if (params.page) url.searchParams.set("page", String(params.page));
+  if (params.limit) url.searchParams.set("limit", String(params.limit));
+  if (params.search) url.searchParams.set("search", params.search);
+  if (params.province) url.searchParams.set("province", params.province);
+  if (params.category) url.searchParams.set("category", params.category);
+  if (params.sort) url.searchParams.set("sort", params.sort);
+  return apiFetch<WorkspacesResponse>(url.toString());
+}
+
+export async function fetchWorkspaceById(workspaceId: string): Promise<WorkspaceDetail | null> {
+  const result = await apiFetch<WorkspaceDetailResponse>(`${LEKKER_WORKSPACES_URL}/${workspaceId}`);
+  return result?.workspace || null;
+}
+
 function resolveWorkspace(entry: LekkerNetworkEntry): LekkerWorkspace {
   const ws = entry.workspace || {};
   return {
@@ -283,6 +320,7 @@ export function extractLekkerpreneurProfile(entry: LekkerNetworkEntry) {
     businessName: ws.businessName || entry.businessName,
     tradingName: ws.tradingName || entry.tradingName || null,
     lekkerNetworkId: entry.id,
+    lekkerWorkspaceId: entry.workspaceId || entry.workspace?.id || null,
     isVerifiedLekkerpreneur: true,
     businessCategory: ws.category || entry.category || null,
     businessWebsite: ws.businessWebsite || ws.websiteUrl || entry.website || null,
@@ -297,6 +335,7 @@ export function buildSyncUserResponse(entry: LekkerNetworkEntry) {
   const ws = resolveWorkspace(entry);
   return {
     id: entry.id,
+    workspaceId: entry.workspaceId || null,
     name: entry.ownerName || entry.name || entry.businessName || "Unknown",
     email: entry.email || "",
     emailVerified: entry.emailVerified ?? false,
@@ -309,6 +348,7 @@ export function buildDirectoryEntry(d: LekkerNetworkEntry) {
   const ws = resolveWorkspace(d);
   return {
     id: d.id,
+    workspaceId: d.workspaceId || null,
     name: d.ownerName || d.businessName || "Unknown",
     businessName: d.businessName || d.ownerName || "Unknown Business",
     tradingName: ws.tradingName || "",
@@ -325,5 +365,33 @@ export function buildDirectoryEntry(d: LekkerNetworkEntry) {
     emailVerified: d.emailVerified ?? false,
     memberSince: d.memberSince || d.createdAt || "",
     workspace: ws,
+  };
+}
+
+export function buildWorkspaceDirectoryEntry(ws: WorkspaceListItem) {
+  return {
+    id: ws.workspaceId,
+    workspaceId: ws.workspaceId,
+    name: ws.ownerName || ws.businessName || "Unknown",
+    businessName: ws.businessName || ws.workspaceName || "Unknown Business",
+    tradingName: ws.tradingName || "",
+    serviceType: ws.category || "General",
+    location: ws.province || "South Africa",
+    province: ws.province || "",
+    phone: ws.phone || "",
+    email: ws.email || "",
+    bio: "",
+    avatarColor: "#F5B800",
+    website: ws.website || "",
+    logoUrl: ws.logoUrl || "",
+    isVerified: ws.isVerified ?? false,
+    currency: ws.currency || "ZAR",
+    plan: ws.plan || "Free",
+    billingStatus: ws.billingStatus || "free",
+    shippingEnabled: ws.shippingEnabled ?? false,
+    paymentUrl: ws.paymentUrl || "",
+    isVatVendor: ws.isVatVendor ?? false,
+    financialYearEndMonth: ws.financialYearEndMonth,
+    memberSince: ws.createdAt || "",
   };
 }

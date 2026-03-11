@@ -15,7 +15,7 @@ import {
 } from "./auth";
 import { ObjectStorageService, ObjectNotFoundError } from "./objectStorage";
 import { ObjectPermission } from "./objectAcl";
-import { findLekkerpreneurByPhoneOrEmail, fetchDirectory as fetchLekkerDirectory, fetchLekkerpreneurById, extractLekkerpreneurProfile, buildSyncUserResponse, buildDirectoryEntry, type LekkerNetworkEntry } from "./lekkerNetwork";
+import { findLekkerpreneurByPhoneOrEmail, fetchDirectory as fetchLekkerDirectory, fetchLekkerpreneurById, fetchWorkspaceById, fetchWorkspaces, extractLekkerpreneurProfile, buildSyncUserResponse, buildDirectoryEntry, buildWorkspaceDirectoryEntry, type LekkerNetworkEntry, type WorkspaceDetail } from "./lekkerNetwork";
 
 async function enrichParticipants(chatId: string) {
   const rawParticipants = await storage.getChatParticipants(chatId);
@@ -1071,29 +1071,54 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userProfile = await storage.getUser(userId);
 
       let workspaceContext = "";
-      if (userProfile && userProfile.lekkerNetworkId) {
+      if (userProfile) {
         try {
-          const lekkerEntry = await fetchLekkerpreneurById(userProfile.lekkerNetworkId);
-          if (lekkerEntry?.workspace) {
-            const ws = lekkerEntry.workspace;
+          let wsDetail: WorkspaceDetail | null = null;
+
+          if (userProfile.lekkerWorkspaceId) {
+            wsDetail = await fetchWorkspaceById(userProfile.lekkerWorkspaceId);
+          }
+
+          if (wsDetail) {
             const parts: string[] = [];
-            if (ws.businessName) parts.push(`Business Name: ${ws.businessName}`);
-            if (ws.tradingName) parts.push(`Trading Name: ${ws.tradingName}`);
-            if (ws.category) parts.push(`Industry/Category: ${ws.category}`);
-            if (ws.businessAddress) parts.push(`Business Address: ${ws.businessAddress}`);
-            if (ws.province) parts.push(`Province: ${ws.province}`);
-            if (ws.businessPhone) parts.push(`Business Phone: ${ws.businessPhone}`);
-            if (ws.businessEmail) parts.push(`Business Email: ${ws.businessEmail}`);
-            if (ws.businessWebsite || ws.websiteUrl) parts.push(`Website: ${ws.businessWebsite || ws.websiteUrl}`);
-            if (ws.currency) parts.push(`Currency: ${ws.currency}`);
-            if (ws.isVatVendor) parts.push(`VAT Vendor: Yes`);
-            if (ws.invoiceNumberPrefix) parts.push(`Invoice Prefix: ${ws.invoiceNumberPrefix}`);
-            if (ws.quoteNumberPrefix) parts.push(`Quote Prefix: ${ws.quoteNumberPrefix}`);
-            if (ws.shippingEnabled) parts.push(`Shipping: Enabled`);
-            if (ws.paymentUrl) parts.push(`Payment URL: ${ws.paymentUrl}`);
-            if (ws.financialYearEndMonth) parts.push(`Financial Year End: Month ${ws.financialYearEndMonth}`);
-            if (parts.length > 0) {
-              workspaceContext = `\n\nThis user's Lekker Network workspace data:\n${parts.join("\n")}`;
+            if (wsDetail.businessName) parts.push(`Business Name: ${wsDetail.businessName}`);
+            if (wsDetail.tradingName) parts.push(`Trading Name: ${wsDetail.tradingName}`);
+            if (wsDetail.workspaceName) parts.push(`Workspace Name: ${wsDetail.workspaceName}`);
+            if (wsDetail.category) parts.push(`Company Type: ${wsDetail.category}`);
+            if (wsDetail.address) parts.push(`Business Address: ${wsDetail.address}`);
+            if (wsDetail.province) parts.push(`Province: ${wsDetail.province}`);
+            if (wsDetail.phone) parts.push(`Business Phone: ${wsDetail.phone}`);
+            if (wsDetail.email) parts.push(`Business Email: ${wsDetail.email}`);
+            if (wsDetail.website) parts.push(`Website: ${wsDetail.website}`);
+            parts.push(`Currency: ${wsDetail.currency || "ZAR"}`);
+            if (wsDetail.isVatVendor) parts.push(`VAT Vendor: Yes (registered with SARS)`);
+            if (wsDetail.financialYearEndMonth) parts.push(`Financial Year End: Month ${wsDetail.financialYearEndMonth}`);
+            if (wsDetail.shippingEnabled) parts.push(`Shipping/Delivery: Enabled`);
+            if (wsDetail.paymentUrl) parts.push(`Payment URL: ${wsDetail.paymentUrl}`);
+            if (wsDetail.isVerified) parts.push(`CIPC Verified: Yes`);
+            parts.push(`Plan: ${wsDetail.plan}`);
+            parts.push(`Billing Status: ${wsDetail.billingStatus}`);
+            if (wsDetail.teamSize) parts.push(`Team Size: ${wsDetail.teamSize} members`);
+            if (wsDetail.activeServices?.length > 0) {
+              parts.push(`Active Services: ${wsDetail.activeServices.map(s => `${s.serviceType} (${s.status})`).join(", ")}`);
+            }
+            if (wsDetail.verifiedDomains?.length > 0) {
+              parts.push(`Verified Domains: ${wsDetail.verifiedDomains.join(", ")}`);
+            }
+            workspaceContext = `\n\nThis user's Lekker Network workspace data:\n${parts.join("\n")}`;
+          } else if (userProfile.lekkerNetworkId) {
+            const lekkerEntry = await fetchLekkerpreneurById(userProfile.lekkerNetworkId);
+            if (lekkerEntry) {
+              const parts: string[] = [];
+              if (lekkerEntry.businessName) parts.push(`Business Name: ${lekkerEntry.businessName}`);
+              if (lekkerEntry.ownerName) parts.push(`Owner: ${lekkerEntry.ownerName}`);
+              if (lekkerEntry.category) parts.push(`Category: ${lekkerEntry.category}`);
+              if (lekkerEntry.website) parts.push(`Website: ${lekkerEntry.website}`);
+              if (lekkerEntry.location?.province) parts.push(`Province: ${lekkerEntry.location.province}`);
+              if (lekkerEntry.isVerified) parts.push(`Verified: Yes`);
+              if (parts.length > 0) {
+                workspaceContext = `\n\nThis user's Lekker Network profile:\n${parts.join("\n")}`;
+              }
             }
           }
         } catch (e) {
