@@ -60,6 +60,18 @@ export const authAuditLogs = pgTable("auth_audit_logs", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const passwordResetCodes = pgTable("password_reset_codes", {
+  id: varchar("id", { length: 36 })
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  userId: varchar("user_id", { length: 36 }).notNull(),
+  email: varchar("email", { length: 255 }).notNull(),
+  code: varchar("code", { length: 6 }).notNull(),
+  used: boolean("used").default(false).notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export const chats = pgTable("chats", {
   id: varchar("id", { length: 36 })
     .primaryKey()
@@ -177,6 +189,7 @@ export const insertUserSchema = createInsertSchema(users).omit({
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 export type AuthAuditLog = typeof authAuditLogs.$inferSelect;
+export type PasswordResetCode = typeof passwordResetCodes.$inferSelect;
 export type Chat = typeof chats.$inferSelect;
 export type ChatParticipant = typeof chatParticipants.$inferSelect;
 export type ChatMessage = typeof chatMessages.$inferSelect;

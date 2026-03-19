@@ -17,10 +17,11 @@ import { Image } from "expo-image";
 import Colors from "@/constants/colors";
 import * as Haptics from "expo-haptics";
 import { isSmallScreen, fontScale } from "@/lib/responsive";
+import { getApiUrl } from "@/lib/query-client";
 
 const lekkerLogo = require("../assets/images/lekker-logo.png");
 
-type Mode = "login" | "register";
+type Mode = "login" | "register" | "forgot" | "resetCode" | "newPassword";
 
 interface FormErrors {
   [key: string]: string;
@@ -74,6 +75,12 @@ export default function LoginScreen() {
 
   const [identifier, setIdentifier] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
+
+  const [resetEmail, setResetEmail] = useState("");
+  const [resetCode, setResetCode] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
 
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
@@ -192,10 +199,114 @@ export default function LoginScreen() {
     }
   }
 
+  async function handleForgotPassword() {
+    const e: FormErrors = {};
+    if (!resetEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(resetEmail)) {
+      e.resetEmail = "Please enter a valid email address";
+    }
+    setErrors(e);
+    if (Object.keys(e).length > 0) return;
+
+    setIsSubmitting(true);
+    setGeneralError("");
+    try {
+      const response = await fetch(new URL("/api/auth/forgot-password", getApiUrl()).toString(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: resetEmail.trim().toLowerCase() }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setGeneralError(data.message || "Something went wrong");
+        return;
+      }
+      setSuccessMessage("A 6-digit reset code has been sent to your email.");
+      setMode("resetCode");
+      clearErrors();
+    } catch {
+      setGeneralError("Connection failed. Check your network and try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleVerifyCode() {
+    const e: FormErrors = {};
+    if (!resetCode || resetCode.length !== 6 || !/^\d{6}$/.test(resetCode)) {
+      e.resetCode = "Please enter the 6-digit code";
+    }
+    setErrors(e);
+    if (Object.keys(e).length > 0) return;
+
+    setIsSubmitting(true);
+    setGeneralError("");
+    try {
+      const response = await fetch(new URL("/api/auth/verify-reset-code", getApiUrl()).toString(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: resetEmail.trim().toLowerCase(), code: resetCode.trim() }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setGeneralError(data.message || "Invalid code");
+        return;
+      }
+      setMode("newPassword");
+      setSuccessMessage("");
+      clearErrors();
+    } catch {
+      setGeneralError("Connection failed. Check your network and try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleResetPassword() {
+    const e: FormErrors = {};
+    if (newPassword.length < 8) e.newPassword = "At least 8 characters";
+    else if (!/[A-Z]/.test(newPassword)) e.newPassword = "Needs an uppercase letter";
+    else if (!/[0-9]/.test(newPassword)) e.newPassword = "Needs a number";
+    else if (!/[^A-Za-z0-9]/.test(newPassword)) e.newPassword = "Needs a special character";
+    if (newPassword !== confirmNewPassword) e.confirmNewPassword = "Passwords don't match";
+    setErrors(e);
+    if (Object.keys(e).length > 0) return;
+
+    setIsSubmitting(true);
+    setGeneralError("");
+    try {
+      const response = await fetch(new URL("/api/auth/reset-password", getApiUrl()).toString(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: resetEmail.trim().toLowerCase(),
+          code: resetCode.trim(),
+          newPassword,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setGeneralError(data.message || "Something went wrong");
+        return;
+      }
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setSuccessMessage("Password reset successfully! You can now sign in.");
+      setResetEmail("");
+      setResetCode("");
+      setNewPassword("");
+      setConfirmNewPassword("");
+      setMode("login");
+    } catch {
+      setGeneralError("Connection failed. Check your network and try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
   function switchMode(newMode: Mode) {
     clearErrors();
     setMode(newMode);
     setGeneralError("");
+    setSuccessMessage("");
   }
 
   const webTopInset = Platform.OS === "web" ? 67 : 0;
@@ -222,22 +333,30 @@ export default function LoginScreen() {
         </View>
 
         <View style={styles.formContainer}>
-          <View style={styles.modeToggle}>
-            <Pressable
-              style={[styles.modeTab, mode === "login" && styles.modeTabActive]}
-              onPress={() => switchMode("login")}
-              testID="login-tab"
-            >
-              <Text style={[styles.modeTabText, mode === "login" && styles.modeTabTextActive]}>Sign In</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.modeTab, mode === "register" && styles.modeTabActive]}
-              onPress={() => switchMode("register")}
-              testID="register-tab"
-            >
-              <Text style={[styles.modeTabText, mode === "register" && styles.modeTabTextActive]}>Register</Text>
-            </Pressable>
-          </View>
+          {(mode === "login" || mode === "register") ? (
+            <View style={styles.modeToggle}>
+              <Pressable
+                style={[styles.modeTab, mode === "login" && styles.modeTabActive]}
+                onPress={() => switchMode("login")}
+                testID="login-tab"
+              >
+                <Text style={[styles.modeTabText, mode === "login" && styles.modeTabTextActive]}>Sign In</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.modeTab, mode === "register" && styles.modeTabActive]}
+                onPress={() => switchMode("register")}
+                testID="register-tab"
+              >
+                <Text style={[styles.modeTabText, mode === "register" && styles.modeTabTextActive]}>Register</Text>
+              </Pressable>
+            </View>
+          ) : null}
+
+          {successMessage && mode === "login" ? (
+            <View style={styles.successBanner}>
+              <Text style={styles.successBannerText}>{successMessage}</Text>
+            </View>
+          ) : null}
 
           {generalError ? (
             <View style={styles.errorBanner}>
@@ -291,6 +410,149 @@ export default function LoginScreen() {
                 ) : (
                   <Text style={styles.buttonText}>Sign In</Text>
                 )}
+              </Pressable>
+
+              <Pressable
+                onPress={() => switchMode("forgot")}
+                style={styles.forgotLink}
+                testID="forgot-password-link"
+              >
+                <Text style={styles.forgotLinkText}>Forgot Password?</Text>
+              </Pressable>
+            </>
+          ) : mode === "forgot" ? (
+            <>
+              <Text style={styles.resetTitle}>Reset Password</Text>
+              <Text style={styles.resetSubtitle}>Enter your email address and we'll send you a code to reset your password.</Text>
+
+              <Text style={styles.label}>Email address</Text>
+              <TextInput
+                style={[styles.input, errors.resetEmail ? styles.inputError : null]}
+                placeholder="your@email.com"
+                placeholderTextColor={Colors.textMuted}
+                value={resetEmail}
+                onChangeText={(t) => { setResetEmail(t); if (errors.resetEmail) setErrors((e) => ({ ...e, resetEmail: "" })); }}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+                returnKeyType="go"
+                onSubmitEditing={handleForgotPassword}
+                accessibilityLabel="Reset email address"
+                testID="reset-email"
+              />
+              {errors.resetEmail ? <Text style={styles.fieldError}>{errors.resetEmail}</Text> : null}
+
+              <Pressable
+                style={({ pressed }) => [styles.button, pressed && styles.buttonPressed, isSubmitting && styles.buttonDisabled]}
+                onPress={handleForgotPassword}
+                disabled={isSubmitting}
+                testID="send-reset-code-button"
+              >
+                {isSubmitting ? (
+                  <ActivityIndicator color={Colors.background} />
+                ) : (
+                  <Text style={styles.buttonText}>Send Reset Code</Text>
+                )}
+              </Pressable>
+
+              <Pressable onPress={() => switchMode("login")} style={styles.forgotLink}>
+                <Text style={styles.forgotLinkText}>Back to Sign In</Text>
+              </Pressable>
+            </>
+          ) : mode === "resetCode" ? (
+            <>
+              <Text style={styles.resetTitle}>Enter Reset Code</Text>
+              <Text style={styles.resetSubtitle}>We sent a 6-digit code to {resetEmail}. Enter it below.</Text>
+
+              {successMessage ? (
+                <View style={styles.successBanner}>
+                  <Text style={styles.successBannerText}>{successMessage}</Text>
+                </View>
+              ) : null}
+
+              <Text style={styles.label}>6-digit code</Text>
+              <TextInput
+                style={[styles.input, styles.codeInput, errors.resetCode ? styles.inputError : null]}
+                placeholder="000000"
+                placeholderTextColor={Colors.textMuted}
+                value={resetCode}
+                onChangeText={(t) => { const digits = t.replace(/[^0-9]/g, "").slice(0, 6); setResetCode(digits); if (errors.resetCode) setErrors((e) => ({ ...e, resetCode: "" })); }}
+                keyboardType="number-pad"
+                maxLength={6}
+                returnKeyType="go"
+                onSubmitEditing={handleVerifyCode}
+                accessibilityLabel="Reset code"
+                testID="reset-code"
+              />
+              {errors.resetCode ? <Text style={styles.fieldError}>{errors.resetCode}</Text> : null}
+
+              <Pressable
+                style={({ pressed }) => [styles.button, pressed && styles.buttonPressed, isSubmitting && styles.buttonDisabled]}
+                onPress={handleVerifyCode}
+                disabled={isSubmitting}
+                testID="verify-code-button"
+              >
+                {isSubmitting ? (
+                  <ActivityIndicator color={Colors.background} />
+                ) : (
+                  <Text style={styles.buttonText}>Verify Code</Text>
+                )}
+              </Pressable>
+
+              <Pressable onPress={() => { setResetCode(""); switchMode("forgot"); }} style={styles.forgotLink}>
+                <Text style={styles.forgotLinkText}>Resend Code</Text>
+              </Pressable>
+            </>
+          ) : mode === "newPassword" ? (
+            <>
+              <Text style={styles.resetTitle}>Set New Password</Text>
+              <Text style={styles.resetSubtitle}>Create a strong new password for your account.</Text>
+
+              <Text style={styles.label}>New password</Text>
+              <TextInput
+                style={[styles.input, errors.newPassword ? styles.inputError : null]}
+                placeholder="Min 8 chars, upper, number, special"
+                placeholderTextColor={Colors.textMuted}
+                value={newPassword}
+                onChangeText={(t) => { setNewPassword(t); if (errors.newPassword) setErrors((e) => ({ ...e, newPassword: "" })); }}
+                secureTextEntry
+                returnKeyType="next"
+                accessibilityLabel="New password"
+                testID="new-password"
+              />
+              {errors.newPassword ? <Text style={styles.fieldError}>{errors.newPassword}</Text> : null}
+              <PasswordStrength password={newPassword} />
+
+              <Text style={styles.label}>Confirm new password</Text>
+              <TextInput
+                style={[styles.input, errors.confirmNewPassword ? styles.inputError : null]}
+                placeholder="Re-enter new password"
+                placeholderTextColor={Colors.textMuted}
+                value={confirmNewPassword}
+                onChangeText={(t) => { setConfirmNewPassword(t); if (errors.confirmNewPassword) setErrors((e) => ({ ...e, confirmNewPassword: "" })); }}
+                secureTextEntry
+                returnKeyType="go"
+                onSubmitEditing={handleResetPassword}
+                accessibilityLabel="Confirm new password"
+                testID="confirm-new-password"
+              />
+              {errors.confirmNewPassword ? <Text style={styles.fieldError}>{errors.confirmNewPassword}</Text> : null}
+
+              <Pressable
+                style={({ pressed }) => [styles.button, pressed && styles.buttonPressed, isSubmitting && styles.buttonDisabled]}
+                onPress={handleResetPassword}
+                disabled={isSubmitting}
+                testID="reset-password-button"
+              >
+                {isSubmitting ? (
+                  <ActivityIndicator color={Colors.background} />
+                ) : (
+                  <Text style={styles.buttonText}>Reset Password</Text>
+                )}
+              </Pressable>
+
+              <Pressable onPress={() => switchMode("login")} style={styles.forgotLink}>
+                <Text style={styles.forgotLinkText}>Back to Sign In</Text>
               </Pressable>
             </>
           ) : (
@@ -577,5 +839,51 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_400Regular",
     fontSize: fontScale(12),
     color: Colors.textMuted,
+  },
+  forgotLink: {
+    alignSelf: "center",
+    marginTop: 16,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  forgotLinkText: {
+    fontFamily: "Poppins_500Medium",
+    fontSize: fontScale(14),
+    color: Colors.primary,
+  },
+  resetTitle: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: fontScale(20),
+    color: Colors.text,
+    textAlign: "center",
+    marginBottom: 8,
+  },
+  resetSubtitle: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: fontScale(13),
+    color: Colors.textSecondary,
+    textAlign: "center",
+    marginBottom: 24,
+    lineHeight: 20,
+  },
+  codeInput: {
+    fontSize: fontScale(24),
+    textAlign: "center",
+    letterSpacing: 8,
+    fontFamily: "Poppins_600SemiBold",
+  },
+  successBanner: {
+    backgroundColor: "rgba(52,199,89,0.15)",
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: "rgba(52,199,89,0.3)",
+  },
+  successBannerText: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: fontScale(13),
+    color: Colors.success,
+    textAlign: "center",
   },
 });
