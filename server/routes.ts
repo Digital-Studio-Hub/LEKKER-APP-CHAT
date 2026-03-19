@@ -16,6 +16,7 @@ import {
 import { ObjectStorageService, ObjectNotFoundError } from "./objectStorage";
 import { ObjectPermission } from "./objectAcl";
 import { findLekkerpreneurByPhoneOrEmail, fetchDirectory as fetchLekkerDirectory, fetchLekkerpreneurById, fetchWorkspaceById, fetchWorkspaces, extractLekkerpreneurProfile, buildSyncUserResponse, buildDirectoryEntry, buildWorkspaceDirectoryEntry, type LekkerNetworkEntry, type WorkspaceDetail } from "./lekkerNetwork";
+import { sendPasswordResetEmail } from "./gmail";
 
 async function enrichParticipants(chatId: string) {
   const rawParticipants = await storage.getChatParticipants(chatId);
@@ -259,7 +260,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       await storage.logAuthEvent("password_reset_requested", user.id, req.ip, req.headers["user-agent"]?.toString());
 
-      console.log(`[Password Reset] Code for ${user.email}: ${code}`);
+      const emailSent = await sendPasswordResetEmail(user.email, code, user.firstName);
+      if (!emailSent) {
+        console.error(`[Password Reset] Failed to send email to ${user.email}`);
+      }
 
       res.json({ message: "If an account with that email exists, a reset code has been sent." });
     } catch (error) {

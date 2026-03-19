@@ -8,6 +8,7 @@ A business messaging app for Lekker Network - connecting Lekkerpreneurs with the
 - **Database**: PostgreSQL via Drizzle ORM
 - **Auth**: JWT (jsonwebtoken) + bcrypt password hashing (12 rounds)
 - **AI**: OpenRouter (xAI Grok 3 Mini) via Replit AI Integrations for CledwynAI assistant
+- **Email**: Gmail API (googleapis) via Replit integration for password reset emails
 - **Storage**: AsyncStorage for local data, SecureStore for auth tokens (native), PostgreSQL for users/auth, Replit Object Storage for chat attachments (voice notes, images, files)
 - **Font**: Poppins (Google Fonts)
 
