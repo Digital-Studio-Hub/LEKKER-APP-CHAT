@@ -1,18 +1,29 @@
 import { Platform } from "react-native";
-import * as Notifications from "expo-notifications";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const NOTIF_KEY = "lekker_notifications_enabled";
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-});
+let Notifications: typeof import("expo-notifications") | null = null;
+
+async function getNotifications() {
+  if (Notifications) return Notifications;
+  if (Platform.OS === "web") return null;
+  try {
+    Notifications = await import("expo-notifications");
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowAlert: true,
+        shouldPlaySound: true,
+        shouldSetBadge: true,
+        shouldShowBanner: true,
+        shouldShowList: true,
+      }),
+    });
+    return Notifications;
+  } catch {
+    return null;
+  }
+}
 
 export async function requestNotificationPermissions(): Promise<boolean> {
   if (Platform.OS === "web") {
@@ -20,14 +31,17 @@ export async function requestNotificationPermissions(): Promise<boolean> {
     return true;
   }
 
-  const { status: existingStatus, canAskAgain } = await Notifications.getPermissionsAsync();
+  const N = await getNotifications();
+  if (!N) return false;
+
+  const { status: existingStatus, canAskAgain } = await N.getPermissionsAsync();
   let finalStatus = existingStatus;
 
   if (existingStatus !== "granted") {
     if (!canAskAgain) {
       return false;
     }
-    const { status } = await Notifications.requestPermissionsAsync();
+    const { status } = await N.requestPermissionsAsync();
     finalStatus = status;
   }
 
@@ -45,7 +59,10 @@ export async function areNotificationsEnabled(): Promise<boolean> {
     return stored === "true";
   }
 
-  const { status } = await Notifications.getPermissionsAsync();
+  const N = await getNotifications();
+  if (!N) return false;
+
+  const { status } = await N.getPermissionsAsync();
   if (status !== "granted") {
     await AsyncStorage.removeItem(NOTIF_KEY);
     return false;
@@ -61,7 +78,9 @@ export async function disableNotifications(): Promise<void> {
 
 export async function canAskForNotifications(): Promise<boolean> {
   if (Platform.OS === "web") return true;
-  const { canAskAgain, status } = await Notifications.getPermissionsAsync();
+  const N = await getNotifications();
+  if (!N) return false;
+  const { canAskAgain, status } = await N.getPermissionsAsync();
   return status !== "granted" && canAskAgain !== false;
 }
 
@@ -72,7 +91,10 @@ export async function sendLocalNotification(title: string, body: string, data?: 
     const enabled = await areNotificationsEnabled();
     if (!enabled) return;
 
-    await Notifications.scheduleNotificationAsync({
+    const N = await getNotifications();
+    if (!N) return;
+
+    await N.scheduleNotificationAsync({
       content: {
         title,
         body,
@@ -98,6 +120,8 @@ export async function sendMessageNotification(senderName: string, messageContent
 export async function setBadgeCount(count: number) {
   if (Platform.OS === "web") return;
   try {
-    await Notifications.setBadgeCountAsync(count);
+    const N = await getNotifications();
+    if (!N) return;
+    await N.setBadgeCountAsync(count);
   } catch (e) {}
 }
