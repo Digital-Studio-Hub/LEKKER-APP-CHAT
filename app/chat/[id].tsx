@@ -531,42 +531,43 @@ function MessageBubbleInner({
       style={[
         bubbleStyles.wrapper,
         isMe ? bubbleStyles.meWrapper : bubbleStyles.themWrapper,
-        isSelecting && { flexDirection: "row", alignItems: "center", gap: 8 },
       ]}
     >
-      {isSelecting && isMe && !message.isDeleted && (
-        <View style={{
-          width: 24,
-          height: 24,
-          borderRadius: 12,
-          borderWidth: 2,
-          borderColor: isSelected ? Colors.primary : Colors.textMuted,
-          backgroundColor: isSelected ? Colors.primary : "transparent",
-          alignItems: "center",
-          justifyContent: "center",
-        }}>
-          {isSelected && <Ionicons name="checkmark" size={16} color={Colors.background} />}
-        </View>
-      )}
-      <View style={[
-        bubbleStyles.bubble,
-        isMe ? bubbleStyles.meBubble : bubbleStyles.themBubble,
-        isSelected && { opacity: 0.85 },
-      ]}>
-        {isGroup && !isMe && senderName && (
-          <Text style={bubbleStyles.senderName}>{senderName}</Text>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        {isSelecting && isMe && !message.isDeleted && (
+          <View style={{
+            width: 24,
+            height: 24,
+            borderRadius: 12,
+            borderWidth: 2,
+            borderColor: isSelected ? Colors.primary : Colors.textMuted,
+            backgroundColor: isSelected ? Colors.primary : "transparent",
+            alignItems: "center",
+            justifyContent: "center",
+          }}>
+            {isSelected && <Ionicons name="checkmark" size={16} color={Colors.background} />}
+          </View>
         )}
-        {renderContent()}
-        <View style={bubbleStyles.metaRow}>
-          {message.editedAt && (
-            <Text style={[bubbleStyles.time, isMe ? bubbleStyles.meTime : bubbleStyles.themTime, { fontStyle: "italic" }]}>
-              edited
-            </Text>
+        <View style={[
+          bubbleStyles.bubble,
+          isMe ? bubbleStyles.meBubble : bubbleStyles.themBubble,
+          isSelected && { opacity: 0.85 },
+        ]}>
+          {isGroup && !isMe && senderName && (
+            <Text style={bubbleStyles.senderName}>{senderName}</Text>
           )}
-          <Text style={[bubbleStyles.time, isMe ? bubbleStyles.meTime : bubbleStyles.themTime]}>
-            {time}
-          </Text>
-          {isMe && <ReceiptIcon status={message.status} />}
+          {renderContent()}
+          <View style={bubbleStyles.metaRow}>
+            {message.editedAt && (
+              <Text style={[bubbleStyles.time, isMe ? bubbleStyles.meTime : bubbleStyles.themTime, { fontStyle: "italic" }]}>
+                edited
+              </Text>
+            )}
+            <Text style={[bubbleStyles.time, isMe ? bubbleStyles.meTime : bubbleStyles.themTime]}>
+              {time}
+            </Text>
+            {isMe && <ReceiptIcon status={message.status} />}
+          </View>
         </View>
       </View>
     </Pressable>
