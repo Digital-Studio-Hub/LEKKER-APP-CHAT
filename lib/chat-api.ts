@@ -26,6 +26,7 @@ export interface ServerMessage {
   fileSize: number | null;
   audioUri: string | null;
   audioDuration: number | null;
+  waveformData: string | null;
   latitude: string | null;
   longitude: string | null;
   locationName: string | null;

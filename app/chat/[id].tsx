@@ -63,10 +63,93 @@ function ReceiptIcon({ status }: { status?: string }) {
   return <Ionicons name="checkmark-done" size={14} color="#4CD964" />;
 }
 
-function VoiceNotePlayer({ uri, duration, isMe }: { uri: string; duration?: number; isMe: boolean }) {
+function downsampleWaveform(data: number[], targetCount: number): number[] {
+  if (data.length <= targetCount) return data;
+  const result: number[] = [];
+  const chunkSize = data.length / targetCount;
+  for (let i = 0; i < targetCount; i++) {
+    const start = Math.floor(i * chunkSize);
+    const end = Math.floor((i + 1) * chunkSize);
+    let max = 0;
+    for (let j = start; j < end && j < data.length; j++) {
+      if (data[j] > max) max = data[j];
+    }
+    result.push(max);
+  }
+  return result;
+}
+
+function generateWaveformFromId(id: string, barCount: number = 30): number[] {
+  const bars: number[] = [];
+  let seed = 0;
+  for (let i = 0; i < id.length; i++) {
+    seed = ((seed << 5) - seed + id.charCodeAt(i)) | 0;
+  }
+  for (let i = 0; i < barCount; i++) {
+    seed = (seed * 16807 + 7) % 2147483647;
+    const val = (seed % 100) / 100;
+    bars.push(0.15 + val * 0.85);
+  }
+  return bars;
+}
+
+function WaveformBars({
+  bars,
+  progress,
+  activeColor,
+  inactiveColor,
+  barCount = 30,
+  height = 28,
+}: {
+  bars: number[];
+  progress: number;
+  activeColor: string;
+  inactiveColor: string;
+  barCount?: number;
+  height?: number;
+}) {
+  const displayBars = bars.length > 0 ? bars : Array(barCount).fill(0.15);
+  const normalizedBars = displayBars.length > barCount
+    ? displayBars.slice(displayBars.length - barCount)
+    : displayBars.length < barCount
+      ? [...Array(barCount - displayBars.length).fill(0.15), ...displayBars]
+      : displayBars;
+
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", height, gap: 1.5, flex: 1 }}>
+      {normalizedBars.map((amp, i) => {
+        const barH = Math.max(3, amp * height);
+        const isActive = progress > 0 && i / normalizedBars.length < progress;
+        return (
+          <View
+            key={i}
+            style={{
+              flex: 1,
+              height: barH,
+              borderRadius: 1.5,
+              backgroundColor: isActive ? activeColor : inactiveColor,
+            }}
+          />
+        );
+      })}
+    </View>
+  );
+}
+
+function VoiceNotePlayer({ uri, duration, isMe, waveform }: { uri: string; duration?: number; isMe: boolean; waveform?: string | null }) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const soundRef = useRef<Audio.Sound | null>(null);
+
+  const bars = React.useMemo(() => {
+    if (waveform) {
+      try {
+        const parsed = JSON.parse(waveform);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed as number[];
+      } catch {}
+    }
+    return generateWaveformFromId(uri || "default");
+  }, [waveform, uri]);
 
   async function togglePlayback() {
     if (isPlaying && soundRef.current) {
@@ -110,15 +193,22 @@ function VoiceNotePlayer({ uri, duration, isMe }: { uri: string; duration?: numb
 
   const tColor = isMe ? Colors.background : Colors.text;
   const mColor = isMe ? "rgba(0,0,0,0.5)" : Colors.textMuted;
+  const barActiveColor = isMe ? "rgba(0,0,0,0.8)" : Colors.primary;
+  const barInactiveColor = isMe ? "rgba(0,0,0,0.25)" : "rgba(255,255,255,0.25)";
 
   return (
     <View style={vnStyles.container}>
       <Pressable onPress={togglePlayback} style={vnStyles.playBtn}>
         <Ionicons name={isPlaying ? "pause" : "play"} size={20} color={tColor} />
       </Pressable>
-      <View style={vnStyles.progressTrack}>
-        <View style={[vnStyles.progressFill, { width: `${Math.max(progress * 100, 2)}%`, backgroundColor: tColor }]} />
-      </View>
+      <WaveformBars
+        bars={bars}
+        progress={progress}
+        activeColor={barActiveColor}
+        inactiveColor={barInactiveColor}
+        barCount={30}
+        height={28}
+      />
       <Text style={[vnStyles.duration, { color: mColor }]}>
         {formatDuration(duration || 0)}
       </Text>
@@ -127,11 +217,9 @@ function VoiceNotePlayer({ uri, duration, isMe }: { uri: string; duration?: numb
 }
 
 const vnStyles = StyleSheet.create({
-  container: { flexDirection: "row", alignItems: "center", gap: 8, minWidth: isSmallScreen ? 120 : 160 },
+  container: { flexDirection: "row", alignItems: "center", gap: 8, minWidth: isSmallScreen ? 160 : 200 },
   playBtn: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center" },
-  progressTrack: { flex: 1, height: 4, backgroundColor: "rgba(255,255,255,0.2)", borderRadius: 2, overflow: "hidden" },
-  progressFill: { height: 4, borderRadius: 2 },
-  duration: { fontSize: 11, fontFamily: "Poppins_400Regular" },
+  duration: { fontSize: 11, fontFamily: "Poppins_400Regular", minWidth: 30 },
 });
 
 interface ParsedPollOption {
@@ -364,6 +452,7 @@ function MessageBubbleInner({
             uri={message.audioUri || ""}
             duration={message.audioDuration ?? undefined}
             isMe={isMe}
+            waveform={message.waveformData}
           />
         );
       case "location":
@@ -524,11 +613,14 @@ export default function ChatDetailScreen() {
   const [pollOptions, setPollOptions] = useState(["", ""]);
   const [editingMessage, setEditingMessage] = useState<ServerMessage | null>(null);
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set());
+  const [recordingWaveform, setRecordingWaveform] = useState<number[]>([]);
   const isSelecting = selectedMessageIds.size > 0;
   const inputRef = useRef<TextInput>(null);
   const refreshIntervalRef = useRef<ReturnType<typeof setInterval>>();
   const recordingRef = useRef<Audio.Recording | null>(null);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval>>();
+  const meteringIntervalRef = useRef<ReturnType<typeof setInterval>>();
+  const waveformRef = useRef<number[]>([]);
 
   useEffect(() => {
     loadChatData();
@@ -539,6 +631,7 @@ export default function ChatDetailScreen() {
     return () => {
       if (refreshIntervalRef.current) clearInterval(refreshIntervalRef.current);
       if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+      if (meteringIntervalRef.current) clearInterval(meteringIntervalRef.current);
     };
   }, [id]);
 
@@ -832,31 +925,60 @@ export default function ChatDetailScreen() {
     recordingRef.current = recording;
     setIsRecording(true);
     setRecordingDuration(0);
+    setRecordingWaveform([]);
+    waveformRef.current = [];
     recordingTimerRef.current = setInterval(() => {
       setRecordingDuration((d) => d + 1);
     }, 1000);
+    let sampleCount = 0;
+    meteringIntervalRef.current = setInterval(async () => {
+      if (!recordingRef.current) return;
+      try {
+        const status = await recordingRef.current.getStatusAsync();
+        if (status.isRecording && status.metering !== undefined) {
+          const dbVal = status.metering;
+          const normalized = Math.max(0.05, Math.min(1, (dbVal + 60) / 55));
+          waveformRef.current.push(normalized);
+        } else {
+          waveformRef.current.push(0.1);
+        }
+      } catch {
+        waveformRef.current.push(0.1);
+      }
+      sampleCount++;
+      if (sampleCount % 2 === 0) {
+        setRecordingWaveform(waveformRef.current.slice(-50));
+      }
+    }, 150);
   }
 
   async function handleStopRecording() {
     if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+    if (meteringIntervalRef.current) clearInterval(meteringIntervalRef.current);
     if (!recordingRef.current) {
       setIsRecording(false);
       return;
     }
+    const finalWaveform = [...waveformRef.current];
     const result = await stopVoiceRecording(recordingRef.current);
     recordingRef.current = null;
     setIsRecording(false);
     setRecordingDuration(0);
+    setRecordingWaveform([]);
+    waveformRef.current = [];
     if (result) {
+      const sampledWaveform = downsampleWaveform(finalWaveform, 30);
       await handleSendAttachment("voicenote", `🎤 Voice note (${formatDuration(result.audioDuration || 0)})`, {
         audioUri: result.audioUri,
         audioDuration: result.audioDuration,
+        waveformData: JSON.stringify(sampledWaveform),
       });
     }
   }
 
   async function handleCancelRecording() {
     if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+    if (meteringIntervalRef.current) clearInterval(meteringIntervalRef.current);
     if (recordingRef.current) {
       try {
         await recordingRef.current.stopAndUnloadAsync();
@@ -865,6 +987,8 @@ export default function ChatDetailScreen() {
     recordingRef.current = null;
     setIsRecording(false);
     setRecordingDuration(0);
+    setRecordingWaveform([]);
+    waveformRef.current = [];
   }
 
   function getSenderName(senderId: string): string | undefined {
@@ -1031,7 +1155,16 @@ export default function ChatDetailScreen() {
           <View style={styles.recordingBar}>
             <View style={styles.recordingDot} />
             <Text style={styles.recordingText}>{formatDuration(recordingDuration)}</Text>
-            <Text style={styles.recordingLabel}>Recording...</Text>
+            <View style={{ flex: 1, marginHorizontal: 8 }}>
+              <WaveformBars
+                bars={recordingWaveform}
+                progress={1}
+                activeColor={Colors.danger}
+                inactiveColor="rgba(255,59,48,0.3)"
+                barCount={25}
+                height={24}
+              />
+            </View>
           </View>
           <Pressable onPress={handleCancelRecording} style={styles.cancelRecButton}>
             <Ionicons name="close" size={20} color={Colors.danger} />
@@ -1331,11 +1464,6 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_600SemiBold",
     fontSize: 15,
     color: Colors.danger,
-  },
-  recordingLabel: {
-    fontFamily: "Poppins_400Regular",
-    fontSize: 13,
-    color: Colors.textMuted,
   },
   cancelRecButton: {
     width: 40,

@@ -101,6 +101,7 @@ export const chatMessages = pgTable("chat_messages", {
   fileSize: integer("file_size"),
   audioUri: text("audio_uri"),
   audioDuration: integer("audio_duration"),
+  waveformData: text("waveform_data"),
   latitude: text("latitude"),
   longitude: text("longitude"),
   locationName: varchar("location_name", { length: 255 }),

@@ -202,9 +202,17 @@ export async function startVoiceRecording(): Promise<Audio.Recording | null> {
       allowsRecordingIOS: true,
       playsInSilentModeIOS: true,
     });
-    const { recording } = await Audio.Recording.createAsync(
-      Audio.RecordingOptionsPresets.HIGH_QUALITY,
-    );
+    const recordingOptions = {
+      ...Audio.RecordingOptionsPresets.HIGH_QUALITY,
+      isMeteringEnabled: true,
+    };
+    if (recordingOptions.android) {
+      (recordingOptions.android as any).isMeteringEnabled = true;
+    }
+    if (recordingOptions.ios) {
+      (recordingOptions.ios as any).isMeteringEnabled = true;
+    }
+    const { recording } = await Audio.Recording.createAsync(recordingOptions);
     return recording;
   } catch {
     Alert.alert("Error", "Could not start recording.");

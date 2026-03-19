@@ -273,6 +273,7 @@ class PgStorage implements IStorage {
       if (extras.fileSize) values.fileSize = extras.fileSize;
       if (extras.audioUri) values.audioUri = extras.audioUri;
       if (extras.audioDuration) values.audioDuration = extras.audioDuration;
+      if (extras.waveformData) values.waveformData = extras.waveformData;
       if (extras.latitude) values.latitude = extras.latitude;
       if (extras.longitude) values.longitude = extras.longitude;
       if (extras.locationName) values.locationName = extras.locationName;
