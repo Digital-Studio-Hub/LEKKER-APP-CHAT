@@ -204,6 +204,10 @@ function MessageBubbleInner({
   onReload,
   onEdit,
   onDelete,
+  isSelecting,
+  isSelected,
+  onToggleSelect,
+  onStartSelect,
 }: {
   message: ServerMessage;
   isMe: boolean;
@@ -213,6 +217,10 @@ function MessageBubbleInner({
   onReload: () => void;
   onEdit: (msg: ServerMessage) => void;
   onDelete: (msg: ServerMessage) => void;
+  isSelecting: boolean;
+  isSelected: boolean;
+  onToggleSelect: (msg: ServerMessage) => void;
+  onStartSelect: (msg: ServerMessage) => void;
 }) {
   const time = new Date(message.createdAt).toLocaleTimeString([], {
     hour: "2-digit",
@@ -223,7 +231,18 @@ function MessageBubbleInner({
   const mColor = isMe ? "rgba(0,0,0,0.5)" : Colors.textMuted;
 
   function handleLongPress() {
-    if (!isMe || message.isDeleted) return;
+    if (message.isDeleted) return;
+
+    if (isSelecting) {
+      if (isMe && !message.isDeleted) {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        onToggleSelect(message);
+      }
+      return;
+    }
+
+    if (!isMe) return;
+
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     if (Platform.OS === "ios") {
@@ -236,6 +255,8 @@ function MessageBubbleInner({
       }
       options.push("Delete");
       actions.push(() => onDelete(message));
+      options.push("Select");
+      actions.push(() => onStartSelect(message));
       options.push("Cancel");
 
       ActionSheetIOS.showActionSheetWithOptions(
@@ -256,10 +277,18 @@ function MessageBubbleInner({
         alertButtons.push({ text: "Edit", onPress: () => onEdit(message) });
       }
       alertButtons.push({ text: "Delete", style: "destructive", onPress: () => onDelete(message) });
+      alertButtons.push({ text: "Select", onPress: () => onStartSelect(message) });
       alertButtons.push({ text: "Cancel", style: "cancel" });
 
       Alert.alert("Message", "What would you like to do?", alertButtons);
     }
+  }
+
+  function handleTap() {
+    if (!isSelecting) return;
+    if (!isMe || message.isDeleted) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    onToggleSelect(message);
   }
 
   if (message.isDeleted) {
@@ -407,11 +436,34 @@ function MessageBubbleInner({
 
   return (
     <Pressable
-      onLongPress={isMe ? handleLongPress : undefined}
+      onLongPress={handleLongPress}
+      onPress={isSelecting ? handleTap : undefined}
       delayLongPress={400}
-      style={[bubbleStyles.wrapper, isMe ? bubbleStyles.meWrapper : bubbleStyles.themWrapper]}
+      style={[
+        bubbleStyles.wrapper,
+        isMe ? bubbleStyles.meWrapper : bubbleStyles.themWrapper,
+        isSelecting && { flexDirection: "row", alignItems: "center", gap: 8 },
+      ]}
     >
-      <View style={[bubbleStyles.bubble, isMe ? bubbleStyles.meBubble : bubbleStyles.themBubble]}>
+      {isSelecting && isMe && !message.isDeleted && (
+        <View style={{
+          width: 24,
+          height: 24,
+          borderRadius: 12,
+          borderWidth: 2,
+          borderColor: isSelected ? Colors.primary : Colors.textMuted,
+          backgroundColor: isSelected ? Colors.primary : "transparent",
+          alignItems: "center",
+          justifyContent: "center",
+        }}>
+          {isSelected && <Ionicons name="checkmark" size={16} color={Colors.background} />}
+        </View>
+      )}
+      <View style={[
+        bubbleStyles.bubble,
+        isMe ? bubbleStyles.meBubble : bubbleStyles.themBubble,
+        isSelected && { opacity: 0.85 },
+      ]}>
         {isGroup && !isMe && senderName && (
           <Text style={bubbleStyles.senderName}>{senderName}</Text>
         )}
@@ -471,6 +523,8 @@ export default function ChatDetailScreen() {
   const [pollQuestion, setPollQuestion] = useState("");
   const [pollOptions, setPollOptions] = useState(["", ""]);
   const [editingMessage, setEditingMessage] = useState<ServerMessage | null>(null);
+  const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set());
+  const isSelecting = selectedMessageIds.size > 0;
   const inputRef = useRef<TextInput>(null);
   const refreshIntervalRef = useRef<ReturnType<typeof setInterval>>();
   const recordingRef = useRef<Audio.Recording | null>(null);
@@ -511,6 +565,17 @@ export default function ChatDetailScreen() {
     if (!id) return;
     const msgs = await fetchChatMessages(id);
     setMessages(msgs);
+    setSelectedMessageIds((prev) => {
+      if (prev.size === 0) return prev;
+      const validIds = new Set<string>();
+      for (const msgId of prev) {
+        const msg = msgs.find((m) => m.id === msgId);
+        if (msg && msg.senderId === myUserId && !msg.isDeleted) {
+          validIds.add(msgId);
+        }
+      }
+      return validIds.size === prev.size ? prev : validIds;
+    });
   }
 
   async function checkBlocked() {
@@ -610,6 +675,59 @@ export default function ChatDetailScreen() {
               await loadMessages();
             },
           },
+        ]
+      );
+    }
+  }
+
+  function handleToggleSelect(msg: ServerMessage) {
+    setSelectedMessageIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(msg.id)) {
+        next.delete(msg.id);
+      } else {
+        next.add(msg.id);
+      }
+      return next;
+    });
+  }
+
+  function handleStartSelect(msg: ServerMessage) {
+    if (msg.senderId === myUserId && !msg.isDeleted) {
+      setSelectedMessageIds(new Set([msg.id]));
+    }
+  }
+
+  function handleCancelSelect() {
+    setSelectedMessageIds(new Set());
+  }
+
+  async function handleDeleteSelected() {
+    if (!id || selectedMessageIds.size === 0) return;
+    const count = selectedMessageIds.size;
+    const msgText = `Delete ${count} message${count > 1 ? "s" : ""} for everyone? This cannot be undone.`;
+
+    async function doDelete() {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      const ids = Array.from(selectedMessageIds);
+      for (const msgId of ids) {
+        await deleteMessage(id, msgId);
+      }
+      setSelectedMessageIds(new Set());
+      await loadMessages();
+    }
+
+    if (Platform.OS === "web") {
+      if (window.confirm(msgText)) {
+        await doDelete();
+      }
+    } else {
+      Alert.alert(
+        "Delete Messages",
+        msgText,
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Delete", style: "destructive", onPress: doDelete },
         ]
       );
     }
@@ -770,70 +888,82 @@ export default function ChatDetailScreen() {
 
   return (
     <KeyboardAvoidingView style={styles.container} behavior="padding" keyboardVerticalOffset={0}>
-      <View style={[styles.header, { paddingTop: insets.top + webTopInset }]}>
-        <Pressable onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons name="chevron-back" size={28} color={Colors.text} />
-        </Pressable>
-        {chat && (
-          <Pressable
-            style={styles.headerCenter}
-            onPress={() => {
-              if (!isGroup && otherParticipant) {
-                router.push({
-                  pathname: "/user-profile/[id]",
-                  params: {
-                    id: otherParticipant.id,
-                    name: chatName || "Unknown",
-                    avatarColor: avatarColor || "#F7DC6F",
-                  },
-                });
-              }
-            }}
-          >
-            <View style={[styles.avatar, { backgroundColor: avatarColor }]}>
-              {profilePhoto ? (
-                <Image source={{ uri: profilePhoto }} style={{ width: 36, height: 36, borderRadius: 18 }} />
-              ) : isGroup ? (
-                <Ionicons name="people" size={16} color="#fff" />
-              ) : (
-                <Text style={styles.avatarText}>
-                  {chatName.split(" ").map((w) => w[0]).join("").substring(0, 2).toUpperCase()}
-                </Text>
-              )}
-            </View>
-            <View>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                <Text style={styles.headerName} numberOfLines={1}>{chatName}</Text>
-                {isVerified && !isGroup && (
-                  <Ionicons name="checkmark-circle" size={16} color={Colors.primary} />
+      {isSelecting ? (
+        <View style={[styles.header, styles.selectionHeader, { paddingTop: insets.top + webTopInset }]}>
+          <Pressable onPress={handleCancelSelect} style={styles.backButton}>
+            <Ionicons name="close" size={28} color={Colors.text} />
+          </Pressable>
+          <Text style={styles.selectionCount}>{selectedMessageIds.size} selected</Text>
+          <Pressable onPress={handleDeleteSelected} style={styles.backButton}>
+            <Ionicons name="trash-outline" size={22} color={Colors.danger} />
+          </Pressable>
+        </View>
+      ) : (
+        <View style={[styles.header, { paddingTop: insets.top + webTopInset }]}>
+          <Pressable onPress={() => router.back()} style={styles.backButton}>
+            <Ionicons name="chevron-back" size={28} color={Colors.text} />
+          </Pressable>
+          {chat && (
+            <Pressable
+              style={styles.headerCenter}
+              onPress={() => {
+                if (!isGroup && otherParticipant) {
+                  router.push({
+                    pathname: "/user-profile/[id]",
+                    params: {
+                      id: otherParticipant.id,
+                      name: chatName || "Unknown",
+                      avatarColor: avatarColor || "#F7DC6F",
+                    },
+                  });
+                }
+              }}
+            >
+              <View style={[styles.avatar, { backgroundColor: avatarColor }]}>
+                {profilePhoto ? (
+                  <Image source={{ uri: profilePhoto }} style={{ width: 36, height: 36, borderRadius: 18 }} />
+                ) : isGroup ? (
+                  <Ionicons name="people" size={16} color="#fff" />
+                ) : (
+                  <Text style={styles.avatarText}>
+                    {chatName.split(" ").map((w) => w[0]).join("").substring(0, 2).toUpperCase()}
+                  </Text>
                 )}
               </View>
-              {isGroup && chat.participants && (
-                <Text style={styles.headerMembers} numberOfLines={1}>
-                  {chat.participants.map((p) => p.firstName || p.username).join(", ")}
-                </Text>
-              )}
-              {!isGroup && otherParticipant && (
+              <View>
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                  <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: getPresenceColor(otherParticipant.presence) }} />
-                  <Text style={styles.headerMembers}>{getPresenceLabel(otherParticipant.presence)}</Text>
+                  <Text style={styles.headerName} numberOfLines={1}>{chatName}</Text>
+                  {isVerified && !isGroup && (
+                    <Ionicons name="checkmark-circle" size={16} color={Colors.primary} />
+                  )}
                 </View>
-              )}
-            </View>
-          </Pressable>
-        )}
-        {chat && !isGroup ? (
-          <Pressable onPress={handleToggleBlock} style={styles.backButton}>
-            <Ionicons
-              name={isBlocked ? "ban" : "ban-outline"}
-              size={22}
-              color={isBlocked ? Colors.danger : Colors.textMuted}
-            />
-          </Pressable>
-        ) : (
-          <View style={styles.backButton} />
-        )}
-      </View>
+                {isGroup && chat.participants && (
+                  <Text style={styles.headerMembers} numberOfLines={1}>
+                    {chat.participants.map((p) => p.firstName || p.username).join(", ")}
+                  </Text>
+                )}
+                {!isGroup && otherParticipant && (
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                    <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: getPresenceColor(otherParticipant.presence) }} />
+                    <Text style={styles.headerMembers}>{getPresenceLabel(otherParticipant.presence)}</Text>
+                  </View>
+                )}
+              </View>
+            </Pressable>
+          )}
+          {chat && !isGroup ? (
+            <Pressable onPress={handleToggleBlock} style={styles.backButton}>
+              <Ionicons
+                name={isBlocked ? "ban" : "ban-outline"}
+                size={22}
+                color={isBlocked ? Colors.danger : Colors.textMuted}
+              />
+            </Pressable>
+          ) : (
+            <View style={styles.backButton} />
+          )}
+        </View>
+      )}
 
       <FlatList
         data={reversedMessages}
@@ -848,6 +978,10 @@ export default function ChatDetailScreen() {
             onReload={loadMessages}
             onEdit={handleEditMessage}
             onDelete={handleDeleteMessage}
+            isSelecting={isSelecting}
+            isSelected={selectedMessageIds.has(item.id)}
+            onToggleSelect={handleToggleSelect}
+            onStartSelect={handleStartSelect}
           />
         )}
         inverted
@@ -1043,6 +1177,8 @@ const styles = StyleSheet.create({
     borderBottomWidth: 0.5,
     borderBottomColor: Colors.border,
   },
+  selectionHeader: { backgroundColor: Colors.cardElevated },
+  selectionCount: { fontFamily: "Poppins_600SemiBold", fontSize: 17, color: Colors.text, flex: 1, textAlign: "center" },
   backButton: { width: 44, height: 44, minWidth: 44, minHeight: 44, alignItems: "center", justifyContent: "center" },
   headerCenter: { flexDirection: "row", alignItems: "center", gap: isSmallScreen ? 6 : 10, flex: 1, justifyContent: "center" },
   avatar: {
