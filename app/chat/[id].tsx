@@ -968,16 +968,26 @@ export default function ChatDetailScreen() {
             maxLength={2000}
             blurOnSubmit={false}
           />
-          <Pressable
-            onPress={() => {
-              handleSend();
-              inputRef.current?.focus();
-            }}
-            style={[styles.sendButton, !inputText.trim() && styles.sendButtonDisabled]}
-            disabled={!inputText.trim()}
-          >
-            <Ionicons name="send" size={18} color={Colors.background} />
-          </Pressable>
+          {inputText.trim() ? (
+            <Pressable
+              onPress={() => {
+                handleSend();
+                inputRef.current?.focus();
+              }}
+              style={styles.sendButton}
+              testID="send-button"
+            >
+              <Ionicons name="send" size={18} color={Colors.background} />
+            </Pressable>
+          ) : (
+            <Pressable
+              onPress={handleStartRecording}
+              style={styles.micButton}
+              testID="mic-button"
+            >
+              <Ionicons name="mic" size={22} color={Colors.background} />
+            </Pressable>
+          )}
         </View>
         </View>
       )}
@@ -1171,6 +1181,17 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   sendButtonDisabled: { opacity: 0.4 },
+  micButton: {
+    width: 44,
+    height: 44,
+    minWidth: 44,
+    minHeight: 44,
+    borderRadius: 22,
+    backgroundColor: Colors.danger,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 2,
+  },
   recordingBar: {
     flex: 1,
     flexDirection: "row",
