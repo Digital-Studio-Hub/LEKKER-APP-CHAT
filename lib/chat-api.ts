@@ -1,3 +1,5 @@
+import { Platform } from "react-native";
+import * as FileSystem from "expo-file-system";
 import { apiRequest, getApiUrl } from "@/lib/query-client";
 import { getAuthToken } from "@/lib/auth-token";
 
@@ -270,4 +272,40 @@ export function getPresenceColor(presence: string | null | undefined): string {
 
 export function getPresenceLabel(presence: string | null | undefined): string {
   return PRESENCE_LABELS[presence || "offline"] || PRESENCE_LABELS.offline;
+}
+
+export async function uploadChatAttachment(localUri: string, contentType?: string): Promise<string | null> {
+  try {
+    const uploadRes = await apiRequest("POST", "/api/objects/upload");
+    if (!uploadRes.ok) return null;
+    const { uploadURL } = await uploadRes.json();
+
+    if (Platform.OS === "web") {
+      const response = await globalThis.fetch(localUri);
+      const blob = await response.blob();
+      const putRes = await globalThis.fetch(uploadURL, {
+        method: "PUT",
+        headers: { "Content-Type": contentType || blob.type || "application/octet-stream" },
+        body: blob,
+      });
+      if (!putRes.ok) return null;
+    } else {
+      const uploadResult = await FileSystem.uploadAsync(uploadURL, localUri, {
+        httpMethod: "PUT",
+        headers: { "Content-Type": contentType || "application/octet-stream" },
+        uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+      });
+      if (uploadResult.status < 200 || uploadResult.status >= 300) return null;
+    }
+
+    const finalizeRes = await apiRequest("POST", "/api/chat-attachments/finalize", { uploadedURL: uploadURL });
+    if (!finalizeRes.ok) return null;
+    const { objectPath } = await finalizeRes.json();
+
+    const baseUrl = getApiUrl();
+    return `${baseUrl}${objectPath}`;
+  } catch (e) {
+    console.error("Failed to upload attachment:", e);
+    return null;
+  }
 }

@@ -50,6 +50,7 @@ import {
   getPresenceLabel,
   editMessage,
   deleteMessage,
+  uploadChatAttachment,
 } from "@/lib/chat-api";
 
 function ReceiptIcon({ status }: { status?: string }) {
@@ -837,9 +838,10 @@ export default function ChatDetailScreen() {
   async function handlePickImage() {
     setShowAttachMenu(false);
     const result = await pickImage();
-    if (result) {
+    if (result && result.imageUri) {
+      const uploadedUri = await uploadChatAttachment(result.imageUri, "image/jpeg");
       await handleSendAttachment("image", "📷 Photo", {
-        imageUri: result.imageUri,
+        imageUri: uploadedUri || result.imageUri,
       });
     }
   }
@@ -847,9 +849,10 @@ export default function ChatDetailScreen() {
   async function handleTakePhoto() {
     setShowAttachMenu(false);
     const result = await takePhoto();
-    if (result) {
+    if (result && result.imageUri) {
+      const uploadedUri = await uploadChatAttachment(result.imageUri, "image/jpeg");
       await handleSendAttachment("image", "📷 Photo", {
-        imageUri: result.imageUri,
+        imageUri: uploadedUri || result.imageUri,
       });
     }
   }
@@ -857,9 +860,10 @@ export default function ChatDetailScreen() {
   async function handlePickDocument() {
     setShowAttachMenu(false);
     const result = await pickDocument();
-    if (result) {
+    if (result && result.fileUri) {
+      const uploadedUri = await uploadChatAttachment(result.fileUri, "application/octet-stream");
       await handleSendAttachment("file", `📎 ${result.fileName || "File"}`, {
-        fileUri: result.fileUri,
+        fileUri: uploadedUri || result.fileUri,
         fileName: result.fileName,
         fileSize: result.fileSize,
       });
@@ -967,10 +971,11 @@ export default function ChatDetailScreen() {
     setRecordingDuration(0);
     setRecordingWaveform([]);
     waveformRef.current = [];
-    if (result) {
+    if (result && result.audioUri) {
       const sampledWaveform = downsampleWaveform(finalWaveform, 30);
+      const uploadedUri = await uploadChatAttachment(result.audioUri, "audio/m4a");
       await handleSendAttachment("voicenote", `🎤 Voice note (${formatDuration(result.audioDuration || 0)})`, {
-        audioUri: result.audioUri,
+        audioUri: uploadedUri || result.audioUri,
         audioDuration: result.audioDuration,
         waveformData: JSON.stringify(sampledWaveform),
       });

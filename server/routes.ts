@@ -651,6 +651,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post("/api/chat-attachments/finalize", authMiddleware, uploadLimiter, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { uploadedURL } = req.body;
+      if (!uploadedURL || typeof uploadedURL !== "string") {
+        return res.status(400).json({ message: "uploadedURL is required" });
+      }
+      const objectStorageService = new ObjectStorageService();
+      const objectPath = await objectStorageService.trySetObjectEntityAclPolicy(
+        uploadedURL,
+        {
+          owner: req.user!.userId,
+          visibility: "public",
+        },
+      );
+      res.json({ objectPath });
+    } catch (error) {
+      console.error("Chat attachment finalize error:", error);
+      res.status(500).json({ message: "Failed to finalize attachment" });
+    }
+  });
+
   app.post("/api/user/profile-image", authMiddleware, uploadLimiter, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { imageURL } = req.body;

@@ -8,7 +8,7 @@ A business messaging app for Lekker Network - connecting Lekkerpreneurs with the
 - **Database**: PostgreSQL via Drizzle ORM
 - **Auth**: JWT (jsonwebtoken) + bcrypt password hashing (12 rounds)
 - **AI**: OpenRouter (xAI Grok 3 Mini) via Replit AI Integrations for CledwynAI assistant
-- **Storage**: AsyncStorage for local data, SecureStore for auth tokens (native), PostgreSQL for users/auth
+- **Storage**: AsyncStorage for local data, SecureStore for auth tokens (native), PostgreSQL for users/auth, Replit Object Storage for chat attachments (voice notes, images, files)
 - **Font**: Poppins (Google Fonts)
 
 ## Architecture
@@ -47,6 +47,7 @@ A business messaging app for Lekker Network - connecting Lekkerpreneurs with the
   - `/api/auth/profile` - Update user profile (protected)
   - `/api/auth/logout` - Logout with audit logging (protected)
   - `/api/objects/upload` - Get presigned upload URL (protected, rate-limited)
+  - `/api/chat-attachments/finalize` - Finalize uploaded chat attachment with ACL (protected, rate-limited)
   - `/api/user/profile-image` - Set/remove profile image via object storage (protected, rate-limited)
   - `/objects/*` - Serve objects from storage (public ACL checked)
   - `/public-objects/*` - Serve public objects from storage
