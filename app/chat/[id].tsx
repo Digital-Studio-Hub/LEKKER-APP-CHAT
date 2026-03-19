@@ -22,7 +22,7 @@ import { Audio } from "expo-av";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/lib/auth-context";
 import { storage } from "@/lib/storage";
-import { isSmallScreen, fontScale, responsivePadding } from "@/lib/responsive";
+import { isSmallScreen, fontScale } from "@/lib/responsive";
 import {
   pickImage,
   takePhoto,
@@ -37,7 +37,6 @@ import {
 import {
   ServerMessage,
   ServerChat,
-  ChatParticipant,
   fetchChatMessages,
   sendChatMessage,
   getChatDetail,
@@ -149,9 +148,8 @@ function PollBubble({ message, isMe, myUserId, onVote }: { message: ServerMessag
     }
   } catch {}
   const totalVotes = options.reduce((sum, o) => sum + (o.votes?.length || 0), 0);
-  const myVote = options.find((o) => o.votes?.includes(myUserId));
 
-  async function handleVote(optionId: string) {
+  async function handleVote(_optionId: string) {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     onVote();
   }
@@ -216,7 +214,6 @@ function MessageBubbleInner({
   onEdit: (msg: ServerMessage) => void;
   onDelete: (msg: ServerMessage) => void;
 }) {
-  const [showMenu, setShowMenu] = useState(false);
   const time = new Date(message.createdAt).toLocaleTimeString([], {
     hour: "2-digit",
     minute: "2-digit",
@@ -225,10 +222,44 @@ function MessageBubbleInner({
   const tColor = isMe ? Colors.background : Colors.text;
   const mColor = isMe ? "rgba(0,0,0,0.5)" : Colors.textMuted;
 
-  function handleToggleMenu() {
+  function handleLongPress() {
     if (!isMe || message.isDeleted) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setShowMenu(!showMenu);
+
+    if (Platform.OS === "ios") {
+      const options: string[] = [];
+      const actions: (() => void)[] = [];
+
+      if (msgType === "text") {
+        options.push("Edit");
+        actions.push(() => onEdit(message));
+      }
+      options.push("Delete");
+      actions.push(() => onDelete(message));
+      options.push("Cancel");
+
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options,
+          destructiveButtonIndex: options.indexOf("Delete"),
+          cancelButtonIndex: options.length - 1,
+        },
+        (buttonIndex) => {
+          if (buttonIndex < actions.length) {
+            actions[buttonIndex]();
+          }
+        },
+      );
+    } else {
+      const alertButtons: { text: string; onPress?: () => void; style?: "cancel" | "destructive" | "default" }[] = [];
+      if (msgType === "text") {
+        alertButtons.push({ text: "Edit", onPress: () => onEdit(message) });
+      }
+      alertButtons.push({ text: "Delete", style: "destructive", onPress: () => onDelete(message) });
+      alertButtons.push({ text: "Cancel", style: "cancel" });
+
+      Alert.alert("Message", "What would you like to do?", alertButtons);
+    }
   }
 
   if (message.isDeleted) {
@@ -376,55 +407,27 @@ function MessageBubbleInner({
 
   return (
     <Pressable
-      onLongPress={isMe ? handleToggleMenu : undefined}
+      onLongPress={isMe ? handleLongPress : undefined}
+      delayLongPress={400}
       style={[bubbleStyles.wrapper, isMe ? bubbleStyles.meWrapper : bubbleStyles.themWrapper]}
     >
-      <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 4 }}>
-        {isMe && (
-          <Pressable onPress={handleToggleMenu} style={bubbleStyles.msgOptionsBtn} testID={`msg-options-${message.id}`}>
-            <Ionicons name="ellipsis-vertical" size={14} color={Colors.textMuted} />
-          </Pressable>
+      <View style={[bubbleStyles.bubble, isMe ? bubbleStyles.meBubble : bubbleStyles.themBubble]}>
+        {isGroup && !isMe && senderName && (
+          <Text style={bubbleStyles.senderName}>{senderName}</Text>
         )}
-        <View style={[bubbleStyles.bubble, isMe ? bubbleStyles.meBubble : bubbleStyles.themBubble]}>
-          {isGroup && !isMe && senderName && (
-            <Text style={bubbleStyles.senderName}>{senderName}</Text>
-          )}
-          {renderContent()}
-          <View style={bubbleStyles.metaRow}>
-            {message.editedAt && (
-              <Text style={[bubbleStyles.time, isMe ? bubbleStyles.meTime : bubbleStyles.themTime, { fontStyle: "italic" }]}>
-                edited
-              </Text>
-            )}
-            <Text style={[bubbleStyles.time, isMe ? bubbleStyles.meTime : bubbleStyles.themTime]}>
-              {time}
+        {renderContent()}
+        <View style={bubbleStyles.metaRow}>
+          {message.editedAt && (
+            <Text style={[bubbleStyles.time, isMe ? bubbleStyles.meTime : bubbleStyles.themTime, { fontStyle: "italic" }]}>
+              edited
             </Text>
-            {isMe && <ReceiptIcon status={message.status} />}
-          </View>
+          )}
+          <Text style={[bubbleStyles.time, isMe ? bubbleStyles.meTime : bubbleStyles.themTime]}>
+            {time}
+          </Text>
+          {isMe && <ReceiptIcon status={message.status} />}
         </View>
       </View>
-      {showMenu && (
-        <View style={bubbleStyles.msgMenu}>
-          {msgType === "text" && (
-            <Pressable
-              style={bubbleStyles.msgMenuItem}
-              onPress={() => { setShowMenu(false); onEdit(message); }}
-              testID="edit-message-btn"
-            >
-              <Ionicons name="pencil-outline" size={16} color={Colors.primary} />
-              <Text style={bubbleStyles.msgMenuText}>Edit</Text>
-            </Pressable>
-          )}
-          <Pressable
-            style={bubbleStyles.msgMenuItem}
-            onPress={() => { setShowMenu(false); onDelete(message); }}
-            testID="delete-message-btn"
-          >
-            <Ionicons name="trash-outline" size={16} color={Colors.danger} />
-            <Text style={[bubbleStyles.msgMenuText, { color: Colors.danger }]}>Delete</Text>
-          </Pressable>
-        </View>
-      )}
     </Pressable>
   );
 }
@@ -446,27 +449,6 @@ const bubbleStyles = StyleSheet.create({
   time: { fontFamily: "Poppins_400Regular", fontSize: fontScale(10) },
   meTime: { color: "rgba(0,0,0,0.4)" },
   themTime: { color: Colors.textMuted },
-  msgOptionsBtn: { paddingTop: 8, paddingHorizontal: 2, opacity: 0.6 },
-  msgMenu: {
-    flexDirection: "row",
-    alignSelf: "flex-end",
-    backgroundColor: Colors.cardElevated,
-    borderRadius: 10,
-    marginTop: 4,
-    overflow: "hidden",
-  },
-  msgMenuItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  msgMenuText: {
-    fontFamily: "Poppins_500Medium",
-    fontSize: 13,
-    color: Colors.text,
-  },
 });
 
 function generateId(): string {
@@ -1180,7 +1162,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginBottom: 2,
   },
-  sendButtonDisabled: { opacity: 0.4 },
   micButton: {
     width: 44,
     height: 44,
