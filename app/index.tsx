@@ -76,7 +76,7 @@ export default function LoginScreen() {
   const [identifier, setIdentifier] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
 
-  const [resetEmail, setResetEmail] = useState("");
+  const [resetIdentifier, setResetIdentifier] = useState("");
   const [resetCode, setResetCode] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmNewPassword, setConfirmNewPassword] = useState("");
@@ -201,8 +201,11 @@ export default function LoginScreen() {
 
   async function handleForgotPassword() {
     const e: FormErrors = {};
-    if (!resetEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(resetEmail)) {
-      e.resetEmail = "Please enter a valid email address";
+    const val = resetIdentifier.trim();
+    const isPhone = /^\+?\d[\d\s-]{5,}$/.test(val);
+    const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val);
+    if (!val || (!isPhone && !isEmail)) {
+      e.resetIdentifier = "Please enter a valid email or phone number";
     }
     setErrors(e);
     if (Object.keys(e).length > 0) return;
@@ -213,14 +216,14 @@ export default function LoginScreen() {
       const response = await fetch(new URL("/api/auth/forgot-password", getApiUrl()).toString(), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: resetEmail.trim().toLowerCase() }),
+        body: JSON.stringify({ identifier: val.toLowerCase() }),
       });
       const data = await response.json();
       if (!response.ok) {
         setGeneralError(data.message || "Something went wrong");
         return;
       }
-      setSuccessMessage("A 6-digit reset code has been sent to your email.");
+      setSuccessMessage("A 6-digit reset code has been sent to your phone and email.");
       setMode("resetCode");
       clearErrors();
     } catch {
@@ -244,7 +247,7 @@ export default function LoginScreen() {
       const response = await fetch(new URL("/api/auth/verify-reset-code", getApiUrl()).toString(), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: resetEmail.trim().toLowerCase(), code: resetCode.trim() }),
+        body: JSON.stringify({ email: resetIdentifier.trim().toLowerCase(), code: resetCode.trim() }),
       });
       const data = await response.json();
       if (!response.ok) {
@@ -278,7 +281,7 @@ export default function LoginScreen() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          email: resetEmail.trim().toLowerCase(),
+          email: resetIdentifier.trim().toLowerCase(),
           code: resetCode.trim(),
           newPassword,
         }),
@@ -423,24 +426,24 @@ export default function LoginScreen() {
           ) : mode === "forgot" ? (
             <>
               <Text style={styles.resetTitle}>Reset Password</Text>
-              <Text style={styles.resetSubtitle}>Enter your email address and we'll send you a code to reset your password.</Text>
+              <Text style={styles.resetSubtitle}>Enter your email or phone number and we'll send you a code to reset your password.</Text>
 
-              <Text style={styles.label}>Email address</Text>
+              <Text style={styles.label}>Email or phone number</Text>
               <TextInput
-                style={[styles.input, errors.resetEmail ? styles.inputError : null]}
-                placeholder="your@email.com"
+                style={[styles.input, errors.resetIdentifier ? styles.inputError : null]}
+                placeholder="email@example.com or +27..."
                 placeholderTextColor={Colors.textMuted}
-                value={resetEmail}
-                onChangeText={(t) => { setResetEmail(t); if (errors.resetEmail) setErrors((e) => ({ ...e, resetEmail: "" })); }}
+                value={resetIdentifier}
+                onChangeText={(t) => { setResetIdentifier(t); if (errors.resetIdentifier) setErrors((e) => ({ ...e, resetIdentifier: "" })); }}
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoCorrect={false}
                 returnKeyType="go"
                 onSubmitEditing={handleForgotPassword}
-                accessibilityLabel="Reset email address"
-                testID="reset-email"
+                accessibilityLabel="Email or phone number"
+                testID="reset-identifier"
               />
-              {errors.resetEmail ? <Text style={styles.fieldError}>{errors.resetEmail}</Text> : null}
+              {errors.resetIdentifier ? <Text style={styles.fieldError}>{errors.resetIdentifier}</Text> : null}
 
               <Pressable
                 style={({ pressed }) => [styles.button, pressed && styles.buttonPressed, isSubmitting && styles.buttonDisabled]}
@@ -462,7 +465,7 @@ export default function LoginScreen() {
           ) : mode === "resetCode" ? (
             <>
               <Text style={styles.resetTitle}>Enter Reset Code</Text>
-              <Text style={styles.resetSubtitle}>We sent a 6-digit code to {resetEmail}. Enter it below.</Text>
+              <Text style={styles.resetSubtitle}>We sent a 6-digit code to {resetIdentifier}. Enter it below.</Text>
 
               {successMessage ? (
                 <View style={styles.successBanner}>

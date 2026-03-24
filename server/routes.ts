@@ -17,6 +17,7 @@ import { ObjectStorageService, ObjectNotFoundError } from "./objectStorage";
 import { ObjectPermission } from "./objectAcl";
 import { findLekkerpreneurByPhoneOrEmail, fetchDirectory as fetchLekkerDirectory, fetchLekkerpreneurById, fetchWorkspaceById, fetchWorkspaces, extractLekkerpreneurProfile, buildSyncUserResponse, buildDirectoryEntry, buildWorkspaceDirectoryEntry, type LekkerNetworkEntry, type WorkspaceDetail } from "./lekkerNetwork";
 import { sendPasswordResetEmail } from "./gmail";
+import { sendPasswordResetSMS } from "./twilio";
 
 async function enrichParticipants(chatId: string) {
   const rawParticipants = await storage.getChatParticipants(chatId);
@@ -237,14 +238,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/auth/forgot-password", resetRequestLimiter, async (req: Request, res: Response) => {
     try {
-      const { email } = req.body;
-      if (!email || typeof email !== "string") {
-        return res.status(400).json({ message: "Email address is required" });
+      const { identifier } = req.body;
+      if (!identifier || typeof identifier !== "string") {
+        return res.status(400).json({ message: "Email or phone number is required" });
       }
 
-      const user = await storage.getUserByEmail(email.trim().toLowerCase());
+      const trimmed = identifier.trim().toLowerCase();
+      const isPhone = /^\+?\d[\d\s-]{5,}$/.test(trimmed);
+      let user;
+      if (isPhone) {
+        const cleanPhone = trimmed.replace(/[\s-]/g, "");
+        user = await storage.getUserByPhone(cleanPhone);
+      } else {
+        user = await storage.getUserByEmail(trimmed);
+      }
+
       if (!user) {
-        return res.json({ message: "If an account with that email exists, a reset code has been sent." });
+        return res.json({ message: "If an account exists, a reset code has been sent." });
       }
 
       const code = Math.floor(100000 + Math.random() * 900000).toString();
@@ -260,23 +270,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       await storage.logAuthEvent("password_reset_requested", user.id, req.ip, req.headers["user-agent"]?.toString());
 
+      const smsSent = await sendPasswordResetSMS(user.phone, code, user.firstName);
+      if (!smsSent) {
+        console.error(`[Password Reset] Failed to send SMS to ${user.phone}`);
+      }
+
       const emailSent = await sendPasswordResetEmail(user.email, code, user.firstName);
       if (!emailSent) {
         console.error(`[Password Reset] Failed to send email to ${user.email}`);
       }
 
-      res.json({ message: "If an account with that email exists, a reset code has been sent." });
+      res.json({ message: "If an account exists, a reset code has been sent." });
     } catch (error) {
       console.error("Forgot password error:", error);
       res.status(500).json({ message: "Something went wrong. Please try again." });
     }
   });
 
+  async function resolveIdentifierToEmail(identifier: string): Promise<string | null> {
+    const trimmed = identifier.trim().toLowerCase();
+    const isPhone = /^\+?\d[\d\s-]{5,}$/.test(trimmed);
+    if (isPhone) {
+      const cleanPhone = trimmed.replace(/[\s-]/g, "");
+      const user = await storage.getUserByPhone(cleanPhone);
+      return user?.email || null;
+    }
+    return trimmed;
+  }
+
   app.post("/api/auth/verify-reset-code", resetRequestLimiter, async (req: Request, res: Response) => {
     try {
       const { email, code } = req.body;
       if (!email || !code) {
-        return res.status(400).json({ message: "Email and code are required" });
+        return res.status(400).json({ message: "Email or phone and code are required" });
+      }
+
+      const resolvedEmail = await resolveIdentifierToEmail(email);
+      if (!resolvedEmail) {
+        return res.status(400).json({ message: "Invalid or expired reset code" });
       }
 
       const resetCodes = await db
@@ -284,7 +315,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .from(passwordResetCodes)
         .where(
           and(
-            eq(passwordResetCodes.email, email.trim().toLowerCase()),
+            eq(passwordResetCodes.email, resolvedEmail),
             eq(passwordResetCodes.code, code.trim()),
             eq(passwordResetCodes.used, false)
           )
@@ -312,11 +343,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { email, code, newPassword } = req.body;
       if (!email || !code || !newPassword) {
-        return res.status(400).json({ message: "Email, code, and new password are required" });
+        return res.status(400).json({ message: "Identifier, code, and new password are required" });
       }
 
       if (newPassword.length < 8 || !/[A-Z]/.test(newPassword) || !/[0-9]/.test(newPassword) || !/[^A-Za-z0-9]/.test(newPassword)) {
         return res.status(400).json({ message: "Password must be at least 8 characters with uppercase, number, and special character" });
+      }
+
+      const resolvedEmail = await resolveIdentifierToEmail(email);
+      if (!resolvedEmail) {
+        return res.status(400).json({ message: "Invalid or expired reset code" });
       }
 
       const resetCodes = await db
@@ -324,7 +360,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .from(passwordResetCodes)
         .where(
           and(
-            eq(passwordResetCodes.email, email.trim().toLowerCase()),
+            eq(passwordResetCodes.email, resolvedEmail),
             eq(passwordResetCodes.code, code.trim()),
             eq(passwordResetCodes.used, false)
           )
