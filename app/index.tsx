@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   ScrollView,
   KeyboardAvoidingView,
+  Linking,
 } from "react-native";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -692,6 +693,24 @@ export default function LoginScreen() {
                   <Text style={styles.buttonText}>Create Account</Text>
                 )}
               </Pressable>
+
+              <Text style={styles.legalAgreement}>
+                By creating an account you agree to our{" "}
+                <Text
+                  style={styles.legalAgreementLink}
+                  onPress={() => Linking.openURL("https://lekker.network/terms")}
+                >
+                  Terms & Conditions
+                </Text>
+                {" "}and{" "}
+                <Text
+                  style={styles.legalAgreementLink}
+                  onPress={() => Linking.openURL("https://lekker.network/privacy")}
+                >
+                  Privacy Policy
+                </Text>
+                .
+              </Text>
             </>
           )}
         </View>
@@ -888,5 +907,18 @@ const styles = StyleSheet.create({
     fontSize: fontScale(13),
     color: Colors.success,
     textAlign: "center",
+  },
+  legalAgreement: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: fontScale(11),
+    color: Colors.textMuted,
+    textAlign: "center" as const,
+    marginTop: 14,
+    lineHeight: 18,
+    paddingHorizontal: 8,
+  },
+  legalAgreementLink: {
+    color: Colors.primary,
+    fontFamily: "Poppins_500Medium",
   },
 });

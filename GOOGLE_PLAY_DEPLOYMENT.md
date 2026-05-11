@@ -1,7 +1,12 @@
-# Lekker Chat — Google Play Store Deployment Guide
+# Lekker Chat — App Store Deployment Guide
+
+This guide covers both **Google Play (Android)** and **Apple App Store (iOS)** submission.
+
+---
 
 ## Prerequisites
 - Google Play Developer account ($25 one-time fee at play.google.com/console)
+- Apple Developer account ($99/year at developer.apple.com)
 - Node.js 18+ installed on your local machine
 - Expo account (expo.dev) — free
 - EAS CLI installed globally
@@ -47,55 +52,49 @@ This creates a project on expo.dev and updates `app.json` with the real `project
 
 ---
 
-## Step 5: Build the Android App Bundle
+# Android (Google Play)
+
+## Step A1: Build the Android App Bundle
 
 ```bash
 eas build --platform android --profile production
 ```
 
-- This builds a `.aab` (Android App Bundle) file on Expo's cloud build servers
-- No Android SDK or Java installation needed on your machine
-- Build takes ~10–20 minutes
-- Download the `.aab` file when complete
+- Builds a `.aab` (Android App Bundle) on Expo's cloud servers — no Android SDK needed locally
+- Takes ~10–20 minutes
+- Download the `.aab` when complete
 
----
-
-## Step 6: Create Your App on Google Play Console
+## Step A2: Create Your App on Google Play Console
 
 1. Go to [play.google.com/console](https://play.google.com/console)
 2. Click **Create app**
-3. Fill in:
-   - App name: `Lekker Chat`
-   - Default language: `English (South Africa)` or `English`
-   - App or game: `App`
-   - Free or paid: `Free`
-4. Accept the declarations and click **Create app**
+3. Fill in: App name `Lekker Chat`, language `English`, type `App`, free
+4. Accept declarations → **Create app**
 
----
+## Step A3: Complete the Store Listing
 
-## Step 7: Complete the Store Listing
+Go to **Store presence → Main store listing**:
 
-Go to **Store presence → Main store listing** and fill in:
-
-### App Details
 - **Short description** (80 chars): `Business messaging for Lekkerpreneurs — connect, chat, and grow.`
-- **Full description** (4000 chars):
-  ```
-  Lekker Chat is the official messaging app for the Lekker Network — connecting South African Lekkerpreneurs with their clients and business community.
+- **Full description**: See below
+- **Privacy Policy URL**: `https://lekker.network/privacy`
 
-  Features:
-  • Secure P2P and group messaging
-  • CledwynAI — your AI business assistant powered by Grok
-  • Lekkerpreneur Directory — find verified local businesses
-  • Social feed — share updates with your network
-  • Voice notes, image sharing, file attachments
-  • Auto-reply for when you're busy
-  • Password-protected with 2-step verification reset
-  • Push notifications for new messages
-  • Location-based Lekkerpreneur discovery
+```
+Lekker Chat is the official messaging app for the Lekker Network — connecting South African Lekkerpreneurs with their clients and business community.
 
-  Built for South African entrepreneurs on the Lekker Network platform.
-  ```
+Features:
+• Secure P2P and group messaging
+• CledwynAI — your AI business assistant powered by Grok
+• Lekkerpreneur Directory — find verified local businesses
+• Social feed — share updates with your network
+• Voice notes, image sharing, file attachments
+• Auto-reply for when you're busy
+• Password-protected with 2-step verification reset
+• Push notifications for new messages
+• Location-based Lekkerpreneur discovery
+
+Built for South African entrepreneurs on the Lekker Network platform.
+```
 
 ### Graphics Required
 | Asset | Size | Notes |
@@ -103,11 +102,8 @@ Go to **Store presence → Main store listing** and fill in:
 | App icon | 512×512 PNG | No rounded corners (Google adds them) |
 | Feature graphic | 1024×500 PNG | Shown at top of listing |
 | Phone screenshots | Min 2, min 1080px | Take from the app |
-| Privacy Policy URL | — | https://lekker.network/privacy |
 
----
-
-## Step 8: Complete Content Declarations
+## Step A4: Complete Content Declarations
 
 ### Content Rating
 - Go to **Policy → App content → Content rating**
@@ -115,7 +111,6 @@ Go to **Store presence → Main store listing** and fill in:
 
 ### Data Safety
 - Go to **Policy → App content → Data safety**
-- Declare the following data collected:
 
 | Data Type | Collected | Shared | Required |
 |---|---|---|---|
@@ -129,45 +124,127 @@ Go to **Store presence → Main store listing** and fill in:
 | Precise location | Optional | No | No |
 | Contacts | Optional | No | No |
 
-- Data is encrypted in transit: **Yes**
+- Data encrypted in transit: **Yes**
 - Users can request deletion: **Yes** (via account settings)
 
 ### Target Audience
-- Target age: **18+**
-- Contains ads: **No**
+- Target age: **18+** | Contains ads: **No**
+
+## Step A5: Upload AAB and Submit
+
+1. Go to **Release → Production → Create new release**
+2. Upload the `.aab` file
+3. Add release notes: `Initial release of Lekker Chat`
+4. Click **Review release** → **Start rollout to Production**
+
+Google review: typically **1–3 business days** for first submissions.
 
 ---
 
-## Step 9: Upload the AAB and Submit
+# iOS (Apple App Store)
 
-1. Go to **Release → Production**
-2. Click **Create new release**
-3. Upload the `.aab` file from Step 5
-4. Add release notes (e.g. "Initial release of Lekker Chat")
-5. Click **Review release** then **Start rollout to Production**
+## Step B1: Build the iOS Archive
+
+```bash
+eas build --platform ios --profile production
+```
+
+- Builds an `.ipa` on Expo's Mac build servers — no Mac needed locally
+- Takes ~15–25 minutes
+- You will be prompted to log in to your Apple Developer account
+
+## Step B2: Create Your App on App Store Connect
+
+1. Go to [appstoreconnect.apple.com](https://appstoreconnect.apple.com)
+2. Click **+** → **New App**
+3. Fill in:
+   - Platform: **iOS**
+   - Name: **Lekker Chat**
+   - Primary Language: **English (South Africa)** or **English**
+   - Bundle ID: `com.lekker.chat` (must match `app.json`)
+   - SKU: `com.lekker.chat` (any unique string)
+4. Click **Create**
+
+## Step B3: Complete the App Information
+
+Under **App Information**:
+- **Privacy Policy URL**: `https://lekker.network/privacy`
+- **Category**: Social Networking (Primary) / Business (Secondary)
+- **Content Rights**: Does not contain third-party content
+
+## Step B4: Complete the Store Listing
+
+Under **App Store → [version] → App Store Information**:
+
+- **Description**: Same as Android description above
+- **Keywords**: `lekker,lekkerpreneur,south africa,business chat,networking,entrepreneur`
+- **Support URL**: `https://lekker.network`
+- **Marketing URL**: `https://lekker.network`
+- **Privacy Policy URL**: `https://lekker.network/privacy`
+
+### Screenshots Required (per device size)
+| Device | Size |
+|---|---|
+| iPhone 6.9" (required) | 1320×2868 or 1290×2796 |
+| iPhone 6.7" (required) | 1290×2796 |
+| iPad 13" (if tablet support enabled) | 2048×2732 |
+
+Take screenshots via Expo Go on a physical device or iOS Simulator.
+
+## Step B5: App Privacy (Data Practices)
+
+Under **App Privacy → Edit**:
+
+Declare the following data types as **Data Linked to You**:
+- Contact Info: Name, Email Address, Phone Number
+- User Content: Messages, Photos or Videos, Audio Data
+- Identifiers: User ID
+
+Declare the following as **Data Not Linked to You** (optional, user-initiated):
+- Location (Precise)
+- Contacts
+
+**Tracking**: Select **No** — app does not track users across other apps.
+
+## Step B6: Export Compliance
+
+When asked about encryption:
+- **Does your app use encryption?** → **Yes**
+- **Does it qualify for the standard encryption exemption?** → **Yes** (uses standard HTTPS/TLS only)
+- `ITSAppUsesNonExemptEncryption: false` is already set in `app.json` — this satisfies Apple automatically
+
+## Step B7: Upload Build and Submit for Review
+
+1. Go to **TestFlight** tab → your build should appear within ~30 minutes of `eas build` completing
+2. Go back to **App Store** tab → **[version] → Build** → select your build
+3. Fill in **What's New** (version notes): `Initial release of Lekker Chat`
+4. Click **Add for Review** → **Submit to App Review**
+
+Apple review: typically **24–48 hours** for first submissions (can be up to 3 days).
+
+## Step B8: Replit Expo Launch (Alternative for iOS)
+
+If you prefer, Replit's built-in **Expo Launch** handles the iOS App Store submission automatically:
+- Click the **Publish** button in Replit
+- Replit builds and submits to App Store on your behalf
+- You still need an Apple Developer account
 
 ---
 
-## Step 10: Wait for Review
-
-- Google review typically takes **1–3 business days** for first submissions
-- You'll receive an email when approved or if changes are needed
-
----
-
-## Subsequent Updates
+## Subsequent Updates (Both Platforms)
 
 For future updates:
-1. Increment `versionCode` in `app.json` (e.g. 2, 3, 4...)
-2. Increment `version` string (e.g. "1.0.1", "1.1.0")
-3. Run `eas build --platform android --profile production` again
-4. Upload the new `.aab` to a new release on Google Play Console
+1. Increment `version` string in `app.json` (e.g. "1.0.1", "1.1.0")
+2. Increment `versionCode` (Android) and `buildNumber` (iOS) in `app.json`
+3. Run `eas build --platform all --profile production`
+4. Upload to respective store consoles
 
 ---
 
 ## Important Notes
 
-- **Production backend**: Make sure your Replit app is published (deployed) before submitting — the backend must be live for the app to work
-- **Twilio**: Your upgraded Twilio account will send SMS resets to all phone numbers
-- **Privacy Policy**: https://lekker.network/privacy (already linked in app)
-- **Terms**: https://lekker.network/terms (already linked in app)
+- **Publish backend first**: Your Replit app must be deployed before submitting — reviewers test the live app
+- **Twilio**: Upgraded account sends SMS resets to all phone numbers globally
+- **Privacy Policy**: `https://lekker.network/privacy` — linked in app (Settings + registration screen)
+- **Terms**: `https://lekker.network/terms` — linked in app (Settings + registration screen)
+- **Both stores require** the privacy policy URL to be live and accessible at review time
