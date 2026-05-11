@@ -759,7 +759,23 @@ export default function SettingsScreen() {
           <Text style={styles.logoutText}>Sign Out</Text>
         </Pressable>
 
-        <Text style={styles.version}>Lekker Chat v1.0.0</Text>
+        <View style={styles.legalLinks}>
+          <Pressable
+            onPress={() => Linking.openURL("https://lekker.network/privacy")}
+            style={({ pressed }) => [styles.legalLink, pressed && { opacity: 0.6 }]}
+          >
+            <Text style={styles.legalLinkText}>Privacy Policy</Text>
+          </Pressable>
+          <Text style={styles.legalDivider}>·</Text>
+          <Pressable
+            onPress={() => Linking.openURL("https://lekker.network/terms")}
+            style={({ pressed }) => [styles.legalLink, pressed && { opacity: 0.6 }]}
+          >
+            <Text style={styles.legalLinkText}>Terms & Conditions</Text>
+          </Pressable>
+        </View>
+
+        <Text style={styles.version}>Lekker Chat v1.0.0 · Powered by Lekker Network</Text>
       </ScrollView>
     </View>
   );
@@ -965,7 +981,28 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: Colors.textMuted,
     textAlign: "center" as const,
-    marginTop: 20,
+    marginTop: 8,
     marginBottom: 20,
+  },
+  legalLinks: {
+    flexDirection: "row" as const,
+    justifyContent: "center" as const,
+    alignItems: "center" as const,
+    marginTop: 20,
+    gap: 8,
+  },
+  legalLink: {
+    paddingVertical: 4,
+    paddingHorizontal: 4,
+  },
+  legalLinkText: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 13,
+    color: Colors.primary,
+  },
+  legalDivider: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 13,
+    color: Colors.textMuted,
   },
 });
