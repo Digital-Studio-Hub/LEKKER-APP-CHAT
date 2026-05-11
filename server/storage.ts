@@ -1,4 +1,5 @@
 import { drizzle } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
 import { eq, or, and, ne, sql, asc, desc, count, inArray, gt, isNull, lt } from "drizzle-orm";
 import { users, authAuditLogs, chats, chatParticipants, chatMessages, type User, type InsertUser, type Chat, type ChatParticipant, type ChatMessage } from "@shared/schema";
 
@@ -6,7 +7,18 @@ if (!process.env.DATABASE_URL) {
   throw new Error("DATABASE_URL is required");
 }
 
-export const db = drizzle(process.env.DATABASE_URL);
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  max: 10,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 10000,
+});
+
+pool.on("error", (err) => {
+  console.error("[DB Pool] Unexpected client error (connection will be recycled):", err.message);
+});
+
+export const db = drizzle(pool);
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;

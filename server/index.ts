@@ -5,6 +5,14 @@ import { registerRoutes } from "./routes";
 import * as fs from "fs";
 import * as path from "path";
 
+process.on("uncaughtException", (err) => {
+  console.error("[Process] Uncaught exception (server will continue):", err.message);
+});
+
+process.on("unhandledRejection", (reason) => {
+  console.error("[Process] Unhandled promise rejection (server will continue):", reason);
+});
+
 const app = express();
 const log = console.log;
 
