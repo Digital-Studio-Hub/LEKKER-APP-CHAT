@@ -71,6 +71,18 @@ export default function SettingsScreen() {
   const [lastLocation, setLastLocation] = useState<UserLocation | null>(null);
   const [blockedUsers, setBlockedUsers] = useState<BlockedUser[]>([]);
 
+  type LinkedEmail = { id: string; email: string; isPrimary: boolean; isVerified: boolean; verifiedAt: string | null };
+  const [linkedEmails, setLinkedEmails] = useState<LinkedEmail[]>([]);
+  const [isLoadingEmails, setIsLoadingEmails] = useState(false);
+  const [showAddEmail, setShowAddEmail] = useState(false);
+  const [newEmail, setNewEmail] = useState("");
+  const [addEmailError, setAddEmailError] = useState("");
+  const [isAddingEmail, setIsAddingEmail] = useState(false);
+  const [pendingEmailId, setPendingEmailId] = useState<string | null>(null);
+  const [verifyCode, setVerifyCode] = useState("");
+  const [isVerifyingEmail, setIsVerifyingEmail] = useState(false);
+  const [verifyError, setVerifyError] = useState("");
+
   const [editingField, setEditingField] = useState<string | null>(null);
   const [editFirstName, setEditFirstName] = useState(user?.firstName || "");
   const [editLastName, setEditLastName] = useState(user?.lastName || "");
@@ -97,7 +109,96 @@ export default function SettingsScreen() {
     }
     loadPermissions();
     loadBlockedUsers();
+    loadLinkedEmails();
   }, []);
+
+  async function loadLinkedEmails() {
+    setIsLoadingEmails(true);
+    try {
+      const res = await apiRequest("GET", "/api/auth/emails");
+      if (res.ok) {
+        const data = await res.json();
+        setLinkedEmails(data.emails || []);
+      }
+    } catch (e) {
+      console.error("Failed to load linked emails:", e);
+    } finally {
+      setIsLoadingEmails(false);
+    }
+  }
+
+  async function handleAddEmail() {
+    if (!newEmail.trim() || !newEmail.includes("@")) {
+      setAddEmailError("Enter a valid email address");
+      return;
+    }
+    setIsAddingEmail(true);
+    setAddEmailError("");
+    try {
+      const res = await apiRequest("POST", "/api/auth/add-email", { email: newEmail.trim() });
+      const data = await res.json();
+      if (!res.ok) { setAddEmailError(data.message || "Failed to add email"); return; }
+      setPendingEmailId(data.emailId);
+      setNewEmail("");
+      await loadLinkedEmails();
+    } catch (e) {
+      setAddEmailError("Something went wrong. Try again.");
+    } finally {
+      setIsAddingEmail(false);
+    }
+  }
+
+  async function handleVerifyEmail(emailId: string) {
+    if (!verifyCode.trim() || verifyCode.length !== 6) {
+      setVerifyError("Enter the 6-digit code sent to your email");
+      return;
+    }
+    setIsVerifyingEmail(true);
+    setVerifyError("");
+    try {
+      const res = await apiRequest("POST", "/api/auth/verify-linked-email", { emailId, code: verifyCode.trim() });
+      const data = await res.json();
+      if (!res.ok) { setVerifyError(data.message || "Invalid code"); return; }
+      setPendingEmailId(null);
+      setVerifyCode("");
+      Alert.alert("Verified!", "Email address verified successfully.");
+      await loadLinkedEmails();
+    } catch (e) {
+      setVerifyError("Something went wrong. Try again.");
+    } finally {
+      setIsVerifyingEmail(false);
+    }
+  }
+
+  async function handleResendCode(emailId: string) {
+    try {
+      const res = await apiRequest("POST", "/api/auth/resend-linked-email-code", { emailId });
+      const data = await res.json();
+      Alert.alert(res.ok ? "Code Sent" : "Error", data.message || (res.ok ? "Verification code resent." : "Failed to resend code."));
+    } catch (e) {
+      Alert.alert("Error", "Failed to resend code.");
+    }
+  }
+
+  async function handleRemoveEmail(emailId: string, email: string) {
+    Alert.alert("Remove Email", `Remove ${email} from your account?`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Remove",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            const res = await apiRequest("DELETE", `/api/auth/emails/${emailId}`);
+            const data = await res.json();
+            if (!res.ok) { Alert.alert("Error", data.message || "Could not remove email"); return; }
+            await loadLinkedEmails();
+          } catch (e) {
+            Alert.alert("Error", "Failed to remove email.");
+          }
+        },
+      },
+    ]);
+  }
 
   useEffect(() => {
     if (user) {
@@ -469,16 +570,150 @@ export default function SettingsScreen() {
           <Text style={styles.sectionTitle}>Account</Text>
           <View style={styles.sectionCard}>
             <View style={styles.infoRow}>
-              <Ionicons name="mail-outline" size={18} color={Colors.textSecondary} />
-              <Text style={styles.infoLabel}>Email</Text>
-              <Text style={styles.infoValue}>{user?.email || ""}</Text>
-            </View>
-            <View style={styles.infoRow}>
               <Ionicons name="call-outline" size={18} color={Colors.textSecondary} />
               <Text style={styles.infoLabel}>Phone</Text>
-              <Text style={styles.infoValue}>{user?.phone || user?.phoneNumber || ""}</Text>
+              <View style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 6 }}>
+                <Text style={styles.infoValue}>{user?.phone || user?.phoneNumber || ""}</Text>
+                {user?.phoneVerified
+                  ? <Ionicons name="checkmark-circle" size={14} color="#4CAF50" />
+                  : <Ionicons name="alert-circle-outline" size={14} color={Colors.textMuted} />}
+              </View>
             </View>
           </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Linked Emails</Text>
+          <View style={styles.sectionCard}>
+            {isLoadingEmails ? (
+              <View style={styles.infoRow}>
+                <ActivityIndicator size="small" color={Colors.primary} />
+                <Text style={[styles.infoLabel, { color: Colors.textMuted }]}>Loading emails…</Text>
+              </View>
+            ) : linkedEmails.length === 0 ? (
+              <View style={styles.infoRow}>
+                <Ionicons name="mail-outline" size={18} color={Colors.textMuted} />
+                <Text style={[styles.infoLabel, { color: Colors.textMuted }]}>No emails linked</Text>
+              </View>
+            ) : (
+              linkedEmails.map((em, idx) => (
+                <View key={em.id}>
+                  {idx > 0 && <View style={{ height: 1, backgroundColor: Colors.border, marginVertical: 4 }} />}
+                  <View style={styles.infoRow}>
+                    <Ionicons name="mail-outline" size={18} color={Colors.textSecondary} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.infoLabel, { fontSize: 13 }]} numberOfLines={1}>{em.email}</Text>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 }}>
+                        {em.isPrimary && (
+                          <View style={{ backgroundColor: "rgba(245,184,0,0.15)", borderRadius: 4, paddingHorizontal: 6, paddingVertical: 1 }}>
+                            <Text style={{ fontFamily: "Poppins_500Medium", fontSize: 10, color: Colors.primary }}>Primary</Text>
+                          </View>
+                        )}
+                        {em.isVerified ? (
+                          <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
+                            <Ionicons name="checkmark-circle" size={12} color="#4CAF50" />
+                            <Text style={{ fontFamily: "Poppins_400Regular", fontSize: 10, color: "#4CAF50" }}>Verified</Text>
+                          </View>
+                        ) : (
+                          <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
+                            <Ionicons name="alert-circle-outline" size={12} color={Colors.textMuted} />
+                            <Text style={{ fontFamily: "Poppins_400Regular", fontSize: 10, color: Colors.textMuted }}>Unverified</Text>
+                          </View>
+                        )}
+                      </View>
+                    </View>
+                    <View style={{ flexDirection: "row", gap: 6 }}>
+                      {!em.isVerified && (
+                        <Pressable
+                          onPress={() => setPendingEmailId(pendingEmailId === em.id ? null : em.id)}
+                          style={{ backgroundColor: Colors.primary, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 }}
+                        >
+                          <Text style={{ fontFamily: "Poppins_500Medium", fontSize: 11, color: Colors.background }}>Verify</Text>
+                        </Pressable>
+                      )}
+                      {!em.isPrimary && (
+                        <Pressable
+                          onPress={() => handleRemoveEmail(em.id, em.email)}
+                          style={{ backgroundColor: "rgba(255,59,48,0.1)", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 }}
+                        >
+                          <Ionicons name="close" size={14} color={Colors.danger} />
+                        </Pressable>
+                      )}
+                    </View>
+                  </View>
+                  {pendingEmailId === em.id && !em.isVerified && (
+                    <View style={{ paddingHorizontal: 8, paddingBottom: 8, paddingTop: 4 }}>
+                      <Text style={{ fontFamily: "Poppins_400Regular", fontSize: 12, color: Colors.textSecondary, marginBottom: 8 }}>
+                        Enter the 6-digit code sent to {em.email}
+                      </Text>
+                      <View style={{ flexDirection: "row", gap: 8 }}>
+                        <TextInput
+                          style={{ flex: 1, backgroundColor: Colors.background, borderRadius: 8, borderWidth: 1, borderColor: Colors.border, paddingHorizontal: 12, paddingVertical: 8, color: Colors.text, fontFamily: "Poppins_400Regular", fontSize: 16, letterSpacing: 4 }}
+                          placeholder="000000"
+                          placeholderTextColor={Colors.textMuted}
+                          keyboardType="number-pad"
+                          maxLength={6}
+                          value={verifyCode}
+                          onChangeText={setVerifyCode}
+                        />
+                        <Pressable
+                          onPress={() => handleVerifyEmail(em.id)}
+                          disabled={isVerifyingEmail}
+                          style={{ backgroundColor: Colors.primary, borderRadius: 8, paddingHorizontal: 14, justifyContent: "center" }}
+                        >
+                          {isVerifyingEmail ? <ActivityIndicator size="small" color={Colors.background} /> : <Text style={{ fontFamily: "Poppins_600SemiBold", fontSize: 13, color: Colors.background }}>Confirm</Text>}
+                        </Pressable>
+                      </View>
+                      {verifyError ? <Text style={{ fontFamily: "Poppins_400Regular", fontSize: 12, color: Colors.danger, marginTop: 4 }}>{verifyError}</Text> : null}
+                      <Pressable onPress={() => handleResendCode(em.id)} style={{ marginTop: 8 }}>
+                        <Text style={{ fontFamily: "Poppins_400Regular", fontSize: 12, color: Colors.textSecondary }}>Didn't receive it? <Text style={{ color: Colors.primary }}>Resend code</Text></Text>
+                      </Pressable>
+                    </View>
+                  )}
+                </View>
+              ))
+            )}
+
+            {showAddEmail ? (
+              <View style={{ paddingHorizontal: 4, paddingTop: 8, paddingBottom: 4 }}>
+                {linkedEmails.length > 0 && <View style={{ height: 1, backgroundColor: Colors.border, marginBottom: 10 }} />}
+                <Text style={{ fontFamily: "Poppins_500Medium", fontSize: 13, color: Colors.text, marginBottom: 8 }}>Add a new email address</Text>
+                <View style={{ flexDirection: "row", gap: 8 }}>
+                  <TextInput
+                    style={{ flex: 1, backgroundColor: Colors.background, borderRadius: 8, borderWidth: 1, borderColor: addEmailError ? Colors.danger : Colors.border, paddingHorizontal: 12, paddingVertical: 8, color: Colors.text, fontFamily: "Poppins_400Regular", fontSize: 14 }}
+                    placeholder="email@example.com"
+                    placeholderTextColor={Colors.textMuted}
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    value={newEmail}
+                    onChangeText={setNewEmail}
+                  />
+                  <Pressable
+                    onPress={handleAddEmail}
+                    disabled={isAddingEmail}
+                    style={{ backgroundColor: Colors.primary, borderRadius: 8, paddingHorizontal: 14, justifyContent: "center" }}
+                  >
+                    {isAddingEmail ? <ActivityIndicator size="small" color={Colors.background} /> : <Text style={{ fontFamily: "Poppins_600SemiBold", fontSize: 13, color: Colors.background }}>Add</Text>}
+                  </Pressable>
+                </View>
+                {addEmailError ? <Text style={{ fontFamily: "Poppins_400Regular", fontSize: 12, color: Colors.danger, marginTop: 4 }}>{addEmailError}</Text> : null}
+                <Pressable onPress={() => { setShowAddEmail(false); setNewEmail(""); setAddEmailError(""); }} style={{ marginTop: 8 }}>
+                  <Text style={{ fontFamily: "Poppins_400Regular", fontSize: 12, color: Colors.textMuted }}>Cancel</Text>
+                </Pressable>
+              </View>
+            ) : (
+              <Pressable
+                onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setShowAddEmail(true); setAddEmailError(""); }}
+                style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 10, paddingHorizontal: 4, marginTop: linkedEmails.length > 0 ? 4 : 0 }}
+              >
+                {linkedEmails.length > 0 && <View style={{ height: 1, backgroundColor: Colors.border, position: "absolute", top: 0, left: 0, right: 0 }} />}
+                <Ionicons name="add-circle-outline" size={18} color={Colors.primary} />
+                <Text style={{ fontFamily: "Poppins_500Medium", fontSize: 14, color: Colors.primary }}>Add email address</Text>
+              </Pressable>
+            )}
+          </View>
+          <Text style={styles.toggleHint}>Link multiple emails to log in from any of them. Search others by any linked email.</Text>
         </View>
 
         <View style={styles.section}>

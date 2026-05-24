@@ -84,6 +84,21 @@ export const emailVerificationCodes = pgTable("email_verification_codes", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const userEmails = pgTable("user_emails", {
+  id: varchar("id", { length: 36 })
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  userId: varchar("user_id", { length: 36 }).notNull(),
+  email: varchar("email", { length: 255 }).notNull(),
+  isPrimary: boolean("is_primary").default(false).notNull(),
+  isVerified: boolean("is_verified").default(false).notNull(),
+  verifiedAt: timestamp("verified_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("idx_user_emails_email_unique").on(table.email),
+  index("idx_user_emails_user_id").on(table.userId),
+]);
+
 export const passwordResetCodes = pgTable("password_reset_codes", {
   id: varchar("id", { length: 36 })
     .primaryKey()
@@ -216,6 +231,7 @@ export type AuthAuditLog = typeof authAuditLogs.$inferSelect;
 export type PhoneVerificationCode = typeof phoneVerificationCodes.$inferSelect;
 export type EmailVerificationCode = typeof emailVerificationCodes.$inferSelect;
 export type PasswordResetCode = typeof passwordResetCodes.$inferSelect;
+export type UserEmail = typeof userEmails.$inferSelect;
 export type Chat = typeof chats.$inferSelect;
 export type ChatParticipant = typeof chatParticipants.$inferSelect;
 export type ChatMessage = typeof chatMessages.$inferSelect;

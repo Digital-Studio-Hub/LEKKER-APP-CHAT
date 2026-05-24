@@ -2,7 +2,7 @@ import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "node:http";
 import OpenAI from "openai";
 import rateLimit, { type Options } from "express-rate-limit";
-import { registerSchema, loginSchema, updateProfileSchema, users, chatMessages, passwordResetCodes, phoneVerificationCodes, emailVerificationCodes } from "@shared/schema";
+import { registerSchema, loginSchema, updateProfileSchema, users, chatMessages, passwordResetCodes, phoneVerificationCodes, emailVerificationCodes, userEmails } from "@shared/schema";
 import { storage, db } from "./storage";
 import { sql, or, and, ne, eq } from "drizzle-orm";
 import {
@@ -357,6 +357,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         presence: "online",
       });
 
+      await storage.addUserEmail(user.id, email.trim().toLowerCase(), true, emailVerifiedFlag);
+
       const token = generateToken({ userId: user.id, email: user.email, role: user.role });
 
       await storage.logAuthEvent("register", user.id, req.ip, req.headers["user-agent"]?.toString());
@@ -611,6 +613,120 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/auth/emails", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const emails = await storage.getUserEmails(req.user!.userId);
+      res.json({ emails });
+    } catch (error) {
+      console.error("Get emails error:", error);
+      res.status(500).json({ message: "Failed to fetch linked emails" });
+    }
+  });
+
+  app.post("/api/auth/add-email", authMiddleware, rateLimit({ windowMs: 15 * 60 * 1000, max: 5 } as Options), async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { email } = req.body;
+      if (!email || typeof email !== "string" || !email.includes("@")) {
+        return res.status(400).json({ message: "A valid email address is required" });
+      }
+      const normalized = email.trim().toLowerCase();
+      const exists = await storage.emailExistsAnywhere(normalized);
+      if (exists) {
+        return res.status(409).json({ message: "This email is already linked to an account" });
+      }
+      const userId = req.user!.userId;
+      const pending = await storage.addUserEmail(userId, normalized, false, false);
+      const code = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+      await db.insert(emailVerificationCodes).values({ email: normalized, code, expiresAt });
+      try {
+        const userForEmail = await storage.getUser(userId);
+        await sendEmailVerificationEmail(normalized, code, userForEmail?.firstName || "there");
+      } catch (e) {
+        console.error("Failed to send verification email (non-fatal):", e);
+      }
+      res.status(201).json({ emailId: pending.id, message: "Verification code sent to " + normalized });
+    } catch (error) {
+      console.error("Add email error:", error);
+      res.status(500).json({ message: "Failed to add email" });
+    }
+  });
+
+  app.post("/api/auth/verify-linked-email", authMiddleware, rateLimit({ windowMs: 15 * 60 * 1000, max: 10 } as Options), async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { emailId, code } = req.body;
+      if (!emailId || !code) return res.status(400).json({ message: "emailId and code are required" });
+      const userId = req.user!.userId;
+      const emails = await storage.getUserEmails(userId);
+      const target = emails.find(e => e.id === emailId);
+      if (!target) return res.status(404).json({ message: "Email not found" });
+      if (target.isVerified) return res.status(400).json({ message: "Email is already verified" });
+      const [codeRecord] = await db.select().from(emailVerificationCodes)
+        .where(eq(emailVerificationCodes.email, target.email))
+        .orderBy(emailVerificationCodes.createdAt)
+        .limit(1);
+      if (!codeRecord || codeRecord.code !== code || codeRecord.used) {
+        return res.status(400).json({ message: "Invalid or expired verification code" });
+      }
+      if (new Date() > codeRecord.expiresAt) {
+        return res.status(400).json({ message: "Verification code has expired. Please request a new one." });
+      }
+      await db.update(emailVerificationCodes).set({ used: true, verified: true }).where(eq(emailVerificationCodes.id, codeRecord.id));
+      await storage.verifyUserEmail(emailId, userId);
+      res.json({ message: "Email verified successfully" });
+    } catch (error) {
+      console.error("Verify linked email error:", error);
+      res.status(500).json({ message: "Failed to verify email" });
+    }
+  });
+
+  app.delete("/api/auth/emails/:emailId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { emailId } = req.params;
+      const userId = req.user!.userId;
+      const emails = await storage.getUserEmails(userId);
+      const target = emails.find(e => e.id === emailId);
+      if (!target) return res.status(404).json({ message: "Email not found" });
+      if (target.isPrimary) return res.status(400).json({ message: "Cannot remove your primary email" });
+      if (emails.length === 1) return res.status(400).json({ message: "Cannot remove your only email address" });
+      const removed = await storage.removeUserEmail(emailId, userId);
+      if (!removed) return res.status(400).json({ message: "Could not remove email" });
+      const remaining = await storage.getUserEmails(userId);
+      const anyVerified = remaining.some(e => e.isVerified);
+      if (!anyVerified) {
+        await storage.updateUser(userId, { emailVerified: false });
+      }
+      res.json({ message: "Email removed" });
+    } catch (error) {
+      console.error("Remove email error:", error);
+      res.status(500).json({ message: "Failed to remove email" });
+    }
+  });
+
+  app.post("/api/auth/resend-linked-email-code", authMiddleware, rateLimit({ windowMs: 5 * 60 * 1000, max: 3 } as Options), async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { emailId } = req.body;
+      if (!emailId) return res.status(400).json({ message: "emailId is required" });
+      const userId = req.user!.userId;
+      const emails = await storage.getUserEmails(userId);
+      const target = emails.find(e => e.id === emailId);
+      if (!target) return res.status(404).json({ message: "Email not found" });
+      if (target.isVerified) return res.status(400).json({ message: "Email is already verified" });
+      const code = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+      await db.insert(emailVerificationCodes).values({ email: target.email, code, expiresAt });
+      try {
+        const userForEmail = await storage.getUser(userId);
+        await sendEmailVerificationEmail(target.email, code, userForEmail?.firstName || "there");
+      } catch (e) {
+        console.error("Failed to resend verification email:", e);
+      }
+      res.json({ message: "Verification code resent" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to resend code" });
+    }
+  });
+
   app.put("/api/auth/profile", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const parsed = updateProfileSchema.safeParse(req.body);
@@ -830,6 +946,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Access denied. You are not a participant in this chat." });
       }
 
+      const sender = await storage.getUser(userId);
+      if (!sender?.phoneVerified || !sender?.emailVerified) {
+        return res.status(403).json({
+          message: "You must verify both your phone number and at least one email address before sending messages.",
+          code: "UNVERIFIED"
+        });
+      }
+
       const { content, type, ...extras } = req.body;
       const msgType = type || "text";
 
@@ -992,6 +1116,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         (variant) => sql`${users.phone} LIKE ${`%${variant}%`}`
       );
 
+      const emailMatchIds = await db.selectDistinct({ userId: userEmails.userId })
+        .from(userEmails)
+        .where(sql`LOWER(${userEmails.email}) LIKE ${`%${query}%`}`);
+      const emailMatchUserIds = emailMatchIds.map(r => r.userId).filter(id => id !== userId);
+
       const results = await db.select({
         id: users.id,
         firstName: users.firstName,
@@ -1010,6 +1139,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             sql`LOWER(${users.lastName}) LIKE ${`%${query}%`}`,
             sql`LOWER(${users.username}) LIKE ${`%${query}%`}`,
             sql`LOWER(${users.email}) LIKE ${`%${query}%`}`,
+            ...(emailMatchUserIds.length > 0 ? [sql`${users.id} = ANY(ARRAY[${sql.join(emailMatchUserIds.map(id => sql`${id}`), sql`, `)}]::text[])`] : []),
             ...phoneConditions
           )
         )
