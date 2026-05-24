@@ -271,36 +271,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { phone, email, username, firstName, lastName, password } = parsed.data;
       const { verificationId, emailVerificationId } = req.body;
 
-      if (!verificationId) {
-        return res.status(400).json({ message: "Phone verification is required", field: "phone" });
-      }
-      if (!emailVerificationId) {
-        return res.status(400).json({ message: "Email verification is required", field: "email" });
+      let phoneVerified = false;
+      let emailVerifiedFlag = false;
+
+      if (verificationId) {
+        const [phoneRecord] = await db.select().from(phoneVerificationCodes).where(eq(phoneVerificationCodes.id, verificationId)).limit(1);
+        if (!phoneRecord || !phoneRecord.verified || phoneRecord.used) {
+          return res.status(400).json({ message: "Invalid or expired phone verification. Please request a new code.", field: "phone" });
+        }
+        if (phoneRecord.phone !== phone.trim()) {
+          return res.status(400).json({ message: "Phone number does not match the verified number.", field: "phone" });
+        }
+        if (new Date() > phoneRecord.expiresAt) {
+          return res.status(400).json({ message: "Phone verification has expired. Please request a new code.", field: "phone" });
+        }
+        phoneVerified = true;
       }
 
-      const [[phoneRecord], [emailRecord]] = await Promise.all([
-        db.select().from(phoneVerificationCodes).where(eq(phoneVerificationCodes.id, verificationId)).limit(1),
-        db.select().from(emailVerificationCodes).where(eq(emailVerificationCodes.id, emailVerificationId)).limit(1),
-      ]);
-
-      if (!phoneRecord || !phoneRecord.verified || phoneRecord.used) {
-        return res.status(400).json({ message: "Invalid or expired phone verification. Please verify your number again.", field: "phone" });
-      }
-      if (phoneRecord.phone !== phone.trim()) {
-        return res.status(400).json({ message: "Phone number does not match verified number.", field: "phone" });
-      }
-      if (new Date() > phoneRecord.expiresAt) {
-        return res.status(400).json({ message: "Phone verification has expired. Please verify your number again.", field: "phone" });
-      }
-
-      if (!emailRecord || !emailRecord.verified || emailRecord.used) {
-        return res.status(400).json({ message: "Invalid or expired email verification. Please verify your email again.", field: "email" });
-      }
-      if (emailRecord.email !== email.trim().toLowerCase()) {
-        return res.status(400).json({ message: "Email does not match verified email.", field: "email" });
-      }
-      if (new Date() > emailRecord.expiresAt) {
-        return res.status(400).json({ message: "Email verification has expired. Please verify your email again.", field: "email" });
+      if (emailVerificationId) {
+        const [emailRecord] = await db.select().from(emailVerificationCodes).where(eq(emailVerificationCodes.id, emailVerificationId)).limit(1);
+        if (!emailRecord || !emailRecord.verified || emailRecord.used) {
+          return res.status(400).json({ message: "Invalid or expired email verification. Please request a new code.", field: "email" });
+        }
+        if (emailRecord.email !== email.trim().toLowerCase()) {
+          return res.status(400).json({ message: "Email does not match the verified email.", field: "email" });
+        }
+        if (new Date() > emailRecord.expiresAt) {
+          return res.status(400).json({ message: "Email verification has expired. Please request a new code.", field: "email" });
+        }
+        emailVerifiedFlag = true;
       }
 
       const existingEmail = await storage.getUserByEmail(email);
@@ -318,10 +317,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(409).json({ message: "This username is already taken", field: "username" });
       }
 
-      await Promise.all([
-        db.update(phoneVerificationCodes).set({ used: true }).where(eq(phoneVerificationCodes.id, verificationId)),
-        db.update(emailVerificationCodes).set({ used: true }).where(eq(emailVerificationCodes.id, emailVerificationId)),
-      ]);
+      const markUsedOps = [];
+      if (verificationId) markUsedOps.push(db.update(phoneVerificationCodes).set({ used: true }).where(eq(phoneVerificationCodes.id, verificationId)));
+      if (emailVerificationId) markUsedOps.push(db.update(emailVerificationCodes).set({ used: true }).where(eq(emailVerificationCodes.id, emailVerificationId)));
+      if (markUsedOps.length > 0) await Promise.all(markUsedOps);
 
       const passwordHash = await hashPassword(password);
 
@@ -337,8 +336,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         passwordHash,
         avatarColor: randomColor,
         role: "user",
-        emailVerified: false,
-        phoneVerified: true,
+        emailVerified: emailVerifiedFlag,
+        phoneVerified: phoneVerified,
         lekkerNetworkAccess: false,
         autoReplyEnabled: false,
         notificationsEnabled: true,

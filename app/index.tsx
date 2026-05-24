@@ -95,6 +95,7 @@ export default function LoginScreen() {
   const [emailVerifyCode, setEmailVerifyCode] = useState("");
   const [verificationId, setVerificationId] = useState("");
   const [emailVerificationId, setEmailVerificationId] = useState("");
+  const [smsSent, setSmsSent] = useState(false);
 
   const emailRef = useRef<TextInput>(null);
   const usernameRef = useRef<TextInput>(null);
@@ -194,7 +195,10 @@ export default function LoginScreen() {
       const fieldErrors: FormErrors = {};
 
       if (!phoneRes.ok) {
-        fieldErrors[phoneData.field || "phone"] = phoneData.message || "Failed to send SMS code.";
+        const isHardPhoneError = phoneRes.status === 409 || phoneRes.status === 429;
+        if (isHardPhoneError) {
+          fieldErrors[phoneData.field || "phone"] = phoneData.message || "Failed to send SMS code.";
+        }
       }
       if (!emailRes.ok) {
         fieldErrors[emailData.field || "email"] = emailData.message || "Failed to send email code.";
@@ -208,6 +212,7 @@ export default function LoginScreen() {
       setEmailVerifyCode("");
       setVerificationId("");
       setEmailVerificationId("");
+      setSmsSent(phoneRes.ok);
       clearErrors();
       setMode("phoneVerify");
     } catch (e: any) {
@@ -219,7 +224,7 @@ export default function LoginScreen() {
 
   async function handlePhoneVerify() {
     const e: FormErrors = {};
-    if (!phoneVerifyCode || phoneVerifyCode.length !== 6) e.phoneVerifyCode = "Enter the 6-digit code sent to your phone";
+    if (smsSent && (!phoneVerifyCode || phoneVerifyCode.length !== 6)) e.phoneVerifyCode = "Enter the 6-digit code sent to your phone";
     if (!emailVerifyCode || emailVerifyCode.length !== 6) e.emailVerifyCode = "Enter the 6-digit code sent to your email";
     if (Object.keys(e).length > 0) { setErrors(e); return; }
 
@@ -228,25 +233,34 @@ export default function LoginScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     try {
-      const [phoneVerifyRes, emailVerifyRes] = await Promise.all([
-        fetch(new URL("/api/auth/verify-phone-code", getApiUrl()).toString(), {
+      let resolvedPhoneVerificationId: string | undefined;
+      let resolvedEmailVerificationId: string | undefined;
+
+      if (smsSent && phoneVerifyCode.trim()) {
+        const phoneVerifyRes = await fetch(new URL("/api/auth/verify-phone-code", getApiUrl()).toString(), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ phone: phone.trim(), code: phoneVerifyCode.trim() }),
-        }),
-        fetch(new URL("/api/auth/verify-email-code", getApiUrl()).toString(), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email: email.trim().toLowerCase(), code: emailVerifyCode.trim() }),
-        }),
-      ]);
+        });
+        const phoneVerifyData = await phoneVerifyRes.json();
+        if (!phoneVerifyRes.ok) {
+          setErrors({ phoneVerifyCode: phoneVerifyData.message || "Incorrect phone code." });
+          return;
+        }
+        resolvedPhoneVerificationId = phoneVerifyData.verificationId;
+      }
 
-      const [phoneVerifyData, emailVerifyData] = await Promise.all([phoneVerifyRes.json(), emailVerifyRes.json()]);
-      const verifyErrors: FormErrors = {};
-
-      if (!phoneVerifyRes.ok) verifyErrors.phoneVerifyCode = phoneVerifyData.message || "Incorrect phone code.";
-      if (!emailVerifyRes.ok) verifyErrors.emailVerifyCode = emailVerifyData.message || "Incorrect email code.";
-      if (Object.keys(verifyErrors).length > 0) { setErrors(verifyErrors); return; }
+      const emailVerifyRes = await fetch(new URL("/api/auth/verify-email-code", getApiUrl()).toString(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim().toLowerCase(), code: emailVerifyCode.trim() }),
+      });
+      const emailVerifyData = await emailVerifyRes.json();
+      if (!emailVerifyRes.ok) {
+        setErrors({ emailVerifyCode: emailVerifyData.message || "Incorrect email code." });
+        return;
+      }
+      resolvedEmailVerificationId = emailVerifyData.emailVerificationId;
 
       const result = await register({
         phone: phone.trim(),
@@ -255,8 +269,8 @@ export default function LoginScreen() {
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         password,
-        verificationId: phoneVerifyData.verificationId,
-        emailVerificationId: emailVerifyData.emailVerificationId,
+        verificationId: resolvedPhoneVerificationId,
+        emailVerificationId: resolvedEmailVerificationId,
       } as any);
 
       if (result.success) {
@@ -643,7 +657,9 @@ export default function LoginScreen() {
             <>
               <Text style={styles.resetTitle}>Verify Your Details</Text>
               <Text style={styles.resetSubtitle}>
-                We sent a 6-digit code to your phone and a separate code to your email. Enter both below.
+                {smsSent
+                  ? `We sent a 6-digit code to your phone and a separate code to your email. Enter both below.`
+                  : `We sent a verification code to your email. Enter it below to create your account.`}
               </Text>
 
               {generalError ? (
@@ -652,29 +668,33 @@ export default function LoginScreen() {
                 </View>
               ) : null}
 
-              <Text style={styles.label}>Phone code — sent to {phone}</Text>
-              <TextInput
-                style={[styles.input, styles.codeInput, errors.phoneVerifyCode ? styles.inputError : null]}
-                placeholder="000000"
-                placeholderTextColor={Colors.textMuted}
-                value={phoneVerifyCode}
-                onChangeText={(t) => {
-                  const digits = t.replace(/[^0-9]/g, "").slice(0, 6);
-                  setPhoneVerifyCode(digits);
-                  if (errors.phoneVerifyCode) setErrors((e) => ({ ...e, phoneVerifyCode: "" }));
-                  if (generalError) setGeneralError("");
-                }}
-                keyboardType="number-pad"
-                textContentType="oneTimeCode"
-                maxLength={6}
-                returnKeyType="next"
-                accessibilityLabel="Phone verification code"
-                testID="phone-verify-code"
-                autoFocus
-              />
-              {errors.phoneVerifyCode ? <Text style={styles.fieldError}>{errors.phoneVerifyCode}</Text> : null}
+              {smsSent ? (
+                <>
+                  <Text style={styles.label}>Phone code — sent to {phone}</Text>
+                  <TextInput
+                    style={[styles.input, styles.codeInput, errors.phoneVerifyCode ? styles.inputError : null]}
+                    placeholder="000000"
+                    placeholderTextColor={Colors.textMuted}
+                    value={phoneVerifyCode}
+                    onChangeText={(t) => {
+                      const digits = t.replace(/[^0-9]/g, "").slice(0, 6);
+                      setPhoneVerifyCode(digits);
+                      if (errors.phoneVerifyCode) setErrors((e) => ({ ...e, phoneVerifyCode: "" }));
+                      if (generalError) setGeneralError("");
+                    }}
+                    keyboardType="number-pad"
+                    textContentType="oneTimeCode"
+                    maxLength={6}
+                    returnKeyType="next"
+                    accessibilityLabel="Phone verification code"
+                    testID="phone-verify-code"
+                    autoFocus
+                  />
+                  {errors.phoneVerifyCode ? <Text style={styles.fieldError}>{errors.phoneVerifyCode}</Text> : null}
+                </>
+              ) : null}
 
-              <Text style={[styles.label, { marginTop: 12 }]}>Email code — sent to {email}</Text>
+              <Text style={[styles.label, { marginTop: smsSent ? 12 : 0 }]}>Email code — sent to {email}</Text>
               <TextInput
                 style={[styles.input, styles.codeInput, errors.emailVerifyCode ? styles.inputError : null]}
                 placeholder="000000"

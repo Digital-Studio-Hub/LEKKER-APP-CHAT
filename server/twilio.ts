@@ -7,22 +7,17 @@ const fromNumber = process.env.TWILIO_PHONE_NUMBER;
 export async function sendPhoneVerificationSMS(toPhone: string, code: string): Promise<boolean> {
   if (!accountSid || !authToken || !fromNumber) {
     console.error("[Twilio] Missing Twilio credentials");
-    return false;
+    throw new Error("SMS service not configured");
   }
 
-  try {
-    const client = Twilio(accountSid, authToken);
-    await client.messages.create({
-      body: `Lekker Chat: Your verification code is ${code}. It expires in 10 minutes. Do not share this code with anyone.`,
-      from: fromNumber,
-      to: toPhone,
-    });
-    console.log(`[Twilio] Phone verification SMS sent to ${toPhone}`);
-    return true;
-  } catch (error) {
-    console.error("[Twilio] Failed to send phone verification SMS:", error);
-    return false;
-  }
+  const client = Twilio(accountSid, authToken);
+  await client.messages.create({
+    body: `Lekker Chat: Your verification code is ${code}. It expires in 10 minutes. Do not share this code with anyone.`,
+    from: fromNumber,
+    to: toPhone,
+  });
+  console.log(`[Twilio] Phone verification SMS sent to ${toPhone}`);
+  return true;
 }
 
 export async function sendPasswordResetSMS(toPhone: string, code: string, firstName: string): Promise<boolean> {
