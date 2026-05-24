@@ -11,6 +11,7 @@ import {
   KeyboardAvoidingView,
   Linking,
 } from "react-native";
+import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "@/lib/auth-context";
@@ -96,6 +97,12 @@ export default function LoginScreen() {
   const [verificationId, setVerificationId] = useState("");
   const [emailVerificationId, setEmailVerificationId] = useState("");
   const [smsSent, setSmsSent] = useState(false);
+
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
+  const [showRegPassword, setShowRegPassword] = useState(false);
+  const [showRegConfirm, setShowRegConfirm] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmNew, setShowConfirmNew] = useState(false);
 
   const emailRef = useRef<TextInput>(null);
   const usernameRef = useRef<TextInput>(null);
@@ -481,19 +488,24 @@ export default function LoginScreen() {
               {errors.identifier ? <Text style={styles.fieldError}>{errors.identifier}</Text> : null}
 
               <Text style={styles.label}>Password</Text>
-              <TextInput
-                ref={loginPassRef}
-                style={[styles.input, errors.loginPassword ? styles.inputError : null]}
-                placeholder="Enter your password"
-                placeholderTextColor={Colors.textMuted}
-                value={loginPassword}
-                onChangeText={(t) => { setLoginPassword(t); if (errors.loginPassword) setErrors((e) => ({ ...e, loginPassword: "" })); }}
-                secureTextEntry
-                returnKeyType="go"
-                onSubmitEditing={handleLogin}
-                accessibilityLabel="Password"
-                testID="login-password"
-              />
+              <View style={styles.passwordContainer}>
+                <TextInput
+                  ref={loginPassRef}
+                  style={[styles.input, styles.passwordInput, errors.loginPassword ? styles.inputError : null]}
+                  placeholder="Enter your password"
+                  placeholderTextColor={Colors.textMuted}
+                  value={loginPassword}
+                  onChangeText={(t) => { setLoginPassword(t); if (errors.loginPassword) setErrors((e) => ({ ...e, loginPassword: "" })); }}
+                  secureTextEntry={!showLoginPassword}
+                  returnKeyType="go"
+                  onSubmitEditing={handleLogin}
+                  accessibilityLabel="Password"
+                  testID="login-password"
+                />
+                <Pressable style={styles.eyeButton} onPress={() => setShowLoginPassword((v) => !v)} accessibilityLabel={showLoginPassword ? "Hide password" : "Show password"}>
+                  <Feather name={showLoginPassword ? "eye-off" : "eye"} size={20} color={Colors.textMuted} />
+                </Pressable>
+              </View>
               {errors.loginPassword ? <Text style={styles.fieldError}>{errors.loginPassword}</Text> : null}
 
               <Pressable
@@ -607,33 +619,43 @@ export default function LoginScreen() {
               <Text style={styles.resetSubtitle}>Create a strong new password for your account.</Text>
 
               <Text style={styles.label}>New password</Text>
-              <TextInput
-                style={[styles.input, errors.newPassword ? styles.inputError : null]}
-                placeholder="Min 8 chars, upper, number, special"
-                placeholderTextColor={Colors.textMuted}
-                value={newPassword}
-                onChangeText={(t) => { setNewPassword(t); if (errors.newPassword) setErrors((e) => ({ ...e, newPassword: "" })); }}
-                secureTextEntry
-                returnKeyType="next"
-                accessibilityLabel="New password"
-                testID="new-password"
-              />
+              <View style={styles.passwordContainer}>
+                <TextInput
+                  style={[styles.input, styles.passwordInput, errors.newPassword ? styles.inputError : null]}
+                  placeholder="Min 8 chars, upper, number, special"
+                  placeholderTextColor={Colors.textMuted}
+                  value={newPassword}
+                  onChangeText={(t) => { setNewPassword(t); if (errors.newPassword) setErrors((e) => ({ ...e, newPassword: "" })); }}
+                  secureTextEntry={!showNewPassword}
+                  returnKeyType="next"
+                  accessibilityLabel="New password"
+                  testID="new-password"
+                />
+                <Pressable style={styles.eyeButton} onPress={() => setShowNewPassword((v) => !v)} accessibilityLabel={showNewPassword ? "Hide password" : "Show password"}>
+                  <Feather name={showNewPassword ? "eye-off" : "eye"} size={20} color={Colors.textMuted} />
+                </Pressable>
+              </View>
               {errors.newPassword ? <Text style={styles.fieldError}>{errors.newPassword}</Text> : null}
               <PasswordStrength password={newPassword} />
 
               <Text style={styles.label}>Confirm new password</Text>
-              <TextInput
-                style={[styles.input, errors.confirmNewPassword ? styles.inputError : null]}
-                placeholder="Re-enter new password"
-                placeholderTextColor={Colors.textMuted}
-                value={confirmNewPassword}
-                onChangeText={(t) => { setConfirmNewPassword(t); if (errors.confirmNewPassword) setErrors((e) => ({ ...e, confirmNewPassword: "" })); }}
-                secureTextEntry
-                returnKeyType="go"
-                onSubmitEditing={handleResetPassword}
-                accessibilityLabel="Confirm new password"
-                testID="confirm-new-password"
-              />
+              <View style={styles.passwordContainer}>
+                <TextInput
+                  style={[styles.input, styles.passwordInput, errors.confirmNewPassword ? styles.inputError : null]}
+                  placeholder="Re-enter new password"
+                  placeholderTextColor={Colors.textMuted}
+                  value={confirmNewPassword}
+                  onChangeText={(t) => { setConfirmNewPassword(t); if (errors.confirmNewPassword) setErrors((e) => ({ ...e, confirmNewPassword: "" })); }}
+                  secureTextEntry={!showConfirmNew}
+                  returnKeyType="go"
+                  onSubmitEditing={handleResetPassword}
+                  accessibilityLabel="Confirm new password"
+                  testID="confirm-new-password"
+                />
+                <Pressable style={styles.eyeButton} onPress={() => setShowConfirmNew((v) => !v)} accessibilityLabel={showConfirmNew ? "Hide password" : "Show password"}>
+                  <Feather name={showConfirmNew ? "eye-off" : "eye"} size={20} color={Colors.textMuted} />
+                </Pressable>
+              </View>
               {errors.confirmNewPassword ? <Text style={styles.fieldError}>{errors.confirmNewPassword}</Text> : null}
 
               <Pressable
@@ -846,38 +868,48 @@ export default function LoginScreen() {
               </View>
 
               <Text style={styles.label}>Password</Text>
-              <TextInput
-                ref={passwordRef}
-                style={[styles.input, errors.password ? styles.inputError : null]}
-                placeholder="Min 8 chars, upper, number, special"
-                placeholderTextColor={Colors.textMuted}
-                value={password}
-                onChangeText={(t) => { setPassword(t); if (errors.password) setErrors((e) => ({ ...e, password: "" })); }}
-                secureTextEntry
-                textContentType="newPassword"
-                returnKeyType="next"
-                onSubmitEditing={() => confirmRef.current?.focus()}
-                accessibilityLabel="Password"
-                testID="register-password"
-              />
+              <View style={styles.passwordContainer}>
+                <TextInput
+                  ref={passwordRef}
+                  style={[styles.input, styles.passwordInput, errors.password ? styles.inputError : null]}
+                  placeholder="Min 8 chars, upper, number, special"
+                  placeholderTextColor={Colors.textMuted}
+                  value={password}
+                  onChangeText={(t) => { setPassword(t); if (errors.password) setErrors((e) => ({ ...e, password: "" })); }}
+                  secureTextEntry={!showRegPassword}
+                  textContentType="newPassword"
+                  returnKeyType="next"
+                  onSubmitEditing={() => confirmRef.current?.focus()}
+                  accessibilityLabel="Password"
+                  testID="register-password"
+                />
+                <Pressable style={styles.eyeButton} onPress={() => setShowRegPassword((v) => !v)} accessibilityLabel={showRegPassword ? "Hide password" : "Show password"}>
+                  <Feather name={showRegPassword ? "eye-off" : "eye"} size={20} color={Colors.textMuted} />
+                </Pressable>
+              </View>
               {errors.password ? <Text style={styles.fieldError}>{errors.password}</Text> : null}
               <PasswordStrength password={password} />
 
               <Text style={styles.label}>Confirm password</Text>
-              <TextInput
-                ref={confirmRef}
-                style={[styles.input, errors.confirmPassword ? styles.inputError : null]}
-                placeholder="Re-enter password"
-                placeholderTextColor={Colors.textMuted}
-                value={confirmPassword}
-                onChangeText={(t) => { setConfirmPassword(t); if (errors.confirmPassword) setErrors((e) => ({ ...e, confirmPassword: "" })); }}
-                secureTextEntry
-                textContentType="newPassword"
-                returnKeyType="go"
-                onSubmitEditing={handleRegister}
-                accessibilityLabel="Confirm password"
-                testID="register-confirm-password"
-              />
+              <View style={styles.passwordContainer}>
+                <TextInput
+                  ref={confirmRef}
+                  style={[styles.input, styles.passwordInput, errors.confirmPassword ? styles.inputError : null]}
+                  placeholder="Re-enter password"
+                  placeholderTextColor={Colors.textMuted}
+                  value={confirmPassword}
+                  onChangeText={(t) => { setConfirmPassword(t); if (errors.confirmPassword) setErrors((e) => ({ ...e, confirmPassword: "" })); }}
+                  secureTextEntry={!showRegConfirm}
+                  textContentType="newPassword"
+                  returnKeyType="go"
+                  onSubmitEditing={handleRegister}
+                  accessibilityLabel="Confirm password"
+                  testID="register-confirm-password"
+                />
+                <Pressable style={styles.eyeButton} onPress={() => setShowRegConfirm((v) => !v)} accessibilityLabel={showRegConfirm ? "Hide password" : "Show password"}>
+                  <Feather name={showRegConfirm ? "eye-off" : "eye"} size={20} color={Colors.textMuted} />
+                </Pressable>
+              </View>
               {errors.confirmPassword ? <Text style={styles.fieldError}>{errors.confirmPassword}</Text> : null}
 
               <Pressable
@@ -1018,6 +1050,22 @@ const styles = StyleSheet.create({
   },
   inputError: {
     borderColor: Colors.danger,
+  },
+  passwordContainer: {
+    position: "relative",
+    width: "100%",
+  },
+  passwordInput: {
+    paddingRight: 48,
+  },
+  eyeButton: {
+    position: "absolute",
+    right: 14,
+    top: 0,
+    bottom: 12,
+    justifyContent: "center",
+    alignItems: "center",
+    width: 32,
   },
   fieldError: {
     fontFamily: "Poppins_400Regular",
