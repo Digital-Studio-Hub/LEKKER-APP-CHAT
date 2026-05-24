@@ -19,6 +19,15 @@ import { findLekkerpreneurByPhoneOrEmail, fetchDirectory as fetchLekkerDirectory
 import { sendPasswordResetEmail, sendEmailVerificationEmail } from "./gmail";
 import { sendPasswordResetSMS, sendPhoneVerificationSMS } from "./twilio";
 
+function normalizePhone(raw: string): string {
+  const digits = raw.replace(/[\s\-().]/g, "");
+  if (digits.startsWith("+")) return digits;
+  if (digits.startsWith("0")) return "+27" + digits.slice(1);
+  if (digits.startsWith("27")) return "+" + digits;
+  if (digits.length >= 7) return "+27" + digits;
+  return digits;
+}
+
 async function enrichParticipants(chatId: string) {
   const rawParticipants = await storage.getChatParticipants(chatId);
   const participantUsers = [];
@@ -116,30 +125,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/auth/send-phone-code", phoneVerifyLimiter, async (req: Request, res: Response) => {
     try {
-      const { phone } = req.body;
-      if (!phone || phone.length < 6) {
+      const rawPhone = req.body.phone;
+      if (!rawPhone || rawPhone.trim().length < 6) {
         return res.status(400).json({ message: "Valid phone number is required" });
       }
+      const phone = normalizePhone(rawPhone.trim());
 
-      const existingUser = await storage.getUserByPhone(phone.trim());
+      const existingUser = await storage.getUserByPhone(phone);
       if (existingUser) {
         return res.status(409).json({ message: "An account with this phone number already exists", field: "phone" });
       }
 
-      await db.delete(phoneVerificationCodes).where(eq(phoneVerificationCodes.phone, phone.trim()));
+      await db.delete(phoneVerificationCodes).where(eq(phoneVerificationCodes.phone, phone));
 
       const code = Math.floor(100000 + Math.random() * 900000).toString();
       const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
       await db.insert(phoneVerificationCodes).values({
-        phone: phone.trim(),
+        phone,
         code,
         verified: false,
         used: false,
         expiresAt,
       });
 
-      await sendPhoneVerificationSMS(phone.trim(), code);
+      await sendPhoneVerificationSMS(phone, code);
 
       res.json({ message: "Verification code sent to your phone" });
     } catch (err) {
@@ -223,7 +233,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/auth/verify-phone-code", phoneVerifyLimiter, async (req: Request, res: Response) => {
     try {
-      const { phone, code } = req.body;
+      const { code } = req.body;
+      const phone = req.body.phone ? normalizePhone(req.body.phone.trim()) : "";
       if (!phone || !code) {
         return res.status(400).json({ message: "Phone number and code are required" });
       }
@@ -231,7 +242,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const [record] = await db
         .select()
         .from(phoneVerificationCodes)
-        .where(eq(phoneVerificationCodes.phone, phone.trim()))
+        .where(eq(phoneVerificationCodes.phone, phone))
         .orderBy(phoneVerificationCodes.createdAt)
         .limit(1);
 
@@ -268,7 +279,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Validation failed", errors });
       }
 
-      const { phone, email, username, firstName, lastName, password } = parsed.data;
+      const { email, username, firstName, lastName, password } = parsed.data;
+      const phone = normalizePhone(parsed.data.phone.trim());
       const { verificationId, emailVerificationId } = req.body;
 
       let phoneVerified = false;
@@ -279,7 +291,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (!phoneRecord || !phoneRecord.verified || phoneRecord.used) {
           return res.status(400).json({ message: "Invalid or expired phone verification. Please request a new code.", field: "phone" });
         }
-        if (phoneRecord.phone !== phone.trim()) {
+        if (phoneRecord.phone !== phone) {
           return res.status(400).json({ message: "Phone number does not match the verified number.", field: "phone" });
         }
         if (new Date() > phoneRecord.expiresAt) {

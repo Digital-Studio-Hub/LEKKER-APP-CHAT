@@ -143,7 +143,8 @@ export default function LoginScreen() {
 
   function validateRegister(): boolean {
     const e: FormErrors = {};
-    if (!phone || phone.length < 6) e.phone = "Valid phone number is required";
+    const normPhone = normalizePhone(phone);
+    if (!phone || normPhone.length < 8) e.phone = "Valid phone number is required";
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) e.email = "Valid email is required";
     if (!username || username.length < 3) e.username = "Username must be at least 3 characters";
     else if (!/^[a-zA-Z0-9_]+$/.test(username)) e.username = "Letters, numbers, and underscores only";
@@ -156,6 +157,15 @@ export default function LoginScreen() {
     if (password !== confirmPassword) e.confirmPassword = "Passwords don't match";
     setErrors(e);
     return Object.keys(e).length === 0;
+  }
+
+  function normalizePhone(raw: string): string {
+    const digits = raw.replace(/[\s\-().]/g, "");
+    if (digits.startsWith("+")) return digits;
+    if (digits.startsWith("0")) return "+27" + digits.slice(1);
+    if (digits.startsWith("27")) return "+" + digits;
+    if (digits.length >= 7) return "+27" + digits;
+    return digits;
   }
 
   async function handleLogin() {
@@ -189,7 +199,7 @@ export default function LoginScreen() {
         fetch(new URL("/api/auth/send-phone-code", getApiUrl()).toString(), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ phone: phone.trim() }),
+          body: JSON.stringify({ phone: normalizePhone(phone.trim()) }),
         }),
         fetch(new URL("/api/auth/send-email-code", getApiUrl()).toString(), {
           method: "POST",
@@ -247,7 +257,7 @@ export default function LoginScreen() {
         const phoneVerifyRes = await fetch(new URL("/api/auth/verify-phone-code", getApiUrl()).toString(), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ phone: phone.trim(), code: phoneVerifyCode.trim() }),
+          body: JSON.stringify({ phone: normalizePhone(phone.trim()), code: phoneVerifyCode.trim() }),
         });
         const phoneVerifyData = await phoneVerifyRes.json();
         if (!phoneVerifyRes.ok) {
@@ -270,7 +280,7 @@ export default function LoginScreen() {
       resolvedEmailVerificationId = emailVerifyData.emailVerificationId;
 
       const result = await register({
-        phone: phone.trim(),
+        phone: normalizePhone(phone.trim()),
         email: email.trim().toLowerCase(),
         username: username.trim().toLowerCase(),
         firstName: firstName.trim(),
@@ -776,7 +786,7 @@ export default function LoginScreen() {
               <Text style={styles.label}>Phone number</Text>
               <TextInput
                 style={[styles.input, errors.phone ? styles.inputError : null]}
-                placeholder="+27 XX XXX XXXX"
+                placeholder="082 XXX XXXX or +27 82 XXX XXXX"
                 placeholderTextColor={Colors.textMuted}
                 value={phone}
                 onChangeText={(t) => { setPhone(t); if (errors.phone) setErrors((e) => ({ ...e, phone: "" })); }}
