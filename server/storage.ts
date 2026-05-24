@@ -366,6 +366,35 @@ class PgStorage implements IStorage {
     await db.delete(chatParticipants).where(eq(chatParticipants.chatId, chatId));
     await db.delete(chats).where(eq(chats.id, chatId));
   }
+
+  async deleteUserAccount(userId: string): Promise<void> {
+    const userChats = await db
+      .select({ chatId: chatParticipants.chatId })
+      .from(chatParticipants)
+      .where(eq(chatParticipants.userId, userId));
+
+    for (const { chatId } of userChats) {
+      const participants = await db
+        .select()
+        .from(chatParticipants)
+        .where(eq(chatParticipants.chatId, chatId));
+      if (participants.length <= 2) {
+        await db.delete(chatMessages).where(eq(chatMessages.chatId, chatId));
+        await db.delete(chatParticipants).where(eq(chatParticipants.chatId, chatId));
+        await db.delete(chats).where(eq(chats.id, chatId));
+      } else {
+        await db.delete(chatParticipants).where(
+          and(eq(chatParticipants.chatId, chatId), eq(chatParticipants.userId, userId))
+        );
+        await db.delete(chatMessages).where(
+          and(eq(chatMessages.chatId, chatId), eq(chatMessages.senderId, userId))
+        );
+      }
+    }
+
+    await db.delete(authAuditLogs).where(eq(authAuditLogs.userId, userId));
+    await db.delete(users).where(eq(users.id, userId));
+  }
 }
 
 export const storage = new PgStorage();

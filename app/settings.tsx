@@ -324,6 +324,43 @@ export default function SettingsScreen() {
     ]);
   }
 
+  async function handleDeleteAccount() {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    Alert.alert(
+      "Delete Account",
+      "This will permanently delete your account and all your data including messages, posts, and profile information. This cannot be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Continue",
+          style: "destructive",
+          onPress: () => {
+            Alert.alert(
+              "Are you absolutely sure?",
+              `Deleting your account will permanently remove all data for ${user?.firstName} ${user?.lastName}. You will not be able to recover it.`,
+              [
+                { text: "Go Back", style: "cancel" },
+                {
+                  text: "Delete My Account",
+                  style: "destructive",
+                  onPress: async () => {
+                    try {
+                      await apiRequest("DELETE", "/api/auth/account");
+                      await logout();
+                      router.replace("/");
+                    } catch (err: any) {
+                      Alert.alert("Error", err.message || "Failed to delete account. Please try again.");
+                    }
+                  },
+                },
+              ]
+            );
+          },
+        },
+      ]
+    );
+  }
+
   const profileImageUrl = getProfileImageUrl(user?.profilePhoto);
 
   function renderEditableField(label: string, fieldKey: string, value: string, setter: (v: string) => void, options?: { multiline?: boolean; maxLength?: number; keyboard?: any }) {
@@ -759,6 +796,15 @@ export default function SettingsScreen() {
           <Text style={styles.logoutText}>Sign Out</Text>
         </Pressable>
 
+        <Pressable
+          style={({ pressed }) => [styles.deleteAccountButton, pressed && { opacity: 0.8 }]}
+          onPress={handleDeleteAccount}
+          testID="delete-account-button"
+        >
+          <Ionicons name="trash-outline" size={18} color={Colors.textMuted} />
+          <Text style={styles.deleteAccountText}>Delete Account</Text>
+        </Pressable>
+
         <View style={styles.legalLinks}>
           <Pressable
             onPress={() => Linking.openURL("https://lekker.network/privacy")}
@@ -976,6 +1022,22 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   logoutText: { fontFamily: "Poppins_600SemiBold", fontSize: 16, color: Colors.danger },
+  deleteAccountButton: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    gap: 8,
+    marginTop: 12,
+    paddingVertical: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+  },
+  deleteAccountText: {
+    fontFamily: "Poppins_500Medium",
+    fontSize: 14,
+    color: Colors.textMuted,
+  },
   version: {
     fontFamily: "Poppins_400Regular",
     fontSize: 12,

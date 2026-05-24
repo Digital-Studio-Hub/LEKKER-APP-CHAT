@@ -482,6 +482,7 @@ export default function LoginScreen() {
                 value={resetCode}
                 onChangeText={(t) => { const digits = t.replace(/[^0-9]/g, "").slice(0, 6); setResetCode(digits); if (errors.resetCode) setErrors((e) => ({ ...e, resetCode: "" })); }}
                 keyboardType="number-pad"
+                textContentType="oneTimeCode"
                 maxLength={6}
                 returnKeyType="go"
                 onSubmitEditing={handleVerifyCode}
@@ -569,6 +570,7 @@ export default function LoginScreen() {
                 value={phone}
                 onChangeText={(t) => { setPhone(t); if (errors.phone) setErrors((e) => ({ ...e, phone: "" })); }}
                 keyboardType="phone-pad"
+                textContentType="telephoneNumber"
                 returnKeyType="next"
                 onSubmitEditing={() => emailRef.current?.focus()}
                 accessibilityLabel="Phone number"
@@ -585,6 +587,7 @@ export default function LoginScreen() {
                 value={email}
                 onChangeText={(t) => { setEmail(t); if (errors.email) setErrors((e) => ({ ...e, email: "" })); }}
                 keyboardType="email-address"
+                textContentType="emailAddress"
                 autoCapitalize="none"
                 autoCorrect={false}
                 returnKeyType="next"
@@ -604,6 +607,7 @@ export default function LoginScreen() {
                 onChangeText={(t) => { setUsername(t); if (errors.username) setErrors((e) => ({ ...e, username: "" })); }}
                 autoCapitalize="none"
                 autoCorrect={false}
+                textContentType="username"
                 returnKeyType="next"
                 onSubmitEditing={() => firstNameRef.current?.focus()}
                 accessibilityLabel="Username"
@@ -622,6 +626,8 @@ export default function LoginScreen() {
                     value={firstName}
                     onChangeText={(t) => { setFirstName(t); if (errors.firstName) setErrors((e) => ({ ...e, firstName: "" })); }}
                     autoCapitalize="words"
+                    textContentType="givenName"
+                    keyboardType="default"
                     returnKeyType="next"
                     onSubmitEditing={() => lastNameRef.current?.focus()}
                     accessibilityLabel="First name"
@@ -639,6 +645,8 @@ export default function LoginScreen() {
                     value={lastName}
                     onChangeText={(t) => { setLastName(t); if (errors.lastName) setErrors((e) => ({ ...e, lastName: "" })); }}
                     autoCapitalize="words"
+                    textContentType="familyName"
+                    keyboardType="default"
                     returnKeyType="next"
                     onSubmitEditing={() => passwordRef.current?.focus()}
                     accessibilityLabel="Last name"
@@ -657,6 +665,7 @@ export default function LoginScreen() {
                 value={password}
                 onChangeText={(t) => { setPassword(t); if (errors.password) setErrors((e) => ({ ...e, password: "" })); }}
                 secureTextEntry
+                textContentType="newPassword"
                 returnKeyType="next"
                 onSubmitEditing={() => confirmRef.current?.focus()}
                 accessibilityLabel="Password"
@@ -674,6 +683,7 @@ export default function LoginScreen() {
                 value={confirmPassword}
                 onChangeText={(t) => { setConfirmPassword(t); if (errors.confirmPassword) setErrors((e) => ({ ...e, confirmPassword: "" })); }}
                 secureTextEntry
+                textContentType="newPassword"
                 returnKeyType="go"
                 onSubmitEditing={handleRegister}
                 accessibilityLabel="Confirm password"
