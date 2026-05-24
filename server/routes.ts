@@ -1726,7 +1726,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.flushHeaders();
 
       const stream = await openrouter.chat.completions.create({
-        model: "x-ai/grok-3-mini",
+        model: "x-ai/grok-4.3",
         messages: [systemMessage, ...messages],
         stream: true,
         max_tokens: 8192,
