@@ -92,7 +92,9 @@ export default function LoginScreen() {
   const [confirmPassword, setConfirmPassword] = useState("");
 
   const [phoneVerifyCode, setPhoneVerifyCode] = useState("");
+  const [emailVerifyCode, setEmailVerifyCode] = useState("");
   const [verificationId, setVerificationId] = useState("");
+  const [emailVerificationId, setEmailVerificationId] = useState("");
 
   const emailRef = useRef<TextInput>(null);
   const usernameRef = useRef<TextInput>(null);
@@ -175,22 +177,37 @@ export default function LoginScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     try {
-      const response = await fetch(new URL("/api/auth/send-phone-code", getApiUrl()).toString(), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: phone.trim() }),
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        if (data.field) {
-          setErrors({ [data.field]: data.message });
-        } else {
-          setGeneralError(data.message || "Failed to send verification code.");
-        }
+      const [phoneRes, emailRes] = await Promise.all([
+        fetch(new URL("/api/auth/send-phone-code", getApiUrl()).toString(), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ phone: phone.trim() }),
+        }),
+        fetch(new URL("/api/auth/send-email-code", getApiUrl()).toString(), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: email.trim().toLowerCase(), firstName: firstName.trim() }),
+        }),
+      ]);
+
+      const [phoneData, emailData] = await Promise.all([phoneRes.json(), emailRes.json()]);
+      const fieldErrors: FormErrors = {};
+
+      if (!phoneRes.ok) {
+        fieldErrors[phoneData.field || "phone"] = phoneData.message || "Failed to send SMS code.";
+      }
+      if (!emailRes.ok) {
+        fieldErrors[emailData.field || "email"] = emailData.message || "Failed to send email code.";
+      }
+      if (Object.keys(fieldErrors).length > 0) {
+        setErrors(fieldErrors);
         return;
       }
+
       setPhoneVerifyCode("");
+      setEmailVerifyCode("");
       setVerificationId("");
+      setEmailVerificationId("");
       clearErrors();
       setMode("phoneVerify");
     } catch (e: any) {
@@ -201,25 +218,35 @@ export default function LoginScreen() {
   }
 
   async function handlePhoneVerify() {
-    if (!phoneVerifyCode || phoneVerifyCode.length !== 6) {
-      setErrors({ phoneVerifyCode: "Enter the 6-digit code sent to your phone" });
-      return;
-    }
+    const e: FormErrors = {};
+    if (!phoneVerifyCode || phoneVerifyCode.length !== 6) e.phoneVerifyCode = "Enter the 6-digit code sent to your phone";
+    if (!emailVerifyCode || emailVerifyCode.length !== 6) e.emailVerifyCode = "Enter the 6-digit code sent to your email";
+    if (Object.keys(e).length > 0) { setErrors(e); return; }
+
     setIsSubmitting(true);
     setGeneralError("");
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     try {
-      const verifyResponse = await fetch(new URL("/api/auth/verify-phone-code", getApiUrl()).toString(), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: phone.trim(), code: phoneVerifyCode.trim() }),
-      });
-      const verifyData = await verifyResponse.json();
-      if (!verifyResponse.ok) {
-        setGeneralError(verifyData.message || "Verification failed. Please try again.");
-        return;
-      }
+      const [phoneVerifyRes, emailVerifyRes] = await Promise.all([
+        fetch(new URL("/api/auth/verify-phone-code", getApiUrl()).toString(), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ phone: phone.trim(), code: phoneVerifyCode.trim() }),
+        }),
+        fetch(new URL("/api/auth/verify-email-code", getApiUrl()).toString(), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: email.trim().toLowerCase(), code: emailVerifyCode.trim() }),
+        }),
+      ]);
+
+      const [phoneVerifyData, emailVerifyData] = await Promise.all([phoneVerifyRes.json(), emailVerifyRes.json()]);
+      const verifyErrors: FormErrors = {};
+
+      if (!phoneVerifyRes.ok) verifyErrors.phoneVerifyCode = phoneVerifyData.message || "Incorrect phone code.";
+      if (!emailVerifyRes.ok) verifyErrors.emailVerifyCode = emailVerifyData.message || "Incorrect email code.";
+      if (Object.keys(verifyErrors).length > 0) { setErrors(verifyErrors); return; }
 
       const result = await register({
         phone: phone.trim(),
@@ -228,7 +255,8 @@ export default function LoginScreen() {
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         password,
-        verificationId: verifyData.verificationId,
+        verificationId: phoneVerifyData.verificationId,
+        emailVerificationId: emailVerifyData.emailVerificationId,
       } as any);
 
       if (result.success) {
@@ -236,11 +264,8 @@ export default function LoginScreen() {
       } else if (result.errors) {
         const fieldErrors: FormErrors = {};
         result.errors.forEach((err: any) => {
-          if (err.field && err.field !== "general") {
-            fieldErrors[err.field] = err.message;
-          } else {
-            setGeneralError(err.message);
-          }
+          if (err.field && err.field !== "general") fieldErrors[err.field] = err.message;
+          else setGeneralError(err.message);
         });
         if (Object.keys(fieldErrors).length > 0) {
           setErrors(fieldErrors);
@@ -616,9 +641,9 @@ export default function LoginScreen() {
             </>
           ) : mode === "phoneVerify" ? (
             <>
-              <Text style={styles.resetTitle}>Verify Your Number</Text>
+              <Text style={styles.resetTitle}>Verify Your Details</Text>
               <Text style={styles.resetSubtitle}>
-                We sent a 6-digit code to {phone}. Enter it below to confirm your number and create your account.
+                We sent a 6-digit code to your phone and a separate code to your email. Enter both below.
               </Text>
 
               {generalError ? (
@@ -627,7 +652,7 @@ export default function LoginScreen() {
                 </View>
               ) : null}
 
-              <Text style={styles.label}>6-digit code</Text>
+              <Text style={styles.label}>Phone code — sent to {phone}</Text>
               <TextInput
                 style={[styles.input, styles.codeInput, errors.phoneVerifyCode ? styles.inputError : null]}
                 placeholder="000000"
@@ -642,19 +667,40 @@ export default function LoginScreen() {
                 keyboardType="number-pad"
                 textContentType="oneTimeCode"
                 maxLength={6}
-                returnKeyType="go"
-                onSubmitEditing={handlePhoneVerify}
+                returnKeyType="next"
                 accessibilityLabel="Phone verification code"
                 testID="phone-verify-code"
                 autoFocus
               />
               {errors.phoneVerifyCode ? <Text style={styles.fieldError}>{errors.phoneVerifyCode}</Text> : null}
 
+              <Text style={[styles.label, { marginTop: 12 }]}>Email code — sent to {email}</Text>
+              <TextInput
+                style={[styles.input, styles.codeInput, errors.emailVerifyCode ? styles.inputError : null]}
+                placeholder="000000"
+                placeholderTextColor={Colors.textMuted}
+                value={emailVerifyCode}
+                onChangeText={(t) => {
+                  const digits = t.replace(/[^0-9]/g, "").slice(0, 6);
+                  setEmailVerifyCode(digits);
+                  if (errors.emailVerifyCode) setErrors((e) => ({ ...e, emailVerifyCode: "" }));
+                  if (generalError) setGeneralError("");
+                }}
+                keyboardType="number-pad"
+                textContentType="oneTimeCode"
+                maxLength={6}
+                returnKeyType="go"
+                onSubmitEditing={handlePhoneVerify}
+                accessibilityLabel="Email verification code"
+                testID="email-verify-code"
+              />
+              {errors.emailVerifyCode ? <Text style={styles.fieldError}>{errors.emailVerifyCode}</Text> : null}
+
               <Pressable
-                style={({ pressed }) => [styles.button, pressed && styles.buttonPressed, isSubmitting && styles.buttonDisabled]}
+                style={({ pressed }) => [styles.button, { marginTop: 20 }, pressed && styles.buttonPressed, isSubmitting && styles.buttonDisabled]}
                 onPress={handlePhoneVerify}
                 disabled={isSubmitting}
-                testID="phone-verify-button"
+                testID="verify-both-button"
               >
                 {isSubmitting ? (
                   <ActivityIndicator color={Colors.background} />
@@ -667,6 +713,7 @@ export default function LoginScreen() {
                 onPress={() => {
                   clearErrors();
                   setPhoneVerifyCode("");
+                  setEmailVerifyCode("");
                   setMode("register");
                 }}
                 style={styles.forgotLink}
@@ -679,7 +726,7 @@ export default function LoginScreen() {
                 style={[styles.forgotLink, { marginTop: 4 }]}
                 disabled={isSubmitting}
               >
-                <Text style={styles.forgotLinkText}>Resend code</Text>
+                <Text style={styles.forgotLinkText}>Resend both codes</Text>
               </Pressable>
             </>
           ) : (

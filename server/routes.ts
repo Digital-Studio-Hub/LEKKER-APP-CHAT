@@ -2,7 +2,7 @@ import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "node:http";
 import OpenAI from "openai";
 import rateLimit, { type Options } from "express-rate-limit";
-import { registerSchema, loginSchema, updateProfileSchema, users, chatMessages, passwordResetCodes, phoneVerificationCodes } from "@shared/schema";
+import { registerSchema, loginSchema, updateProfileSchema, users, chatMessages, passwordResetCodes, phoneVerificationCodes, emailVerificationCodes } from "@shared/schema";
 import { storage, db } from "./storage";
 import { sql, or, and, ne, eq } from "drizzle-orm";
 import {
@@ -16,7 +16,7 @@ import {
 import { ObjectStorageService, ObjectNotFoundError } from "./objectStorage";
 import { ObjectPermission } from "./objectAcl";
 import { findLekkerpreneurByPhoneOrEmail, fetchDirectory as fetchLekkerDirectory, fetchLekkerpreneurById, fetchWorkspaceById, fetchWorkspaces, extractLekkerpreneurProfile, buildSyncUserResponse, buildDirectoryEntry, buildWorkspaceDirectoryEntry, type LekkerNetworkEntry, type WorkspaceDetail } from "./lekkerNetwork";
-import { sendPasswordResetEmail } from "./gmail";
+import { sendPasswordResetEmail, sendEmailVerificationEmail } from "./gmail";
 import { sendPasswordResetSMS, sendPhoneVerificationSMS } from "./twilio";
 
 async function enrichParticipants(chatId: string) {
@@ -148,6 +148,79 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post("/api/auth/send-email-code", phoneVerifyLimiter, async (req: Request, res: Response) => {
+    try {
+      const { email, firstName } = req.body;
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        return res.status(400).json({ message: "Valid email address is required" });
+      }
+
+      const existingUser = await storage.getUserByEmail(email.trim().toLowerCase());
+      if (existingUser) {
+        return res.status(409).json({ message: "An account with this email already exists", field: "email" });
+      }
+
+      await db.delete(emailVerificationCodes).where(eq(emailVerificationCodes.email, email.trim().toLowerCase()));
+
+      const code = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+      await db.insert(emailVerificationCodes).values({
+        email: email.trim().toLowerCase(),
+        code,
+        verified: false,
+        used: false,
+        expiresAt,
+      });
+
+      await sendEmailVerificationEmail(email.trim().toLowerCase(), code, firstName || "there");
+
+      res.json({ message: "Verification code sent to your email" });
+    } catch (err) {
+      console.error("Send email code error:", err);
+      res.status(500).json({ message: "Failed to send email verification code. Please try again." });
+    }
+  });
+
+  app.post("/api/auth/verify-email-code", phoneVerifyLimiter, async (req: Request, res: Response) => {
+    try {
+      const { email, code } = req.body;
+      if (!email || !code) {
+        return res.status(400).json({ message: "Email and code are required" });
+      }
+
+      const [record] = await db
+        .select()
+        .from(emailVerificationCodes)
+        .where(eq(emailVerificationCodes.email, email.trim().toLowerCase()))
+        .orderBy(emailVerificationCodes.createdAt)
+        .limit(1);
+
+      if (!record) {
+        return res.status(400).json({ message: "No verification code found. Please request a new code." });
+      }
+      if (record.used) {
+        return res.status(400).json({ message: "This code has already been used. Please request a new code." });
+      }
+      if (new Date() > record.expiresAt) {
+        return res.status(400).json({ message: "This code has expired. Please request a new code." });
+      }
+      if (record.code !== code.trim()) {
+        return res.status(400).json({ message: "Incorrect code. Please try again." });
+      }
+
+      await db
+        .update(emailVerificationCodes)
+        .set({ verified: true })
+        .where(eq(emailVerificationCodes.id, record.id));
+
+      res.json({ verified: true, emailVerificationId: record.id });
+    } catch (err) {
+      console.error("Verify email code error:", err);
+      res.status(500).json({ message: "Verification failed. Please try again." });
+    }
+  });
+
   app.post("/api/auth/verify-phone-code", phoneVerifyLimiter, async (req: Request, res: Response) => {
     try {
       const { phone, code } = req.body;
@@ -196,26 +269,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const { phone, email, username, firstName, lastName, password } = parsed.data;
-      const { verificationId } = req.body;
+      const { verificationId, emailVerificationId } = req.body;
 
       if (!verificationId) {
         return res.status(400).json({ message: "Phone verification is required", field: "phone" });
       }
+      if (!emailVerificationId) {
+        return res.status(400).json({ message: "Email verification is required", field: "email" });
+      }
 
-      const [verificationRecord] = await db
-        .select()
-        .from(phoneVerificationCodes)
-        .where(eq(phoneVerificationCodes.id, verificationId))
-        .limit(1);
+      const [[phoneRecord], [emailRecord]] = await Promise.all([
+        db.select().from(phoneVerificationCodes).where(eq(phoneVerificationCodes.id, verificationId)).limit(1),
+        db.select().from(emailVerificationCodes).where(eq(emailVerificationCodes.id, emailVerificationId)).limit(1),
+      ]);
 
-      if (!verificationRecord || !verificationRecord.verified || verificationRecord.used) {
+      if (!phoneRecord || !phoneRecord.verified || phoneRecord.used) {
         return res.status(400).json({ message: "Invalid or expired phone verification. Please verify your number again.", field: "phone" });
       }
-      if (verificationRecord.phone !== phone.trim()) {
+      if (phoneRecord.phone !== phone.trim()) {
         return res.status(400).json({ message: "Phone number does not match verified number.", field: "phone" });
       }
-      if (new Date() > verificationRecord.expiresAt) {
+      if (new Date() > phoneRecord.expiresAt) {
         return res.status(400).json({ message: "Phone verification has expired. Please verify your number again.", field: "phone" });
+      }
+
+      if (!emailRecord || !emailRecord.verified || emailRecord.used) {
+        return res.status(400).json({ message: "Invalid or expired email verification. Please verify your email again.", field: "email" });
+      }
+      if (emailRecord.email !== email.trim().toLowerCase()) {
+        return res.status(400).json({ message: "Email does not match verified email.", field: "email" });
+      }
+      if (new Date() > emailRecord.expiresAt) {
+        return res.status(400).json({ message: "Email verification has expired. Please verify your email again.", field: "email" });
       }
 
       const existingEmail = await storage.getUserByEmail(email);
@@ -233,10 +318,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(409).json({ message: "This username is already taken", field: "username" });
       }
 
-      await db
-        .update(phoneVerificationCodes)
-        .set({ used: true })
-        .where(eq(phoneVerificationCodes.id, verificationId));
+      await Promise.all([
+        db.update(phoneVerificationCodes).set({ used: true }).where(eq(phoneVerificationCodes.id, verificationId)),
+        db.update(emailVerificationCodes).set({ used: true }).where(eq(emailVerificationCodes.id, emailVerificationId)),
+      ]);
 
       const passwordHash = await hashPassword(password);
 
