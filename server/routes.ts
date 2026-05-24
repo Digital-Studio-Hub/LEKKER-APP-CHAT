@@ -627,6 +627,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post("/api/admin/seed-test-user", async (req: Request, res: Response) => {
+    const apiKey = req.headers["x-api-key"];
+    if (!apiKey || apiKey !== process.env.LEKKER_NETWORK_API_KEY) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    try {
+      const existing = await storage.getUserByEmail("test@lekker.chat");
+      if (existing) {
+        return res.json({ message: "Test user already exists", email: "test@lekker.chat", phone: "+27000000001", password: "Lekker@2026" });
+      }
+      const passwordHash = await hashPassword("Lekker@2026");
+      const user = await storage.createUser({
+        phone: "+27000000001",
+        email: "test@lekker.chat",
+        username: "testuser",
+        firstName: "Test",
+        lastName: "User",
+        passwordHash,
+        avatarColor: "#F5B800",
+        role: "user",
+        emailVerified: true,
+        phoneVerified: true,
+        lekkerNetworkAccess: false,
+        autoReplyEnabled: false,
+        notificationsEnabled: true,
+        locationEnabled: false,
+        presence: "online",
+      });
+      res.json({ message: "Test user created", email: "test@lekker.chat", phone: "+27000000001", password: "Lekker@2026", id: user.id });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   app.post("/api/auth/logout", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     await storage.logAuthEvent("logout", req.user!.userId, req.ip, req.headers["user-agent"]?.toString());
     res.json({ message: "Logged out successfully" });
