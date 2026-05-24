@@ -2,7 +2,7 @@ import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "node:http";
 import OpenAI from "openai";
 import rateLimit, { type Options } from "express-rate-limit";
-import { registerSchema, loginSchema, updateProfileSchema, users, chatMessages, passwordResetCodes } from "@shared/schema";
+import { registerSchema, loginSchema, updateProfileSchema, users, chatMessages, passwordResetCodes, phoneVerificationCodes } from "@shared/schema";
 import { storage, db } from "./storage";
 import { sql, or, and, ne, eq } from "drizzle-orm";
 import {
@@ -17,7 +17,7 @@ import { ObjectStorageService, ObjectNotFoundError } from "./objectStorage";
 import { ObjectPermission } from "./objectAcl";
 import { findLekkerpreneurByPhoneOrEmail, fetchDirectory as fetchLekkerDirectory, fetchLekkerpreneurById, fetchWorkspaceById, fetchWorkspaces, extractLekkerpreneurProfile, buildSyncUserResponse, buildDirectoryEntry, buildWorkspaceDirectoryEntry, type LekkerNetworkEntry, type WorkspaceDetail } from "./lekkerNetwork";
 import { sendPasswordResetEmail } from "./gmail";
-import { sendPasswordResetSMS } from "./twilio";
+import { sendPasswordResetSMS, sendPhoneVerificationSMS } from "./twilio";
 
 async function enrichParticipants(chatId: string) {
   const rawParticipants = await storage.getChatParticipants(chatId);
@@ -103,7 +103,89 @@ function sanitizeUser(user: any) {
   return safe;
 }
 
+const phoneVerifyLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many verification attempts. Please try again in an hour." },
+  validate: { xForwardedForHeader: false },
+});
+
 export async function registerRoutes(app: Express): Promise<Server> {
+
+  app.post("/api/auth/send-phone-code", phoneVerifyLimiter, async (req: Request, res: Response) => {
+    try {
+      const { phone } = req.body;
+      if (!phone || phone.length < 6) {
+        return res.status(400).json({ message: "Valid phone number is required" });
+      }
+
+      const existingUser = await storage.getUserByPhone(phone.trim());
+      if (existingUser) {
+        return res.status(409).json({ message: "An account with this phone number already exists", field: "phone" });
+      }
+
+      await db.delete(phoneVerificationCodes).where(eq(phoneVerificationCodes.phone, phone.trim()));
+
+      const code = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+      await db.insert(phoneVerificationCodes).values({
+        phone: phone.trim(),
+        code,
+        verified: false,
+        used: false,
+        expiresAt,
+      });
+
+      await sendPhoneVerificationSMS(phone.trim(), code);
+
+      res.json({ message: "Verification code sent to your phone" });
+    } catch (err) {
+      console.error("Send phone code error:", err);
+      res.status(500).json({ message: "Failed to send verification code. Please try again." });
+    }
+  });
+
+  app.post("/api/auth/verify-phone-code", phoneVerifyLimiter, async (req: Request, res: Response) => {
+    try {
+      const { phone, code } = req.body;
+      if (!phone || !code) {
+        return res.status(400).json({ message: "Phone number and code are required" });
+      }
+
+      const [record] = await db
+        .select()
+        .from(phoneVerificationCodes)
+        .where(eq(phoneVerificationCodes.phone, phone.trim()))
+        .orderBy(phoneVerificationCodes.createdAt)
+        .limit(1);
+
+      if (!record) {
+        return res.status(400).json({ message: "No verification code found. Please request a new code." });
+      }
+      if (record.used) {
+        return res.status(400).json({ message: "This code has already been used. Please request a new code." });
+      }
+      if (new Date() > record.expiresAt) {
+        return res.status(400).json({ message: "This code has expired. Please request a new code." });
+      }
+      if (record.code !== code.trim()) {
+        return res.status(400).json({ message: "Incorrect code. Please try again." });
+      }
+
+      await db
+        .update(phoneVerificationCodes)
+        .set({ verified: true })
+        .where(eq(phoneVerificationCodes.id, record.id));
+
+      res.json({ verified: true, verificationId: record.id });
+    } catch (err) {
+      console.error("Verify phone code error:", err);
+      res.status(500).json({ message: "Verification failed. Please try again." });
+    }
+  });
 
   app.post("/api/auth/register", registerLimiter, async (req: Request, res: Response) => {
     try {
@@ -114,6 +196,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const { phone, email, username, firstName, lastName, password } = parsed.data;
+      const { verificationId } = req.body;
+
+      if (!verificationId) {
+        return res.status(400).json({ message: "Phone verification is required", field: "phone" });
+      }
+
+      const [verificationRecord] = await db
+        .select()
+        .from(phoneVerificationCodes)
+        .where(eq(phoneVerificationCodes.id, verificationId))
+        .limit(1);
+
+      if (!verificationRecord || !verificationRecord.verified || verificationRecord.used) {
+        return res.status(400).json({ message: "Invalid or expired phone verification. Please verify your number again.", field: "phone" });
+      }
+      if (verificationRecord.phone !== phone.trim()) {
+        return res.status(400).json({ message: "Phone number does not match verified number.", field: "phone" });
+      }
+      if (new Date() > verificationRecord.expiresAt) {
+        return res.status(400).json({ message: "Phone verification has expired. Please verify your number again.", field: "phone" });
+      }
 
       const existingEmail = await storage.getUserByEmail(email);
       if (existingEmail) {
@@ -130,6 +233,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(409).json({ message: "This username is already taken", field: "username" });
       }
 
+      await db
+        .update(phoneVerificationCodes)
+        .set({ used: true })
+        .where(eq(phoneVerificationCodes.id, verificationId));
+
       const passwordHash = await hashPassword(password);
 
       const AVATAR_COLORS = ["#4ECDC4", "#FF6B6B", "#45B7D1", "#96CEB4", "#FFEAA7", "#DDA0DD", "#85C1E9", "#F7DC6F", "#BB8FCE", "#98D8C8"];
@@ -145,7 +253,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         avatarColor: randomColor,
         role: "user",
         emailVerified: false,
-        phoneVerified: false,
+        phoneVerified: true,
         lekkerNetworkAccess: false,
         autoReplyEnabled: false,
         notificationsEnabled: true,

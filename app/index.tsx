@@ -22,7 +22,7 @@ import { getApiUrl } from "@/lib/query-client";
 
 const lekkerLogo = require("../assets/images/lekker-logo.png");
 
-type Mode = "login" | "register" | "forgot" | "resetCode" | "newPassword";
+type Mode = "login" | "register" | "forgot" | "resetCode" | "newPassword" | "phoneVerify";
 
 interface FormErrors {
   [key: string]: string;
@@ -90,6 +90,9 @@ export default function LoginScreen() {
   const [lastName, setLastName] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+
+  const [phoneVerifyCode, setPhoneVerifyCode] = useState("");
+  const [verificationId, setVerificationId] = useState("");
 
   const emailRef = useRef<TextInput>(null);
   const usernameRef = useRef<TextInput>(null);
@@ -172,6 +175,52 @@ export default function LoginScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     try {
+      const response = await fetch(new URL("/api/auth/send-phone-code", getApiUrl()).toString(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: phone.trim() }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        if (data.field) {
+          setErrors({ [data.field]: data.message });
+        } else {
+          setGeneralError(data.message || "Failed to send verification code.");
+        }
+        return;
+      }
+      setPhoneVerifyCode("");
+      setVerificationId("");
+      clearErrors();
+      setMode("phoneVerify");
+    } catch (e: any) {
+      setGeneralError("Connection failed. Check your network and try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handlePhoneVerify() {
+    if (!phoneVerifyCode || phoneVerifyCode.length !== 6) {
+      setErrors({ phoneVerifyCode: "Enter the 6-digit code sent to your phone" });
+      return;
+    }
+    setIsSubmitting(true);
+    setGeneralError("");
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+    try {
+      const verifyResponse = await fetch(new URL("/api/auth/verify-phone-code", getApiUrl()).toString(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: phone.trim(), code: phoneVerifyCode.trim() }),
+      });
+      const verifyData = await verifyResponse.json();
+      if (!verifyResponse.ok) {
+        setGeneralError(verifyData.message || "Verification failed. Please try again.");
+        return;
+      }
+
       const result = await register({
         phone: phone.trim(),
         email: email.trim().toLowerCase(),
@@ -179,7 +228,9 @@ export default function LoginScreen() {
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         password,
-      });
+        verificationId: verifyData.verificationId,
+      } as any);
+
       if (result.success) {
         router.replace("/(tabs)");
       } else if (result.errors) {
@@ -191,7 +242,10 @@ export default function LoginScreen() {
             setGeneralError(err.message);
           }
         });
-        setErrors(fieldErrors);
+        if (Object.keys(fieldErrors).length > 0) {
+          setErrors(fieldErrors);
+          setMode("register");
+        }
       }
     } catch (e: any) {
       setGeneralError("Connection failed. Check your network and try again.");
@@ -558,6 +612,74 @@ export default function LoginScreen() {
 
               <Pressable onPress={() => switchMode("login")} style={styles.forgotLink}>
                 <Text style={styles.forgotLinkText}>Back to Sign In</Text>
+              </Pressable>
+            </>
+          ) : mode === "phoneVerify" ? (
+            <>
+              <Text style={styles.resetTitle}>Verify Your Number</Text>
+              <Text style={styles.resetSubtitle}>
+                We sent a 6-digit code to {phone}. Enter it below to confirm your number and create your account.
+              </Text>
+
+              {generalError ? (
+                <View style={styles.errorBanner}>
+                  <Text style={styles.errorBannerText}>{generalError}</Text>
+                </View>
+              ) : null}
+
+              <Text style={styles.label}>6-digit code</Text>
+              <TextInput
+                style={[styles.input, styles.codeInput, errors.phoneVerifyCode ? styles.inputError : null]}
+                placeholder="000000"
+                placeholderTextColor={Colors.textMuted}
+                value={phoneVerifyCode}
+                onChangeText={(t) => {
+                  const digits = t.replace(/[^0-9]/g, "").slice(0, 6);
+                  setPhoneVerifyCode(digits);
+                  if (errors.phoneVerifyCode) setErrors((e) => ({ ...e, phoneVerifyCode: "" }));
+                  if (generalError) setGeneralError("");
+                }}
+                keyboardType="number-pad"
+                textContentType="oneTimeCode"
+                maxLength={6}
+                returnKeyType="go"
+                onSubmitEditing={handlePhoneVerify}
+                accessibilityLabel="Phone verification code"
+                testID="phone-verify-code"
+                autoFocus
+              />
+              {errors.phoneVerifyCode ? <Text style={styles.fieldError}>{errors.phoneVerifyCode}</Text> : null}
+
+              <Pressable
+                style={({ pressed }) => [styles.button, pressed && styles.buttonPressed, isSubmitting && styles.buttonDisabled]}
+                onPress={handlePhoneVerify}
+                disabled={isSubmitting}
+                testID="phone-verify-button"
+              >
+                {isSubmitting ? (
+                  <ActivityIndicator color={Colors.background} />
+                ) : (
+                  <Text style={styles.buttonText}>Verify & Create Account</Text>
+                )}
+              </Pressable>
+
+              <Pressable
+                onPress={() => {
+                  clearErrors();
+                  setPhoneVerifyCode("");
+                  setMode("register");
+                }}
+                style={styles.forgotLink}
+              >
+                <Text style={styles.forgotLinkText}>← Back to edit details</Text>
+              </Pressable>
+
+              <Pressable
+                onPress={handleRegister}
+                style={[styles.forgotLink, { marginTop: 4 }]}
+                disabled={isSubmitting}
+              >
+                <Text style={styles.forgotLinkText}>Resend code</Text>
               </Pressable>
             </>
           ) : (
