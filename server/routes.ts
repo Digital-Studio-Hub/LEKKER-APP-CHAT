@@ -805,6 +805,62 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  async function resolveOrCreateP2PChat(userId: string, participantId: string) {
+    if (participantId === userId) {
+      return { error: "Cannot create chat with yourself", status: 400 as const };
+    }
+    const otherUser = await storage.getUser(participantId);
+    if (!otherUser) {
+      return { error: "User not found", status: 404 as const };
+    }
+    const existing = await storage.findExistingP2PChat(userId, participantId);
+    if (existing) {
+      const participants = await enrichParticipants(existing.id);
+      return { chat: { ...existing, participants }, status: 200 as const };
+    }
+    const chat = await storage.createChat("p2p", userId);
+    await storage.addChatParticipant(chat.id, userId, "owner");
+    await storage.addChatParticipant(chat.id, participantId, "member");
+    const participants = await enrichParticipants(chat.id);
+    return { chat: { ...chat, participants }, status: 201 as const };
+  }
+
+  app.post("/api/chats/start-with-contact", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const userId = req.user!.userId;
+      const { userId: bodyUserId, lekkerNetworkId, phone } = req.body || {};
+
+      let participantId: string | undefined = typeof bodyUserId === "string" ? bodyUserId : undefined;
+
+      if (!participantId && typeof lekkerNetworkId === "string" && lekkerNetworkId.trim()) {
+        const match = await storage.getUserByLekkerNetworkId(lekkerNetworkId.trim());
+        participantId = match?.id;
+      }
+
+      if (!participantId && typeof phone === "string" && phone.trim()) {
+        const cleanPhone = phone.replace(/\s/g, "");
+        const match = await storage.getUserByPhone(cleanPhone);
+        participantId = match?.id;
+      }
+
+      if (!participantId) {
+        return res.status(404).json({
+          message: "This person is not on Lekker Chat yet. Ask them to install the app and register with the same phone or email.",
+          code: "USER_NOT_REGISTERED",
+        });
+      }
+
+      const result = await resolveOrCreateP2PChat(userId, participantId);
+      if ("error" in result && result.error) {
+        return res.status(result.status).json({ message: result.error });
+      }
+      return res.status(result.status).json({ chat: result.chat });
+    } catch (error) {
+      console.error("Start-with-contact error:", error);
+      res.status(500).json({ message: "Failed to start chat" });
+    }
+  });
+
   app.post("/api/chats", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { participantId, type, name } = req.body;
@@ -815,23 +871,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (!participantId) {
           return res.status(400).json({ message: "participantId is required for P2P chat" });
         }
-        if (participantId === userId) {
-          return res.status(400).json({ message: "Cannot create chat with yourself" });
+        const result = await resolveOrCreateP2PChat(userId, participantId);
+        if ("error" in result && result.error) {
+          return res.status(result.status).json({ message: result.error });
         }
-        const otherUser = await storage.getUser(participantId);
-        if (!otherUser) {
-          return res.status(404).json({ message: "User not found" });
-        }
-        const existing = await storage.findExistingP2PChat(userId, participantId);
-        if (existing) {
-          const participants = await enrichParticipants(existing.id);
-          return res.json({ chat: { ...existing, participants } });
-        }
-        const chat = await storage.createChat("p2p", userId);
-        await storage.addChatParticipant(chat.id, userId, "owner");
-        await storage.addChatParticipant(chat.id, participantId, "member");
-        const participants = await enrichParticipants(chat.id);
-        return res.status(201).json({ chat: { ...chat, participants } });
+        return res.status(result.status).json({ chat: result.chat });
       }
 
       if (chatType === "group") {
@@ -995,6 +1039,57 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Mark read error:", error);
       res.status(500).json({ message: "Failed to mark messages as read" });
+    }
+  });
+
+  app.post("/api/chats/:chatId/messages/:messageId/poll-vote", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { chatId, messageId } = req.params;
+      const userId = req.user!.userId;
+      const { optionId } = req.body || {};
+
+      if (!optionId || typeof optionId !== "string") {
+        return res.status(400).json({ message: "optionId is required" });
+      }
+
+      const isParticipant = await storage.isUserInChat(chatId, userId);
+      if (!isParticipant) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const [msg] = await db.select().from(chatMessages).where(
+        and(eq(chatMessages.id, messageId), eq(chatMessages.chatId, chatId)),
+      ).limit(1);
+
+      if (!msg || msg.type !== "poll" || msg.isDeleted) {
+        return res.status(404).json({ message: "Poll not found" });
+      }
+
+      let options: Array<{ id: string; text: string; votes?: string[] }> = [];
+      try {
+        options = msg.pollOptions ? JSON.parse(msg.pollOptions) : [];
+      } catch {
+        return res.status(400).json({ message: "Invalid poll data" });
+      }
+
+      for (const opt of options) {
+        opt.votes = (opt.votes || []).filter((v) => v !== userId);
+      }
+      const target = options.find((o) => o.id === optionId);
+      if (!target) {
+        return res.status(404).json({ message: "Poll option not found" });
+      }
+      target.votes = [...(target.votes || []), userId];
+
+      const [updated] = await db.update(chatMessages)
+        .set({ pollOptions: JSON.stringify(options) })
+        .where(eq(chatMessages.id, messageId))
+        .returning();
+
+      res.json({ message: updated });
+    } catch (error) {
+      console.error("Poll vote error:", error);
+      res.status(500).json({ message: "Failed to record vote" });
     }
   });
 

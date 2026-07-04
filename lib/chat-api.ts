@@ -97,6 +97,53 @@ export async function fetchChatMessages(chatId: string, limit: number = 50, befo
   }
 }
 
+export async function startChatWithContact(opts: {
+  userId?: string;
+  lekkerNetworkId?: string;
+  phone?: string;
+}): Promise<{ chat: ServerChat | null; message?: string; code?: string }> {
+  try {
+    const baseUrl = getApiUrl();
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    const token = getAuthToken();
+    if (token) headers.Authorization = `Bearer ${token}`;
+
+    const res = await fetch(new URL("/api/chats/start-with-contact", baseUrl).toString(), {
+      method: "POST",
+      headers,
+      body: JSON.stringify(opts),
+      credentials: "include",
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { chat: null, message: data.message || "Could not start chat", code: data.code };
+    }
+    return { chat: data.chat || null };
+  } catch (e: any) {
+    console.error("Failed to start chat with contact:", e);
+    return { chat: null, message: e?.message || "Failed to start chat" };
+  }
+}
+
+export async function voteOnPoll(
+  chatId: string,
+  messageId: string,
+  optionId: string,
+): Promise<ServerMessage | null> {
+  try {
+    const res = await apiRequest(
+      "POST",
+      `/api/chats/${chatId}/messages/${messageId}/poll-vote`,
+      { optionId },
+    );
+    const data = await res.json();
+    return data.message || null;
+  } catch (e) {
+    console.error("Failed to vote on poll:", e);
+    return null;
+  }
+}
+
 export async function createP2PChat(participantId: string): Promise<ServerChat | null> {
   try {
     const res = await apiRequest("POST", "/api/chats", { participantId, type: "p2p" });

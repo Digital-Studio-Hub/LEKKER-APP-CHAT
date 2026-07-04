@@ -32,7 +32,7 @@ A business messaging app for Lekker Network - connecting Lekkerpreneurs with the
 - `app/new-post.tsx` - Create feed post
 - `app/post-comments.tsx` - View/add comments on posts
 - `lib/storage.ts` - AsyncStorage data layer (block/unblock, pins, local preferences)
-- `lib/chat-api.ts` - Server-backed chat client (fetchChats, fetchChatMessages, createP2PChat, createGroupChat, sendChatMessage, markChatRead, deleteServerChat, searchUsers, getChatDetail, display helpers)
+- `lib/chat-api.ts` - Server-backed chat client (fetchChats, fetchChatMessages, createP2PChat, startChatWithContact, createGroupChat, sendChatMessage, markChatRead, voteOnPoll, deleteServerChat, searchUsers, getChatDetail, display helpers)
 - `lib/auth-context.tsx` - Server-backed authentication context (JWT + SecureStore)
 - `lib/auth-token.ts` - Singleton auth token accessor (breaks circular dependency)
 - `lib/query-client.ts` - React Query + API helpers with Authorization headers

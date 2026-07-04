@@ -7,6 +7,7 @@ import {
   StyleSheet,
   Platform,
   ActivityIndicator,
+  Alert,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -15,7 +16,13 @@ import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { storage, FeedPost } from "@/lib/storage";
 import { fetchDirectoryCached } from "@/lib/query-client";
-import { fetchUserProfile, getPresenceColor, getPresenceLabel } from "@/lib/chat-api";
+import {
+  fetchUserProfile,
+  getPresenceColor,
+  getPresenceLabel,
+  createP2PChat,
+  startChatWithContact,
+} from "@/lib/chat-api";
 
 interface UserInfo {
   name: string;
@@ -115,12 +122,23 @@ export default function UserProfileScreen() {
   async function handleStartChat() {
     if (!userInfo || !id) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    const convs = await storage.getConversations();
-    let conv = convs.find((c) => c.contactId === id);
-    if (!conv) {
-      conv = await storage.addConversation(userInfo.name, id, userInfo.avatarColor);
+
+    let chat = await createP2PChat(id);
+    if (!chat) {
+      const result = await startChatWithContact({
+        lekkerNetworkId: userInfo.isLekkerpreneur ? id : undefined,
+        phone: userInfo.phone || undefined,
+      });
+      chat = result.chat;
+      if (!chat) {
+        Alert.alert(
+          result.code === "USER_NOT_REGISTERED" ? "Not on Lekker Chat yet" : "Couldn't start chat",
+          result.message || "Please try again.",
+        );
+        return;
+      }
     }
-    router.push({ pathname: "/chat/[id]", params: { id: conv.id } });
+    router.push({ pathname: "/chat/[id]", params: { id: chat.id } });
   }
 
   const initials = (userInfo?.name || name || "?")

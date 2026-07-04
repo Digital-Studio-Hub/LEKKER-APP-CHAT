@@ -10,6 +10,7 @@ import {
   TextInput,
   Image,
   ScrollView,
+  Alert,
 } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -18,7 +19,7 @@ import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { fontScale } from "@/lib/responsive";
 import { getApiUrl } from "@/lib/query-client";
-import { storage } from "@/lib/storage";
+import { startChatWithContact } from "@/lib/chat-api";
 import { useAuth } from "@/lib/auth-context";
 
 let WebView: any = null;
@@ -138,10 +139,25 @@ function DirectoryView() {
     setStartingChat(entry.id);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
-      const conversation = await storage.addConversation(entry.name, entry.id, entry.avatarColor);
-      router.push({ pathname: "/chat/[id]", params: { id: conversation.id } });
+      const { chat, message, code } = await startChatWithContact({
+        lekkerNetworkId: entry.id,
+        phone: entry.phone || undefined,
+      });
+      if (chat?.id) {
+        router.push({ pathname: "/chat/[id]", params: { id: chat.id } });
+        return;
+      }
+      if (code === "USER_NOT_REGISTERED") {
+        Alert.alert(
+          "Not on Lekker Chat yet",
+          message || "Ask them to install Lekker Chat and register with the same phone or email.",
+        );
+      } else {
+        Alert.alert("Couldn't start chat", message || "Please try again.");
+      }
     } catch (e) {
       console.error("Start chat error:", e);
+      Alert.alert("Couldn't start chat", "Please try again.");
     } finally {
       setStartingChat(null);
     }

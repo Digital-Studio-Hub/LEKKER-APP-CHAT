@@ -26,6 +26,7 @@ export interface IStorage {
   getUserByPhone(phone: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
   getUserByIdentifier(identifier: string): Promise<User | undefined>;
+  getUserByLekkerNetworkId(lekkerNetworkId: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   updateUser(id: string, data: Partial<User>): Promise<User | undefined>;
   getVerifiedUsers(excludeId: string, page: number, limit: number): Promise<{ users: User[]; total: number }>;
@@ -72,6 +73,13 @@ class PgStorage implements IStorage {
 
   async getUserByUsername(username: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.username, username.toLowerCase())).limit(1);
+    return user;
+  }
+
+  async getUserByLekkerNetworkId(lekkerNetworkId: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users)
+      .where(eq(users.lekkerNetworkId, lekkerNetworkId))
+      .limit(1);
     return user;
   }
 

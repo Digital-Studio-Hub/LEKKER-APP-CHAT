@@ -18,7 +18,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.lekker.chat",
-      "buildNumber": "1",
+      "buildNumber": "2",
       "infoPlist": {
         "UIRequiresFullScreen": false,
         "NSCameraUsageDescription": "Lekker Chat uses your camera to take photos and share them in conversations.",
@@ -31,7 +31,10 @@
         "NSFaceIDUsageDescription": "Lekker Chat uses Face ID to keep your account secure.",
         "NSUserTrackingUsageDescription": "Lekker Chat does not track you across other apps or websites.",
         "NSCalendarsUsageDescription": "Lekker Chat does not use your calendar.",
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSAppTransportSecurity": {
+          "NSAllowsLocalNetworking": true
+        }
       }
     },
     "android": {
