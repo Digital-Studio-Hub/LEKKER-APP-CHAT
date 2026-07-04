@@ -18,7 +18,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.lekker.chat",
-      "buildNumber": "2",
+      "buildNumber": "3",
       "infoPlist": {
         "UIRequiresFullScreen": false,
         "NSCameraUsageDescription": "Lekker Chat uses your camera to take photos and share them in conversations.",
@@ -28,9 +28,6 @@
         "NSLocationWhenInUseUsageDescription": "Lekker Chat uses your location to find nearby Lekkerpreneurs and share your location in conversations.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Lekker Chat uses your location to find nearby Lekkerpreneurs and enhance your networking experience.",
         "NSContactsUsageDescription": "Lekker Chat accesses your contacts so you can share contact cards in conversations and find people you know.",
-        "NSFaceIDUsageDescription": "Lekker Chat uses Face ID to keep your account secure.",
-        "NSUserTrackingUsageDescription": "Lekker Chat does not track you across other apps or websites.",
-        "NSCalendarsUsageDescription": "Lekker Chat does not use your calendar.",
         "ITSAppUsesNonExemptEncryption": false,
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true

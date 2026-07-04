@@ -20,6 +20,7 @@ import Colors from "@/constants/colors";
 import * as Haptics from "expo-haptics";
 import { isSmallScreen, fontScale } from "@/lib/responsive";
 import { getApiUrl } from "@/lib/query-client";
+import { COMMUNITY_GUIDELINES_URL, PRIVACY_POLICY_URL } from "@/constants/safety";
 
 const lekkerLogo = require("../assets/images/lekker-logo.png");
 
@@ -103,6 +104,7 @@ export default function LoginScreen() {
   const [showRegConfirm, setShowRegConfirm] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmNew, setShowConfirmNew] = useState(false);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
 
   const emailRef = useRef<TextInput>(null);
   const usernameRef = useRef<TextInput>(null);
@@ -155,6 +157,7 @@ export default function LoginScreen() {
     else if (!/[0-9]/.test(password)) e.password = "Needs a number";
     else if (!/[^A-Za-z0-9]/.test(password)) e.password = "Needs a special character";
     if (password !== confirmPassword) e.confirmPassword = "Passwords don't match";
+    if (!acceptedTerms) e.terms = "You must accept the Terms, Privacy Policy, and Community Guidelines";
     setErrors(e);
     return Object.keys(e).length === 0;
   }
@@ -923,9 +926,44 @@ export default function LoginScreen() {
               {errors.confirmPassword ? <Text style={styles.fieldError}>{errors.confirmPassword}</Text> : null}
 
               <Pressable
-                style={({ pressed }) => [styles.button, pressed && styles.buttonPressed, isSubmitting && styles.buttonDisabled]}
+                style={styles.termsRow}
+                onPress={() => {
+                  setAcceptedTerms((v) => !v);
+                  if (errors.terms) setErrors((e) => ({ ...e, terms: "" }));
+                }}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: acceptedTerms }}
+                testID="accept-terms-checkbox"
+              >
+                <View style={[styles.termsCheckbox, acceptedTerms && styles.termsCheckboxChecked]}>
+                  {acceptedTerms ? <Feather name="check" size={14} color={Colors.background} /> : null}
+                </View>
+                <Text style={styles.termsText}>
+                  I agree to the{" "}
+                  <Text style={styles.legalAgreementLink} onPress={() => Linking.openURL("https://lekker.network/terms")}>
+                    Terms & Conditions
+                  </Text>
+                  ,{" "}
+                  <Text style={styles.legalAgreementLink} onPress={() => Linking.openURL(PRIVACY_POLICY_URL)}>
+                    Privacy Policy
+                  </Text>
+                  , and{" "}
+                  <Text style={styles.legalAgreementLink} onPress={() => Linking.openURL(COMMUNITY_GUIDELINES_URL)}>
+                    Community Guidelines
+                  </Text>
+                  .
+                </Text>
+              </Pressable>
+              {errors.terms ? <Text style={styles.fieldError}>{errors.terms}</Text> : null}
+
+              <Pressable
+                style={({ pressed }) => [
+                  styles.button,
+                  pressed && styles.buttonPressed,
+                  (isSubmitting || !acceptedTerms) && styles.buttonDisabled,
+                ]}
                 onPress={handleRegister}
-                disabled={isSubmitting}
+                disabled={isSubmitting || !acceptedTerms}
                 testID="register-button"
               >
                 {isSubmitting ? (
@@ -934,24 +972,6 @@ export default function LoginScreen() {
                   <Text style={styles.buttonText}>Create Account</Text>
                 )}
               </Pressable>
-
-              <Text style={styles.legalAgreement}>
-                By creating an account you agree to our{" "}
-                <Text
-                  style={styles.legalAgreementLink}
-                  onPress={() => Linking.openURL("https://lekker.network/terms")}
-                >
-                  Terms & Conditions
-                </Text>
-                {" "}and{" "}
-                <Text
-                  style={styles.legalAgreementLink}
-                  onPress={() => Linking.openURL("https://lekker.network/privacy")}
-                >
-                  Privacy Policy
-                </Text>
-                .
-              </Text>
             </>
           )}
         </View>
@@ -1165,14 +1185,35 @@ const styles = StyleSheet.create({
     color: Colors.success,
     textAlign: "center",
   },
-  legalAgreement: {
+  termsRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    marginTop: 8,
+    marginBottom: 4,
+    paddingHorizontal: 2,
+  },
+  termsCheckbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: Colors.border,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 1,
+    backgroundColor: Colors.inputBackground,
+  },
+  termsCheckboxChecked: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  termsText: {
+    flex: 1,
     fontFamily: "Poppins_400Regular",
     fontSize: fontScale(11),
     color: Colors.textMuted,
-    textAlign: "center" as const,
-    marginTop: 14,
     lineHeight: 18,
-    paddingHorizontal: 8,
   },
   legalAgreementLink: {
     color: Colors.primary,

@@ -5,7 +5,7 @@
 1. Read `../1. start here/KNOWLEDGE_HUB.md`
 2. Read `../user knowledge/infra/LEKKER-CHAT.md` — full product + engineering reference
 3. Read `replit.md` for stack, routes, env vars
-4. iOS App Store: `IOS-PRODUCTION-READINESS.md`
+4. iOS App Store: `IOS-PRODUCTION-READINESS.md` + `APP_STORE_COMPLIANCE.md` (rejections / resubmission)
 5. `../user knowledge/narrative/IDEA-TO-CODE.md` — Lekker Chat ↔ lekker.network
 
 ## What this is

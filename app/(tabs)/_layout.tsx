@@ -65,6 +65,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="feed"
         options={{
+          href: null,
           title: "Newsfeed",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="layers-outline" size={size} color={color} />

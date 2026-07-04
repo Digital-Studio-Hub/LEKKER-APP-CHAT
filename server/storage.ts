@@ -1,7 +1,11 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { eq, or, and, ne, sql, asc, desc, count, inArray, gt, isNull, lt } from "drizzle-orm";
-import { users, authAuditLogs, chats, chatParticipants, chatMessages, userEmails, type User, type InsertUser, type Chat, type ChatParticipant, type ChatMessage, type UserEmail } from "@shared/schema";
+import {
+  users, authAuditLogs, chats, chatParticipants, chatMessages, userEmails,
+  userBlocks, contentReports,
+  type User, type InsertUser, type Chat, type ChatParticipant, type ChatMessage, type UserEmail,
+} from "@shared/schema";
 
 if (!process.env.DATABASE_URL) {
   throw new Error("DATABASE_URL is required");
@@ -50,6 +54,21 @@ export interface IStorage {
   getChatParticipants(chatId: string): Promise<Array<ChatParticipant & { user?: Partial<User> }>>;
   getChat(chatId: string): Promise<Chat | undefined>;
   deleteChat(chatId: string): Promise<void>;
+
+  blockUser(blockerId: string, blockedUserId: string): Promise<void>;
+  unblockUser(blockerId: string, blockedUserId: string): Promise<void>;
+  getBlockedUsers(blockerId: string): Promise<Array<{ id: string; blockedUserId: string; name: string; createdAt: Date }>>;
+  isEitherUserBlocked(userId1: string, userId2: string): Promise<boolean>;
+
+  createContentReport(input: {
+    reporterId: string;
+    reportedUserId?: string | null;
+    messageId?: string | null;
+    chatId?: string | null;
+    reportType: string;
+    reason: string;
+    details?: string | null;
+  }): Promise<{ id: string }>;
 }
 
 class PgStorage implements IStorage {
@@ -425,6 +444,71 @@ class PgStorage implements IStorage {
     await db.delete(chats).where(eq(chats.id, chatId));
   }
 
+  async blockUser(blockerId: string, blockedUserId: string): Promise<void> {
+    if (blockerId === blockedUserId) return;
+    await db.insert(userBlocks).values({ blockerId, blockedUserId }).onConflictDoNothing();
+  }
+
+  async unblockUser(blockerId: string, blockedUserId: string): Promise<void> {
+    await db.delete(userBlocks).where(
+      and(eq(userBlocks.blockerId, blockerId), eq(userBlocks.blockedUserId, blockedUserId)),
+    );
+  }
+
+  async getBlockedUsers(blockerId: string): Promise<Array<{ id: string; blockedUserId: string; name: string; createdAt: Date }>> {
+    const rows = await db.select({
+      id: userBlocks.id,
+      blockedUserId: userBlocks.blockedUserId,
+      createdAt: userBlocks.createdAt,
+      firstName: users.firstName,
+      lastName: users.lastName,
+      username: users.username,
+    })
+      .from(userBlocks)
+      .innerJoin(users, eq(users.id, userBlocks.blockedUserId))
+      .where(eq(userBlocks.blockerId, blockerId))
+      .orderBy(desc(userBlocks.createdAt));
+
+    return rows.map((r) => ({
+      id: r.id,
+      blockedUserId: r.blockedUserId,
+      name: `${r.firstName} ${r.lastName}`.trim() || r.username,
+      createdAt: r.createdAt,
+    }));
+  }
+
+  async isEitherUserBlocked(userId1: string, userId2: string): Promise<boolean> {
+    const [row] = await db.select({ id: userBlocks.id }).from(userBlocks).where(
+      or(
+        and(eq(userBlocks.blockerId, userId1), eq(userBlocks.blockedUserId, userId2)),
+        and(eq(userBlocks.blockerId, userId2), eq(userBlocks.blockedUserId, userId1)),
+      ),
+    ).limit(1);
+    return !!row;
+  }
+
+  async createContentReport(input: {
+    reporterId: string;
+    reportedUserId?: string | null;
+    messageId?: string | null;
+    chatId?: string | null;
+    reportType: string;
+    reason: string;
+    details?: string | null;
+  }): Promise<{ id: string }> {
+    const [row] = await db.insert(contentReports).values({
+      reporterId: input.reporterId,
+      reportedUserId: input.reportedUserId ?? null,
+      messageId: input.messageId ?? null,
+      chatId: input.chatId ?? null,
+      reportType: input.reportType,
+      reason: input.reason,
+      details: input.details ?? null,
+      status: "open",
+    }).returning({ id: contentReports.id });
+    return { id: row.id };
+  }
+
   async deleteUserAccount(userId: string): Promise<void> {
     const userChats = await db
       .select({ chatId: chatParticipants.chatId })
@@ -450,6 +534,12 @@ class PgStorage implements IStorage {
       }
     }
 
+    await db.delete(userBlocks).where(
+      or(eq(userBlocks.blockerId, userId), eq(userBlocks.blockedUserId, userId)),
+    );
+    await db.delete(contentReports).where(
+      or(eq(contentReports.reporterId, userId), eq(contentReports.reportedUserId, userId)),
+    );
     await db.delete(authAuditLogs).where(eq(authAuditLogs.userId, userId));
     await db.delete(users).where(eq(users.id, userId));
   }

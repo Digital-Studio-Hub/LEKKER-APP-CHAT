@@ -21,7 +21,12 @@ import * as Haptics from "expo-haptics";
 import { Audio } from "expo-av";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/lib/auth-context";
-import { storage } from "@/lib/storage";
+import {
+  blockUserServer,
+  unblockUserServer,
+  isUserBlockedServer,
+  promptContentReport,
+} from "@/lib/safety-api";
 import { isSmallScreen, fontScale } from "@/lib/responsive";
 import {
   pickImage,
@@ -295,6 +300,7 @@ function MessageBubbleInner({
   onReload,
   onEdit,
   onDelete,
+  onReport,
   isSelecting,
   isSelected,
   onToggleSelect,
@@ -308,6 +314,7 @@ function MessageBubbleInner({
   onReload: () => void;
   onEdit: (msg: ServerMessage) => void;
   onDelete: (msg: ServerMessage) => void;
+  onReport?: (msg: ServerMessage) => void;
   isSelecting: boolean;
   isSelected: boolean;
   onToggleSelect: (msg: ServerMessage) => void;
@@ -332,9 +339,22 @@ function MessageBubbleInner({
       return;
     }
 
-    if (!isMe) return;
-
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+    if (!isMe) {
+      if (Platform.OS === "ios") {
+        ActionSheetIOS.showActionSheetWithOptions(
+          { options: ["Report message", "Cancel"], cancelButtonIndex: 1, destructiveButtonIndex: 0 },
+          (idx) => { if (idx === 0) onReport?.(message); },
+        );
+      } else {
+        Alert.alert("Message", undefined, [
+          { text: "Report message", style: "destructive", onPress: () => onReport?.(message) },
+          { text: "Cancel", style: "cancel" },
+        ]);
+      }
+      return;
+    }
 
     if (Platform.OS === "ios") {
       const options: string[] = [];
@@ -680,7 +700,7 @@ export default function ChatDetailScreen() {
     if (chat.type !== "group") {
       const other = getOtherParticipant(chat, myUserId);
       if (other) {
-        const blocked = await storage.isUserBlocked(other.id);
+        const blocked = await isUserBlockedServer(other.id);
         setIsBlocked(blocked);
       }
     }
@@ -703,7 +723,7 @@ export default function ChatDetailScreen() {
     if (!chat || isGroup || !otherParticipant) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     if (isBlocked) {
-      await storage.unblockUser(otherParticipant.id);
+      await unblockUserServer(otherParticipant.id);
       setIsBlocked(false);
     } else {
       Alert.alert(
@@ -715,13 +735,33 @@ export default function ChatDetailScreen() {
             text: "Block",
             style: "destructive",
             onPress: async () => {
-              await storage.blockUser(chatName, otherParticipant.id);
-              setIsBlocked(true);
+              const ok = await blockUserServer(otherParticipant.id);
+              if (ok) setIsBlocked(true);
             },
           },
         ],
       );
     }
+  }
+
+  function handleReportUser() {
+    if (!otherParticipant) return;
+    promptContentReport({
+      reportType: "user",
+      reportedUserId: otherParticipant.id,
+      chatId: id,
+      subjectLabel: chatName,
+    });
+  }
+
+  function handleReportMessage(msg: ServerMessage) {
+    promptContentReport({
+      reportType: "message",
+      reportedUserId: msg.senderId,
+      messageId: msg.id,
+      chatId: id,
+      subjectLabel: "message",
+    });
   }
 
   async function handleSend() {
@@ -1084,13 +1124,18 @@ export default function ChatDetailScreen() {
             </Pressable>
           )}
           {chat && !isGroup ? (
-            <Pressable onPress={handleToggleBlock} style={styles.backButton}>
-              <Ionicons
-                name={isBlocked ? "ban" : "ban-outline"}
-                size={22}
-                color={isBlocked ? Colors.danger : Colors.textMuted}
-              />
-            </Pressable>
+            <View style={{ flexDirection: "row", alignItems: "center" }}>
+              <Pressable onPress={handleReportUser} style={styles.backButton}>
+                <Ionicons name="flag-outline" size={20} color={Colors.textMuted} />
+              </Pressable>
+              <Pressable onPress={handleToggleBlock} style={styles.backButton}>
+                <Ionicons
+                  name={isBlocked ? "ban" : "ban-outline"}
+                  size={22}
+                  color={isBlocked ? Colors.danger : Colors.textMuted}
+                />
+              </Pressable>
+            </View>
           ) : (
             <View style={styles.backButton} />
           )}
@@ -1110,6 +1155,7 @@ export default function ChatDetailScreen() {
             onReload={loadMessages}
             onEdit={handleEditMessage}
             onDelete={handleDeleteMessage}
+            onReport={handleReportMessage}
             isSelecting={isSelecting}
             isSelected={selectedMessageIds.has(item.id)}
             onToggleSelect={handleToggleSelect}

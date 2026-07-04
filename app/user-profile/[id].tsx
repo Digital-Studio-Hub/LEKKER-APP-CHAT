@@ -14,6 +14,13 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
+import { useAuth } from "@/lib/auth-context";
+import {
+  blockUserServer,
+  isUserBlockedServer,
+  promptContentReport,
+  unblockUserServer,
+} from "@/lib/safety-api";
 import { storage, FeedPost } from "@/lib/storage";
 import { fetchDirectoryCached } from "@/lib/query-client";
 import {
@@ -56,9 +63,12 @@ export default function UserProfileScreen() {
     avatarColor?: string;
   }>();
   const insets = useSafeAreaInsets();
+  const { user: currentUser } = useAuth();
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
+  const [profileUserId, setProfileUserId] = useState<string | null>(null);
   const [posts, setPosts] = useState<FeedPost[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isBlocked, setIsBlocked] = useState(false);
 
   const webTopInset = Platform.OS === "web" ? 67 : 0;
 
@@ -80,6 +90,7 @@ export default function UserProfileScreen() {
       const profile = await fetchUserProfile(id || "");
       if (profile) {
         const fullName = `${profile.firstName} ${profile.lastName}`.trim() || profile.username;
+        setProfileUserId(profile.id);
         info = {
           ...info,
           name: fullName,
@@ -92,6 +103,8 @@ export default function UserProfileScreen() {
           presence: profile.presence,
           memberSince: profile.createdAt,
         };
+        const blocked = await isUserBlockedServer(profile.id);
+        setIsBlocked(blocked);
       }
     } catch {}
 
@@ -117,6 +130,43 @@ export default function UserProfileScreen() {
     const allPosts = await storage.getFeedPosts();
     const userPosts = allPosts.filter((p) => p.authorId === id);
     setPosts(userPosts);
+  }
+
+  const isOwnProfile = !!currentUser?.id && profileUserId === currentUser.id;
+
+  function handleReportUser() {
+    if (!profileUserId || !userInfo) return;
+    promptContentReport({
+      reportType: "user",
+      reportedUserId: profileUserId,
+      subjectLabel: userInfo.name,
+    });
+  }
+
+  async function handleToggleBlock() {
+    if (!profileUserId || !userInfo) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    if (isBlocked) {
+      await unblockUserServer(profileUserId);
+      setIsBlocked(false);
+      Alert.alert("Unblocked", `${userInfo.name} can send you messages again.`);
+    } else {
+      Alert.alert(
+        `Block ${userInfo.name}?`,
+        "Blocked users cannot send you messages. You can unblock them later from Settings.",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Block",
+            style: "destructive",
+            onPress: async () => {
+              const ok = await blockUserServer(profileUserId);
+              if (ok) setIsBlocked(true);
+            },
+          },
+        ],
+      );
+    }
   }
 
   async function handleStartChat() {
@@ -172,7 +222,18 @@ export default function UserProfileScreen() {
           <Ionicons name="chevron-back" size={28} color={Colors.text} />
         </Pressable>
         <Text style={styles.headerTitle}>Profile</Text>
-        <View style={styles.backButton} />
+        {!isOwnProfile && profileUserId ? (
+          <View style={styles.headerActions}>
+            <Pressable onPress={handleReportUser} style={styles.headerActionBtn} accessibilityLabel="Report user">
+              <Ionicons name="flag-outline" size={20} color={Colors.textMuted} />
+            </Pressable>
+            <Pressable onPress={handleToggleBlock} style={styles.headerActionBtn} accessibilityLabel={isBlocked ? "Unblock user" : "Block user"}>
+              <Ionicons name={isBlocked ? "ban" : "ban-outline"} size={22} color={isBlocked ? Colors.danger : Colors.textMuted} />
+            </Pressable>
+          </View>
+        ) : (
+          <View style={styles.backButton} />
+        )}
       </View>
 
       <FlatList
@@ -301,6 +362,8 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   backButton: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
+  headerActions: { flexDirection: "row", alignItems: "center" },
+  headerActionBtn: { width: 40, height: 44, alignItems: "center", justifyContent: "center" },
   headerTitle: { fontFamily: "Poppins_600SemiBold", fontSize: 18, color: Colors.text },
   loadingContainer: { flex: 1, alignItems: "center", justifyContent: "center" },
   listContent: { padding: 20 },

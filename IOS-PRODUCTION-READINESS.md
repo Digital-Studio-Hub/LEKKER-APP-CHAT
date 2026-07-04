@@ -18,7 +18,10 @@ Use **`~/Projects/LEKKER-APP-CHAT`** for all iOS builds (not the iCloud git driv
 | Directory → Start chat | **Fixed** | Uses `/api/chats/start-with-contact` |
 | Profile → Message | **Fixed** | Server P2P chat |
 | Poll voting | **Fixed** | Server persistence |
-| Feed (Newsfeed tab) | Partial | Local-only — acceptable for v1 if positioned as “my posts” |
+| Feed (Newsfeed tab) | Hidden | Tab hidden for App Store 2.1.0 — local-only feed not production-ready |
+| UGC safety (block/report) | **Fixed** | Server blocks + reports; chat + profile + Settings |
+| Privacy disclosure | **Fixed** | Registration checkbox + Settings Data & privacy section |
+| App Store compliance doc | **Added** | `APP_STORE_COMPLIANCE.md` — rejection mapping + review notes |
 | Push notifications | No | Local only — App Store OK without remote push |
 | Neon DB | Pending | Set `DATABASE_URL` to Neon `Lekker_Chat` pooled URL on Replit + verify `db:push` |
 | Production API URL in EAS | **Action required** | See step 1 below |
@@ -111,7 +114,9 @@ Increment `ios.buildNumber` in `app.json` for each App Store upload (or rely on 
 - [ ] Screenshots: iPhone 6.7" + 6.5" (Chats, Network, Cledwyn, Settings)
 - [ ] Age rating questionnaire (messaging app — likely 12+)
 - [ ] Export compliance: `ITSAppUsesNonExemptEncryption: false` already in `app.json`
-- [ ] Review notes: test account credentials (`test@lekker.chat` / seed via admin endpoint if enabled)
+- [ ] Review notes: use template in `APP_STORE_COMPLIANCE.md` (UGC moderation + test account + no Apple affiliation)
+- [ ] Privacy Nutrition Labels aligned with Settings → Data & privacy (see `APP_STORE_COMPLIANCE.md`)
+- [ ] iOS buildNumber **3** (App Store compliance resubmission)
 
 ---
 
@@ -119,8 +124,8 @@ Increment `ios.buildNumber` in `app.json` for each App Store upload (or rely on 
 
 1. **Neon migration** — move off Replit Postgres to DSH Neon `Lekker_Chat`
 2. **Expo push notifications** — register tokens, notify on new server messages
-3. **Server-side block list**
-4. **Feed on server** — or remove/hide Newsfeed tab until real
+3. ~~**Server-side block list**~~ — done (build 3)
+4. **Feed on server** — Newsfeed tab hidden until server feed ships
 5. **Wire Connect API** (`lekker-connect.ts`) for forms/CRM from mobile
 6. **WebSockets or shorter poll interval** for chat latency
 7. **Remove legacy** `lib/storage.ts` conversation code when fully migrated

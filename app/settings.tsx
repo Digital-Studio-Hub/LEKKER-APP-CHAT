@@ -24,7 +24,8 @@ import { fontScale } from "@/lib/responsive";
 import { useAuth } from "@/lib/auth-context";
 import { requestNotificationPermissions, areNotificationsEnabled, disableNotifications, canAskForNotifications } from "@/lib/notifications";
 import { requestLocationPermissions, isLocationEnabled, getLastLocation, disableLocation, UserLocation } from "@/lib/location";
-import { storage, BlockedUser } from "@/lib/storage";
+import { fetchBlockedUsers, unblockUserServer, type BlockedUserRow } from "@/lib/safety-api";
+import { ABUSE_CONTACT_EMAIL, COMMUNITY_GUIDELINES_URL, PRIVACY_POLICY_URL } from "@/constants/safety";
 import { getApiUrl, apiRequest } from "@/lib/query-client";
 import { uploadFileToStorage } from "@/client/utils/objectStorageExpo";
 import { File } from "expo-file-system";
@@ -69,7 +70,7 @@ export default function SettingsScreen() {
   const [notificationsOn, setNotificationsOn] = useState(false);
   const [locationOn, setLocationOn] = useState(false);
   const [lastLocation, setLastLocation] = useState<UserLocation | null>(null);
-  const [blockedUsers, setBlockedUsers] = useState<BlockedUser[]>([]);
+  const [blockedUsers, setBlockedUsers] = useState<BlockedUserRow[]>([]);
 
   type LinkedEmail = { id: string; email: string; isPrimary: boolean; isVerified: boolean; verifiedAt: string | null };
   const [linkedEmails, setLinkedEmails] = useState<LinkedEmail[]>([]);
@@ -217,11 +218,11 @@ export default function SettingsScreen() {
   );
 
   async function loadBlockedUsers() {
-    const blocked = await storage.getBlockedUsers();
+    const blocked = await fetchBlockedUsers();
     setBlockedUsers(blocked);
   }
 
-  async function handleUnblock(phone: string) {
+  async function handleUnblock(userId: string) {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     Alert.alert(
       "Unblock User",
@@ -231,7 +232,7 @@ export default function SettingsScreen() {
         {
           text: "Unblock",
           onPress: async () => {
-            await storage.unblockUser(phone);
+            await unblockUserServer(userId);
             loadBlockedUsers();
           },
         },
@@ -880,7 +881,40 @@ export default function SettingsScreen() {
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Privacy</Text>
+          <Text style={styles.sectionTitle}>Safety</Text>
+          <View style={styles.sectionCard}>
+            <Pressable
+              style={styles.optionRow}
+              onPress={() => Linking.openURL(COMMUNITY_GUIDELINES_URL)}
+            >
+              <Ionicons name="shield-checkmark-outline" size={20} color={Colors.textSecondary} />
+              <Text style={styles.optionLabel}>Community guidelines</Text>
+              <Ionicons name="open-outline" size={16} color={Colors.textMuted} />
+            </Pressable>
+            <Pressable
+              style={styles.optionRow}
+              onPress={() => Linking.openURL(`mailto:${ABUSE_CONTACT_EMAIL}?subject=Lekker%20Chat%20safety%20report`)}
+            >
+              <Ionicons name="mail-outline" size={20} color={Colors.textSecondary} />
+              <Text style={styles.optionLabel}>Report abuse</Text>
+              <Text style={styles.optionValue} numberOfLines={1}>{ABUSE_CONTACT_EMAIL}</Text>
+            </Pressable>
+          </View>
+          <Text style={styles.toggleHint}>
+            Flag messages in any chat (long-press) or use the flag icon in the chat header. Reports are reviewed within 24 hours.
+          </Text>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Data &amp; privacy</Text>
+          <View style={styles.infoCard}>
+            <Text style={styles.infoText}>
+              Lekker Chat collects your account details (name, phone, email), messages you send, profile information, and optional location when you enable it. Data is stored on secure servers and used to provide messaging, directory, and AI assistant features.
+            </Text>
+            <Text style={[styles.infoText, { marginTop: 8 }]}>
+              We do not sell your personal data. Limited sharing occurs with service providers (SMS/email delivery, cloud hosting, AI processing) only to operate the app. We do not track you across other companies&apos; apps or websites.
+            </Text>
+          </View>
           <View style={styles.sectionCard}>
             <View style={styles.optionRow}>
               <Ionicons name="eye-outline" size={20} color={Colors.textSecondary} />
@@ -1012,7 +1046,7 @@ export default function SettingsScreen() {
                 <View key={bu.id} style={styles.optionRow}>
                   <Ionicons name="ban" size={20} color={Colors.danger} />
                   <Text style={styles.optionLabel}>{bu.name}</Text>
-                  <Pressable onPress={() => handleUnblock(bu.phone)} style={styles.unblockButton}>
+                  <Pressable onPress={() => handleUnblock(bu.blockedUserId)} style={styles.unblockButton}>
                     <Text style={styles.unblockText}>Unblock</Text>
                   </Pressable>
                 </View>
@@ -1042,7 +1076,7 @@ export default function SettingsScreen() {
 
         <View style={styles.legalLinks}>
           <Pressable
-            onPress={() => Linking.openURL("https://lekker.network/privacy")}
+            onPress={() => Linking.openURL(PRIVACY_POLICY_URL)}
             style={({ pressed }) => [styles.legalLink, pressed && { opacity: 0.6 }]}
           >
             <Text style={styles.legalLinkText}>Privacy Policy</Text>
@@ -1115,6 +1149,20 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     marginBottom: 8,
     paddingHorizontal: 4,
+  },
+  infoCard: {
+    backgroundColor: Colors.card,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  infoText: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 13,
+    color: Colors.textSecondary,
+    lineHeight: 20,
   },
   sectionCard: {
     backgroundColor: Colors.card,

@@ -809,6 +809,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (participantId === userId) {
       return { error: "Cannot create chat with yourself", status: 400 as const };
     }
+    if (await storage.isEitherUserBlocked(userId, participantId)) {
+      return { error: "You cannot message this user", status: 403 as const, code: "BLOCKED" as const };
+    }
     const otherUser = await storage.getUser(participantId);
     if (!otherUser) {
       return { error: "User not found", status: 404 as const };
@@ -824,6 +827,82 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const participants = await enrichParticipants(chat.id);
     return { chat: { ...chat, participants }, status: 201 as const };
   }
+
+  // ── Safety (App Store Guideline 1.2 — UGC) ───────────────────────────────
+
+  app.get("/api/safety/blocks", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const blocks = await storage.getBlockedUsers(req.user!.userId);
+      res.json({ blocks });
+    } catch (error) {
+      console.error("List blocks error:", error);
+      res.status(500).json({ message: "Failed to load blocked users" });
+    }
+  });
+
+  app.post("/api/safety/block", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { userId: blockedUserId } = req.body || {};
+      const blockerId = req.user!.userId;
+      if (!blockedUserId || typeof blockedUserId !== "string") {
+        return res.status(400).json({ message: "userId is required" });
+      }
+      if (blockedUserId === blockerId) {
+        return res.status(400).json({ message: "You cannot block yourself" });
+      }
+      const target = await storage.getUser(blockedUserId);
+      if (!target) return res.status(404).json({ message: "User not found" });
+      await storage.blockUser(blockerId, blockedUserId);
+      res.json({ ok: true });
+    } catch (error) {
+      console.error("Block user error:", error);
+      res.status(500).json({ message: "Failed to block user" });
+    }
+  });
+
+  app.delete("/api/safety/block/:userId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      await storage.unblockUser(req.user!.userId, req.params.userId);
+      res.json({ ok: true });
+    } catch (error) {
+      console.error("Unblock user error:", error);
+      res.status(500).json({ message: "Failed to unblock user" });
+    }
+  });
+
+  app.post("/api/safety/report", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { reportType, reportedUserId, messageId, chatId, reason, details } = req.body || {};
+      if (!reportType || !reason) {
+        return res.status(400).json({ message: "reportType and reason are required" });
+      }
+      const allowed = ["user", "message", "chat"];
+      if (!allowed.includes(reportType)) {
+        return res.status(400).json({ message: "Invalid reportType" });
+      }
+      if (reportedUserId && reportedUserId === req.user!.userId) {
+        return res.status(400).json({ message: "You cannot report yourself" });
+      }
+      const report = await storage.createContentReport({
+        reporterId: req.user!.userId,
+        reportedUserId: reportedUserId || null,
+        messageId: messageId || null,
+        chatId: chatId || null,
+        reportType,
+        reason: String(reason).slice(0, 50),
+        details: details ? String(details).slice(0, 2000) : null,
+      });
+      console.log(`[safety] Report ${report.id} type=${reportType} reason=${reason} reporter=${req.user!.userId}`);
+      res.status(201).json({
+        ok: true,
+        reportId: report.id,
+        message: "Thank you. Our team reviews reports within 24 hours.",
+      });
+    } catch (error) {
+      console.error("Content report error:", error);
+      res.status(500).json({ message: "Failed to submit report" });
+    }
+  });
 
   app.post("/api/chats/start-with-contact", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
@@ -1003,6 +1082,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (msgType === "text" && (!content || typeof content !== "string" || !content.trim())) {
         return res.status(400).json({ message: "Message content is required" });
+      }
+
+      const chatParticipantsList = await storage.getChatParticipants(chatId);
+      for (const p of chatParticipantsList) {
+        if (p.userId !== userId && await storage.isEitherUserBlocked(userId, p.userId)) {
+          return res.status(403).json({
+            message: "Messaging is not available with this user.",
+            code: "BLOCKED",
+          });
+        }
       }
 
       const message = await storage.sendMessage(chatId, userId, content || null, msgType, extras);

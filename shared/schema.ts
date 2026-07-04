@@ -137,6 +137,36 @@ export const chatParticipants = pgTable("chat_participants", {
   index("idx_chat_participants_chat").on(table.chatId),
 ]);
 
+export const userBlocks = pgTable("user_blocks", {
+  id: varchar("id", { length: 36 })
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  blockerId: varchar("blocker_id", { length: 36 }).notNull(),
+  blockedUserId: varchar("blocked_user_id", { length: 36 }).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("idx_user_blocks_pair").on(table.blockerId, table.blockedUserId),
+  index("idx_user_blocks_blocker").on(table.blockerId),
+]);
+
+export const contentReports = pgTable("content_reports", {
+  id: varchar("id", { length: 36 })
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  reporterId: varchar("reporter_id", { length: 36 }).notNull(),
+  reportedUserId: varchar("reported_user_id", { length: 36 }),
+  messageId: varchar("message_id", { length: 36 }),
+  chatId: varchar("chat_id", { length: 36 }),
+  reportType: varchar("report_type", { length: 30 }).notNull(),
+  reason: varchar("reason", { length: 50 }).notNull(),
+  details: text("details"),
+  status: varchar("status", { length: 20 }).default("open").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("idx_content_reports_status").on(table.status, table.createdAt),
+  index("idx_content_reports_reporter").on(table.reporterId),
+]);
+
 export const chatMessages = pgTable("chat_messages", {
   id: varchar("id", { length: 36 })
     .primaryKey()
