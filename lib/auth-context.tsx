@@ -55,6 +55,8 @@ export interface AuthUser {
   status: string | null;
   presence: string | null;
   lekkerNetworkAccess: boolean;
+  lekkerWorkspaceId?: string | null;
+  workspaceEmailActive?: boolean;
   autoReplyEnabled: boolean;
   autoReplyMessage: string | null;
   notificationsEnabled: boolean;
@@ -85,12 +87,19 @@ interface LoginData {
   password: string;
 }
 
+interface WhatsAppVerifyData {
+  phone: string;
+  code: string;
+  displayName?: string;
+}
+
 interface AuthContextValue {
   user: AuthUser | null;
   isLoading: boolean;
   isLoggedIn: boolean;
   register: (data: RegisterData) => Promise<{ success: boolean; errors?: any[] }>;
   login: (data: LoginData) => Promise<{ success: boolean; message?: string }>;
+  verifyWhatsApp: (data: WhatsAppVerifyData) => Promise<{ success: boolean; needsDisplayName?: boolean; message?: string }>;
   updateProfile: (updates: Partial<AuthUser>) => Promise<void>;
   logout: () => Promise<void>;
 }
@@ -207,6 +216,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { success: true };
   }
 
+  async function verifyWhatsApp(
+    data: WhatsAppVerifyData,
+  ): Promise<{ success: boolean; needsDisplayName?: boolean; message?: string }> {
+    const baseUrl = getApiUrl();
+    const res = await fetch(`${baseUrl}api/auth/whatsapp/verify`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    const body = await res.json();
+    if (body.needsDisplayName) {
+      return { success: false, needsDisplayName: true };
+    }
+    if (!res.ok) {
+      return { success: false, message: body.message };
+    }
+    await storeToken(body.token);
+    const enriched = enrichUser(body.user);
+    await storeUser(enriched);
+    setUser(enriched);
+    return { success: true };
+  }
+
   async function login(data: LoginData): Promise<{ success: boolean; message?: string }> {
     const baseUrl = getApiUrl();
     const res = await fetch(`${baseUrl}api/auth/login`, {
@@ -302,6 +334,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isLoggedIn: !!user,
       register,
       login,
+      verifyWhatsApp,
       updateProfile,
       logout,
     }),

@@ -15,9 +15,28 @@ import {
 } from "./auth";
 import { ObjectStorageService, ObjectNotFoundError } from "./objectStorage";
 import { ObjectPermission } from "./objectAcl";
-import { findLekkerpreneurByPhoneOrEmail, fetchDirectory as fetchLekkerDirectory, fetchLekkerpreneurById, fetchWorkspaceById, fetchWorkspaces, extractLekkerpreneurProfile, buildSyncUserResponse, buildDirectoryEntry, buildWorkspaceDirectoryEntry, type LekkerNetworkEntry, type WorkspaceDetail } from "./lekkerNetwork";
+import {
+  findLekkerpreneurByPhoneOrEmail,
+  fetchDirectory as fetchLekkerDirectory,
+  fetchLekkerpreneurById,
+  fetchWorkspaceById,
+  fetchWorkspaces,
+  extractLekkerpreneurProfile,
+  buildSyncUserResponse,
+  buildDirectoryEntry,
+  buildWorkspaceDirectoryEntry,
+  fetchMobileSessionToken,
+  fetchWorkspaceEmailStatus,
+  fetchMobileEmailThreads,
+  fetchMobileEmailThread,
+  type LekkerNetworkEntry,
+  type WorkspaceDetail,
+} from "./lekkerNetwork";
 import { sendPasswordResetEmail, sendEmailVerificationEmail } from "./gmail";
 import { sendPasswordResetSMS, sendPhoneVerificationSMS } from "./twilio";
+import { sendWhatsAppOtp } from "./whatsapp-otp";
+import { normaliseMobile, phoneToPlaceholderEmail, phoneToUsername } from "../shared/mobile-utils";
+import type { User } from "@shared/schema";
 
 function normalizePhone(raw: string): string {
   const digits = raw.replace(/[\s\-().]/g, "");
@@ -110,6 +129,51 @@ const registerLimiter = rateLimit({
 function sanitizeUser(user: any) {
   const { passwordHash, ...safe } = user;
   return safe;
+}
+
+const AVATAR_COLORS = ["#4ECDC4", "#FF6B6B", "#45B7D1", "#96CEB4", "#FFEAA7", "#DDA0DD", "#85C1E9", "#F7DC6F", "#BB8FCE", "#98D8C8"];
+
+async function applyLekkerSync(user: User, req: Request): Promise<User> {
+  let finalUser = user;
+  try {
+    const lekkerMatch = await findLekkerpreneurByPhoneOrEmail(user.phone, user.email);
+    if (lekkerMatch) {
+      const profileData = extractLekkerpreneurProfile(lekkerMatch);
+      let workspaceEmailActive = false;
+      if (profileData.lekkerWorkspaceId) {
+        const emailStatus = await fetchWorkspaceEmailStatus(profileData.lekkerWorkspaceId);
+        workspaceEmailActive = emailStatus.active;
+      }
+      const updated = await storage.updateUser(user.id, {
+        ...profileData,
+        workspaceEmailActive,
+      });
+      if (updated) {
+        finalUser = updated;
+        await storage.logAuthEvent(
+          "lekker_network_match",
+          user.id,
+          req.ip,
+          undefined,
+          `Matched Lekkerpreneur: ${lekkerMatch.businessName} (${lekkerMatch.id})`,
+        );
+      }
+    }
+  } catch (e) {
+    console.error("Lekker Network sync (non-fatal):", e);
+  }
+  return finalUser;
+}
+
+async function resolveUniqueUsername(phone: string): Promise<string> {
+  let base = phoneToUsername(phone);
+  let candidate = base;
+  let n = 0;
+  while (await storage.getUserByUsername(candidate)) {
+    n += 1;
+    candidate = `${base}_${n}`;
+  }
+  return candidate;
 }
 
 const phoneVerifyLimiter = rateLimit({
@@ -267,6 +331,126 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ verified: true, verificationId: record.id });
     } catch (err) {
       console.error("Verify phone code error:", err);
+      res.status(500).json({ message: "Verification failed. Please try again." });
+    }
+  });
+
+  /** WhatsApp OTP — passwordless login & registration (Guideline synergy with lekker.network) */
+  app.post("/api/auth/whatsapp/send-code", phoneVerifyLimiter, async (req: Request, res: Response) => {
+    try {
+      const rawPhone = req.body.phone;
+      if (!rawPhone || String(rawPhone).trim().length < 6) {
+        return res.status(400).json({ message: "Valid phone number is required" });
+      }
+      const phone = normaliseMobile(String(rawPhone).trim());
+      if (!phone) {
+        return res.status(400).json({ message: "Could not parse phone number" });
+      }
+
+      await db.delete(phoneVerificationCodes).where(eq(phoneVerificationCodes.phone, phone));
+
+      const code = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+      await db.insert(phoneVerificationCodes).values({
+        phone,
+        code,
+        verified: false,
+        used: false,
+        expiresAt,
+      });
+
+      await sendWhatsAppOtp(phone, code);
+
+      const existing = await storage.getUserByPhone(phone);
+      res.json({
+        message: "Verification code sent via WhatsApp",
+        isExistingUser: !!existing,
+      });
+    } catch (err) {
+      console.error("WhatsApp send-code error:", err);
+      res.status(500).json({ message: "Failed to send WhatsApp code. Please try again." });
+    }
+  });
+
+  app.post("/api/auth/whatsapp/verify", phoneVerifyLimiter, async (req: Request, res: Response) => {
+    try {
+      const { code, displayName } = req.body;
+      const phone = req.body.phone ? normaliseMobile(String(req.body.phone).trim()) : null;
+      if (!phone || !code) {
+        return res.status(400).json({ message: "Phone number and code are required" });
+      }
+
+      const [record] = await db
+        .select()
+        .from(phoneVerificationCodes)
+        .where(eq(phoneVerificationCodes.phone, phone))
+        .orderBy(phoneVerificationCodes.createdAt)
+        .limit(1);
+
+      if (!record) {
+        return res.status(400).json({ message: "No verification code found. Please request a new code." });
+      }
+      if (record.used) {
+        return res.status(400).json({ message: "This code has already been used." });
+      }
+      if (new Date() > record.expiresAt) {
+        return res.status(400).json({ message: "This code has expired. Please request a new code." });
+      }
+      if (record.code !== String(code).trim()) {
+        return res.status(400).json({ message: "Incorrect code. Please try again." });
+      }
+
+      await db.update(phoneVerificationCodes).set({ verified: true, used: true }).where(eq(phoneVerificationCodes.id, record.id));
+
+      let user = await storage.getUserByPhone(phone);
+
+      if (!user) {
+        const name = (displayName || "").trim();
+        if (!name || name.length < 2) {
+          return res.status(200).json({
+            needsDisplayName: true,
+            message: "Enter your display name to create your account",
+          });
+        }
+
+        const email = phoneToPlaceholderEmail(phone);
+        const username = await resolveUniqueUsername(phone);
+        const randomColor = AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)];
+
+        user = await storage.createUser({
+          phone,
+          email,
+          username,
+          firstName: name,
+          lastName: "",
+          passwordHash: null,
+          avatarColor: randomColor,
+          role: "user",
+          emailVerified: false,
+          phoneVerified: true,
+          lekkerNetworkAccess: false,
+          autoReplyEnabled: false,
+          notificationsEnabled: true,
+          locationEnabled: false,
+          presence: "online",
+        } as any);
+
+        await storage.addUserEmail(user.id, email, true, false);
+        await storage.logAuthEvent("register_whatsapp", user.id, req.ip, req.headers["user-agent"]?.toString());
+      } else {
+        if (!user.phoneVerified) {
+          await storage.updateUser(user.id, { phoneVerified: true });
+          user = (await storage.getUser(user.id))!;
+        }
+        await storage.logAuthEvent("login_whatsapp", user.id, req.ip, req.headers["user-agent"]?.toString());
+      }
+
+      const synced = await applyLekkerSync(user, req);
+      const token = generateToken({ userId: synced.id, email: synced.email, role: synced.role });
+      res.json({ user: sanitizeUser(synced), token });
+    } catch (err) {
+      console.error("WhatsApp verify error:", err);
       res.status(500).json({ message: "Verification failed. Please try again." });
     }
   });
@@ -1732,7 +1916,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const profileData = extractLekkerpreneurProfile(match);
-      const updated = await storage.updateUser(user.id, profileData);
+      let workspaceEmailActive = false;
+      if (profileData.lekkerWorkspaceId) {
+        const emailStatus = await fetchWorkspaceEmailStatus(profileData.lekkerWorkspaceId);
+        workspaceEmailActive = emailStatus.active;
+      }
+      const updated = await storage.updateUser(user.id, { ...profileData, workspaceEmailActive });
 
       await storage.logAuthEvent("lekker_network_sync", user.id, req.ip, undefined, `Synced with: ${match.businessName} (${match.id})`);
 
@@ -1935,6 +2124,70 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } else {
         res.status(500).json({ error: "Failed to process chat" });
       }
+    }
+  });
+
+  app.get("/api/lekker/session-token", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const user = await storage.getUser(req.user!.userId);
+      if (!user?.lekkerNetworkId) {
+        return res.status(403).json({ message: "Lekkerpreneur account required" });
+      }
+      const token = await fetchMobileSessionToken(user.lekkerNetworkId);
+      if (!token) {
+        return res.status(502).json({ message: "Could not create session. Try again later." });
+      }
+      const base = process.env.LEKKER_API_BASE_URL || "https://lekker.network";
+      res.json({
+        token,
+        url: `${base}/api/v1/mobile/establish-session?token=${encodeURIComponent(token)}`,
+      });
+    } catch (e) {
+      res.status(500).json({ message: "Session token failed" });
+    }
+  });
+
+  app.get("/api/lekker/email/status", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const user = await storage.getUser(req.user!.userId);
+      if (!user?.isVerifiedLekkerpreneur || !user.lekkerWorkspaceId) {
+        return res.json({ active: false });
+      }
+      const status = await fetchWorkspaceEmailStatus(user.lekkerWorkspaceId);
+      if (status.active !== user.workspaceEmailActive) {
+        await storage.updateUser(user.id, { workspaceEmailActive: status.active });
+      }
+      res.json(status);
+    } catch (e) {
+      res.status(500).json({ message: "Email status failed" });
+    }
+  });
+
+  app.get("/api/lekker/email/threads", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const user = await storage.getUser(req.user!.userId);
+      if (!user?.lekkerWorkspaceId || !user.workspaceEmailActive) {
+        return res.status(403).json({ message: "Workspace email not active" });
+      }
+      const page = Math.max(1, parseInt(String(req.query.page || "1"), 10) || 1);
+      const data = await fetchMobileEmailThreads(user.lekkerWorkspaceId, page);
+      res.json(data || { threads: [] });
+    } catch (e) {
+      res.status(500).json({ message: "Failed to load inbox" });
+    }
+  });
+
+  app.get("/api/lekker/email/threads/:threadId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const user = await storage.getUser(req.user!.userId);
+      if (!user?.lekkerWorkspaceId || !user.workspaceEmailActive) {
+        return res.status(403).json({ message: "Workspace email not active" });
+      }
+      const data = await fetchMobileEmailThread(user.lekkerWorkspaceId, req.params.threadId);
+      if (!data) return res.status(404).json({ message: "Thread not found" });
+      res.json(data);
+    } catch (e) {
+      res.status(500).json({ message: "Failed to load thread" });
     }
   });
 

@@ -76,6 +76,8 @@ export interface LekkerNetworkEntry {
   memberSince?: string;
   logoUrl?: string;
   category?: string;
+  directoryCategory?: string;
+  servicesOffered?: string;
   website?: string;
   province?: string;
   location?: {
@@ -322,6 +324,7 @@ export function extractLekkerpreneurProfile(entry: LekkerNetworkEntry) {
     lekkerNetworkId: entry.id,
     lekkerWorkspaceId: entry.workspaceId || entry.workspace?.id || null,
     isVerifiedLekkerpreneur: true,
+    lekkerNetworkAccess: true,
     businessCategory: ws.category || entry.category || null,
     businessWebsite: ws.businessWebsite || ws.websiteUrl || entry.website || null,
     businessLogoUrl: ws.logoUrl || entry.logoUrl || null,
@@ -329,6 +332,61 @@ export function extractLekkerpreneurProfile(entry: LekkerNetworkEntry) {
     businessCountry: entry.location?.country || "South Africa",
     lekkerVerifiedAt: new Date(),
   };
+}
+
+const LEKKER_MOBILE_BASE = process.env.LEKKER_API_BASE_URL || "https://lekker.network";
+
+async function lekkerMobileFetch<T>(path: string, init?: RequestInit): Promise<T | null> {
+  if (!LEKKER_API_KEY) return null;
+  try {
+    const res = await fetch(`${LEKKER_MOBILE_BASE}${path}`, {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-Key": LEKKER_API_KEY,
+        ...(init?.headers || {}),
+      },
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as T;
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchMobileSessionToken(lekkerNetworkUserId: string): Promise<string | null> {
+  const data = await lekkerMobileFetch<{ token?: string }>("/api/v1/mobile/session-token", {
+    method: "POST",
+    body: JSON.stringify({ userId: lekkerNetworkUserId }),
+  });
+  return data?.token || null;
+}
+
+export async function fetchWorkspaceEmailStatus(
+  workspaceId: string,
+): Promise<{ active: boolean; unreadCount?: number }> {
+  const data = await lekkerMobileFetch<{ active: boolean; unreadCount?: number }>(
+    `/api/v1/mobile/email/status?workspaceId=${encodeURIComponent(workspaceId)}`,
+  );
+  return data || { active: false };
+}
+
+export async function fetchMobileEmailThreads(
+  workspaceId: string,
+  page = 1,
+): Promise<{ threads: Array<{ id: string; subject: string; snippet: string; fromName: string; unread: boolean; updatedAt: string }> } | null> {
+  return lekkerMobileFetch(
+    `/api/v1/mobile/email/threads?workspaceId=${encodeURIComponent(workspaceId)}&page=${page}`,
+  );
+}
+
+export async function fetchMobileEmailThread(
+  workspaceId: string,
+  threadId: string,
+): Promise<{ messages: Array<{ id: string; from: string; bodyText: string; createdAt: string; isOutbound: boolean }> } | null> {
+  return lekkerMobileFetch(
+    `/api/v1/mobile/email/threads/${threadId}?workspaceId=${encodeURIComponent(workspaceId)}`,
+  );
 }
 
 export function buildSyncUserResponse(entry: LekkerNetworkEntry) {
@@ -352,12 +410,12 @@ export function buildDirectoryEntry(d: LekkerNetworkEntry) {
     name: d.ownerName || d.businessName || "Unknown",
     businessName: d.businessName || d.ownerName || "Unknown Business",
     tradingName: ws.tradingName || "",
-    serviceType: ws.category || "General",
+    serviceType: d.directoryCategory || ws.category || "General",
     location: ws.province || d.location?.province || "South Africa",
     province: ws.province || d.location?.province || "",
     phone: ws.businessPhone || d.phone || "",
     email: ws.businessEmail || d.email || "",
-    bio: "",
+    bio: d.servicesOffered || "",
     avatarColor: "#F5B800",
     website: ws.businessWebsite || ws.websiteUrl || d.website || "",
     logoUrl: ws.logoUrl || d.logoUrl || "",

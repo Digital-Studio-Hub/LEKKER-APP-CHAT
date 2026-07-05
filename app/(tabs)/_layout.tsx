@@ -4,10 +4,15 @@ import { Platform, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import Colors from "@/constants/colors";
+import { useAuth } from "@/lib/auth-context";
 
 export default function TabLayout() {
   const isWeb = Platform.OS === "web";
   const isIOS = Platform.OS === "ios";
+  const { user } = useAuth();
+
+  const isLekkerpreneur = !!user?.isVerifiedLekkerpreneur;
+  const showMail = isLekkerpreneur && !!user?.workspaceEmailActive;
 
   return (
     <Tabs
@@ -54,22 +59,56 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="network"
+        name="directory"
         options={{
-          title: "Network",
+          title: "Directory",
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="globe-outline" size={size} color={color} />
+            <Ionicons name="people-outline" size={size} color={color} />
           ),
         }}
       />
       <Tabs.Screen
         name="feed"
         options={{
-          href: null,
           title: "Newsfeed",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="layers-outline" size={size} color={color} />
           ),
+        }}
+      />
+      <Tabs.Screen
+        name="browse"
+        options={{
+          title: "Browse",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="compass-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="software"
+        options={{
+          title: "Software",
+          href: isLekkerpreneur ? undefined : null,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="grid-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="mail"
+        options={{
+          title: "Mail",
+          href: showMail ? undefined : null,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="mail-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="network"
+        options={{
+          href: null,
         }}
       />
     </Tabs>
