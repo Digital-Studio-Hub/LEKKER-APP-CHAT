@@ -1,6 +1,6 @@
 # Lekker Chat — App Store Compliance (Resubmission)
 
-Last updated: 2026-07-04 · iOS build **3**
+Last updated: 2026-07-05 · iOS build **4** (synergy + compliance)
 
 This document maps Apple rejection reasons to fixes in this build and what to configure in App Store Connect before resubmitting.
 
@@ -11,8 +11,8 @@ This document maps Apple rejection reasons to fixes in this build and what to co
 | Guideline | Issue | Fix in build 3 |
 |-----------|-------|----------------|
 | **1.2.0** Safety — User Generated Content | Missing moderation tools | Server-backed block list + content reports; flag user/message in chat; report/block on user profiles; Safety section in Settings; abuse contact `info@digitalstudiohub.com`; 24h review copy |
-| **2.1.0** Performance — App Completeness | Incomplete / broken features | Newsfeed tab hidden (`href: null`) until server-backed feed ships |
-| **5.1.1** Privacy — Data Collection & Storage | Labels / disclosure mismatch | In-app **Data & privacy** disclosure in Settings; registration requires explicit Terms + Privacy + Community Guidelines checkbox |
+| **2.1.0** Performance — App Completeness | Incomplete / broken features | Build 4: Newsfeed visible (local feed); Software/Mail gated to lekkerpreneurs only |
+| **5.1.1** Privacy — Data Collection & Storage | Labels / disclosure mismatch | In-app **Data & privacy** in Settings; WhatsApp login shows Terms + Privacy legal line |
 | **5.1.2** Privacy — Data Use and Sharing | Unclear data sharing | Settings disclosure states no sale of data; limited sharing with SMS/email, hosting, AI providers only to operate the app; no cross-app tracking |
 | **5.2.5** Legal — Apple Products | Improper Apple trademarks | Removed Apple logo from dev landing page; app UI uses only Lekker branding (no Apple logos or “Made for iPhone” marks) |
 

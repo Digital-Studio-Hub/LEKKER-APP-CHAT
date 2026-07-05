@@ -1,8 +1,27 @@
 # Lekker Chat — iOS Production Readiness
 
-Last updated: 2026-07-04
+Last updated: 2026-07-05
 
 Use **`~/Projects/LEKKER-APP-CHAT`** for all iOS builds (not the iCloud git drive path).
+
+---
+
+## Build 4 (2026-07-05)
+
+Synergy release — see **`HANDOVER.md`** for full detail.
+
+- WhatsApp OTP auth (replaces password registration)
+- Tabs: Chats, Assistant, Directory, Newsfeed, Browse, Software (lekkerpreneurs), Mail (active email)
+- iOS `buildNumber`: **4**
+- **EAS build:** requires `eas login` on operator machine — not triggered in agent session
+- **Depends on:** LekkerNetworkV3 @ `1505853e` deployed + migration `0031_directory_listing.sql`
+
+```bash
+cd ~/Projects/LEKKER-APP-CHAT
+eas login
+eas secret:create --name EXPO_PUBLIC_API_URL --value "https://YOUR-REPLIT-SLUG.replit.app" --scope project
+eas build --platform ios --profile production
+```
 
 ---
 
