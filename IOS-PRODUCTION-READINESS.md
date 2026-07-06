@@ -13,13 +13,14 @@ Synergy release — see **`HANDOVER.md`** for full detail.
 - WhatsApp OTP auth (replaces password registration)
 - Tabs: Chats, Assistant, Directory, Newsfeed, Browse, Software (lekkerpreneurs), Mail (active email)
 - iOS `buildNumber`: **4**
-- **EAS build:** requires `eas login` on operator machine — not triggered in agent session
-- **Depends on:** LekkerNetworkV3 @ `1505853e` deployed + migration `0031_directory_listing.sql`
+- **Production API:** `https://lekkerchat.replit.app` (in `eas.json` since `979ef25`)
+- **EAS build:** requires `eas login` + `eas init` (real `projectId`) on operator machine
+- **Depends on:** LekkerNetworkV3 deployed + migration `0031_directory_listing.sql`
 
 ```bash
 cd ~/Projects/LEKKER-APP-CHAT
 eas login
-eas secret:create --name EXPO_PUBLIC_API_URL --value "https://YOUR-REPLIT-SLUG.replit.app" --scope project
+eas init    # fixes app.json projectId — commit result
 eas build --platform ios --profile production
 ```
 

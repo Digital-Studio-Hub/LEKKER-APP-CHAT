@@ -4,7 +4,8 @@
 **Prepared by:** Grok (Digital Studio Hub agent session)  
 **Repo:** `Digital-Studio-Hub/LEKKER-APP-CHAT`  
 **Canonical build path:** `~/Projects/LEKKER-APP-CHAT`  
-**Latest commit:** `e6da2c4` — *feat: ecosystem synergy — WhatsApp OTP, role-based tabs, mail SSO*
+**Latest commit:** `979ef25` — *Update API URL in build configuration* (Replit)  
+**Synergy commit:** `e6da2c4` — *feat: ecosystem synergy — WhatsApp OTP, role-based tabs, mail SSO*
 
 ---
 
@@ -98,15 +99,17 @@ Lekker Chat App (Expo)
 
 ---
 
-## Git & deployment status
+## Git & deployment status (Replit-confirmed 2026-07-06)
 
 | Item | Status |
 |------|--------|
-| Code committed | ✅ `e6da2c4` on `main` |
-| Pushed to GitHub | ✅ `Digital-Studio-Hub/LEKKER-APP-CHAT` |
-| Replit redeploy | ⏳ **You must redeploy** Replit after pulling `main` |
-| `db:push` on production DB | ⏳ Run on Replit deploy (in `.replit` build chain) or manually |
-| EAS iOS build 4 | ⏳ **Blocked — `eas login` required** (see below) |
+| All 5 synergy phases built | ✅ Replit verified |
+| Production API URL in `eas.json` | ✅ `https://lekkerchat.replit.app` (`979ef25`) |
+| Metro stale-temp crash | ✅ Fixed on Replit |
+| Code on GitHub `main` | ✅ through `979ef25` |
+| `db:push` on production DB | ✅ Runs in Replit deploy chain (`.replit` build) |
+| EAS iOS build 4 | ⏳ **Operator:** `eas login` + `eas build` locally |
+| `app.json` EAS `projectId` | ⏳ Placeholder `"lekker-chat"` — run `eas init` for real UUID |
 | App Store resubmit | ⏳ After EAS build + TestFlight smoke test |
 
 ---
@@ -120,13 +123,12 @@ cd ~/Projects/LEKKER-APP-CHAT
 npm install -g eas-cli   # or use npx eas-cli
 eas login
 
-# Set production API URL (Replit serves API on port 80, no :5000)
-eas secret:create --name EXPO_PUBLIC_API_URL \
-  --value "https://YOUR-REPLIT-SLUG.replit.app" \
-  --scope project
+# Production URL is already in eas.json — optional EAS secret override:
+# eas secret:create --name EXPO_PUBLIC_API_URL \
+#   --value "https://lekkerchat.replit.app" --scope project
 
-# Link EAS project if needed (app.json still has placeholder projectId "lekker-chat")
-eas init
+# Required once: replace placeholder projectId in app.json
+eas init   # writes real UUID to app.json extra.eas.projectId — commit the result
 
 # Build
 eas build --platform ios --profile production
@@ -198,15 +200,15 @@ Run: `npm run db:push` with production `DATABASE_URL`.
 
 ## Known gaps / follow-ups
 
-| Gap | Priority |
-|-----|----------|
-| EAS build not triggered (no Expo login) | **P0** — operator action |
-| Replit production URL still placeholder in `eas.json` | **P0** |
-| Mail send/reply from app | P2 |
-| Server-backed Newsfeed | P2 |
-| Push notifications | P3 |
-| Connect API wiring (`server/lekker-connect.ts`) | P3 |
-| iCloud `LEKKER-APP-CHAT` mirror sync from `~/Projects` | P1 |
+| Gap | Priority | What it needs |
+|-----|----------|---------------|
+| EAS iOS build 4 | **P0** | You: `eas login` → `eas init` → `eas build --platform ios --profile production` |
+| `app.json` `projectId` | **P0** | Real Expo project UUID from `eas init` (currently `"lekker-chat"` placeholder) |
+| Mail compose/reply | P2 | Compose UI in `mail.tsx` + V3 `POST /api/v1/mobile/email/send` |
+| Server-backed Newsfeed | P2 | DB endpoint; replace AsyncStorage-only `feed.tsx` |
+| Push notifications | P3 | Expo push token registration + server send |
+| Connect API wiring | P3 | Expose `server/lekker-connect.ts` via routes |
+| iCloud `LEKKER-APP-CHAT` mirror | P1 | Stash local changes, `git pull` from `main` |
 
 ---
 
