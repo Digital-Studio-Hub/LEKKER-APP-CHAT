@@ -41,8 +41,21 @@ UGC SAFETY (1.2):
 LOGIN / NAME KEYBOARD (2.1a):
 - WhatsApp OTP flow: phone → 6-digit code → display name (full text keyboard on separate screen).
 
-Test account:
-[Provide WhatsApp test number that receives OTP, or pre-verified account]
+Apple Review test account (no WhatsApp — set Replit secrets, then deploy):
+
+| Secret | Example value |
+|--------|----------------|
+| `APPLE_REVIEW_PHONE` | `+27821099999` |
+| `APPLE_REVIEW_CODE` | `847291` |
+| `APPLE_REVIEW_DISPLAY_NAME` | `Apple Reviewer` (optional) |
+
+**Sign-in steps for reviewers:**
+1. Enter phone `082 109 9999` (or `+27821099999`)
+2. Tap **Send WhatsApp Code** (no message is sent)
+3. Enter code `847291`
+4. Accept Terms checkbox → **Sign In**
+
+Optional pre-seed: `npx tsx --env-file=.env scripts/seed-apple-reviewer.ts`
 
 Screen recordings attached: login + name entry, report/block, account deletion.
 

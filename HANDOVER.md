@@ -88,6 +88,18 @@ This build is **iOS build 5** (`app.json` → `buildNumber: "5"`). Build 5 adds 
 
 **Note:** Expo push tokens require a real EAS `projectId` in `app.json` (`eas init`). Until then, registration is skipped with a console warning.
 
+### Apple Review test login (no WhatsApp)
+
+Set on Replit: `APPLE_REVIEW_PHONE`, `APPLE_REVIEW_CODE`, optional `APPLE_REVIEW_DISPLAY_NAME`.
+
+| Item | Location |
+|------|----------|
+| Bypass logic | `server/apple-review-auth.ts` |
+| Routes | `POST /api/auth/whatsapp/send-code` + `verify` |
+| Pre-seed script | `scripts/seed-apple-reviewer.ts` |
+
+Default credentials (override via env): phone `+27821099999`, code `847291`.
+
 ### Connect API (lekker.network Standard Connector)
 
 | Route | Proxies to |

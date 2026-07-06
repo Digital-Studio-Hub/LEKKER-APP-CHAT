@@ -37,6 +37,11 @@ import { sendPasswordResetEmail, sendEmailVerificationEmail } from "./gmail";
 import { sendPasswordResetSMS, sendPhoneVerificationSMS } from "./twilio";
 import { sendWhatsAppOtp } from "./whatsapp-otp";
 import {
+  getAppleReviewConfig,
+  isAppleReviewPhone,
+  isAppleReviewLogin,
+} from "./apple-review-auth";
+import {
   listFeedPosts,
   getFeedPostById,
   createFeedPost,
@@ -217,7 +222,76 @@ const phoneVerifyLimiter = rateLimit({
   legacyHeaders: false,
   message: { message: "Too many verification attempts. Please try again in an hour." },
   validate: { xForwardedForHeader: false },
+  skip: (req) => {
+    const raw = req.body?.phone;
+    return raw ? isAppleReviewPhone(String(raw)) : false;
+  },
 });
+
+async function handleAppleReviewVerify(
+  req: Request,
+  res: Response,
+  phone: string,
+  displayName?: string,
+): Promise<void> {
+  const config = getAppleReviewConfig();
+  if (!config) {
+    res.status(503).json({ message: "Apple Review login is not configured." });
+    return;
+  }
+
+  let user = await storage.getUserByPhone(phone);
+
+  if (!user) {
+    const name = (displayName || config.displayName).trim();
+    if (!name || name.length < 2) {
+      res.status(200).json({
+        needsDisplayName: true,
+        message: "Enter your display name to create your account",
+      });
+      return;
+    }
+
+    const email = phoneToPlaceholderEmail(phone);
+    const username = await resolveUniqueUsername(phone);
+    const randomColor = AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)];
+
+    user = await storage.createUser({
+      phone,
+      email,
+      username,
+      firstName: name,
+      lastName: "",
+      passwordHash: null,
+      avatarColor: randomColor,
+      role: "user",
+      emailVerified: true,
+      phoneVerified: true,
+      lekkerNetworkAccess: false,
+      autoReplyEnabled: false,
+      notificationsEnabled: true,
+      locationEnabled: false,
+      presence: "online",
+    } as any);
+
+    await storage.addUserEmail(user.id, email, true, true);
+    await storage.logAuthEvent("register_apple_review", user.id, req.ip, req.headers["user-agent"]?.toString());
+  } else {
+    await storage.updateUser(user.id, { phoneVerified: true, emailVerified: true });
+    const emails = await storage.getUserEmails(user.id);
+    for (const row of emails) {
+      if (!row.isVerified) {
+        await storage.verifyUserEmail(row.id, user.id);
+      }
+    }
+    user = (await storage.getUser(user.id))!;
+    await storage.logAuthEvent("login_apple_review", user.id, req.ip, req.headers["user-agent"]?.toString());
+  }
+
+  const synced = await applyLekkerSync(user, req);
+  const token = generateToken({ userId: synced.id, email: synced.email, role: synced.role });
+  res.json({ user: sanitizeUser(synced), token });
+}
 
 export async function registerRoutes(app: Express): Promise<Server> {
 
@@ -381,6 +455,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Could not parse phone number" });
       }
 
+      if (isAppleReviewPhone(phone)) {
+        const existing = await storage.getUserByPhone(phone);
+        return res.json({
+          message: "Verification code sent via WhatsApp",
+          isExistingUser: !!existing,
+        });
+      }
+
       await db.delete(phoneVerificationCodes).where(eq(phoneVerificationCodes.phone, phone));
 
       const code = Math.floor(100000 + Math.random() * 900000).toString();
@@ -413,6 +495,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const phone = req.body.phone ? normaliseMobile(String(req.body.phone).trim()) : null;
       if (!phone || !code) {
         return res.status(400).json({ message: "Phone number and code are required" });
+      }
+
+      if (isAppleReviewLogin(phone, String(code).trim())) {
+        await handleAppleReviewVerify(req, res, phone, displayName);
+        return;
       }
 
       const [record] = await db
