@@ -252,6 +252,19 @@ export const chatMessages = pgTable("chat_messages", {
   index("idx_chat_messages_sender").on(table.senderId),
 ]);
 
+export const pushTokens = pgTable("push_tokens", {
+  id: varchar("id", { length: 36 })
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  userId: varchar("user_id", { length: 36 }).notNull(),
+  token: text("token").notNull(),
+  deviceId: varchar("device_id", { length: 255 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("idx_push_tokens_token").on(table.token),
+  index("idx_push_tokens_user").on(table.userId),
+]);
+
 export const passwordSchema = z.string()
   .min(8, "Password must be at least 8 characters")
   .regex(/[A-Z]/, "Password must contain at least one uppercase letter")
@@ -322,3 +335,4 @@ export type FeedPost = typeof feedPosts.$inferSelect;
 export type FeedLike = typeof feedLikes.$inferSelect;
 export type FeedComment = typeof feedComments.$inferSelect;
 export type FeedShare = typeof feedShares.$inferSelect;
+export type PushToken = typeof pushTokens.$inferSelect;

@@ -3,7 +3,7 @@ import { Pool } from "pg";
 import { eq, or, and, ne, sql, asc, desc, count, inArray, gt, isNull, lt } from "drizzle-orm";
 import {
   users, authAuditLogs, chats, chatParticipants, chatMessages, userEmails,
-  userBlocks, contentReports,
+  userBlocks, contentReports, pushTokens,
   type User, type InsertUser, type Chat, type ChatParticipant, type ChatMessage, type UserEmail,
 } from "@shared/schema";
 
@@ -69,6 +69,11 @@ export interface IStorage {
     reason: string;
     details?: string | null;
   }): Promise<{ id: string }>;
+
+  savePushToken(userId: string, token: string, deviceId?: string): Promise<void>;
+  deletePushToken(token: string, userId: string): Promise<void>;
+  getPushTokensForUsers(userIds: string[]): Promise<Array<{ userId: string; token: string }>>;
+  deleteAllPushTokensForUser(userId: string): Promise<void>;
 }
 
 class PgStorage implements IStorage {
@@ -542,6 +547,32 @@ class PgStorage implements IStorage {
     );
     await db.delete(authAuditLogs).where(eq(authAuditLogs.userId, userId));
     await db.delete(users).where(eq(users.id, userId));
+  }
+
+  async savePushToken(userId: string, token: string, deviceId?: string): Promise<void> {
+    await db
+      .insert(pushTokens)
+      .values({ userId, token, deviceId })
+      .onConflictDoUpdate({ target: pushTokens.token, set: { userId, deviceId } });
+  }
+
+  async deletePushToken(token: string, userId: string): Promise<void> {
+    await db
+      .delete(pushTokens)
+      .where(and(eq(pushTokens.token, token), eq(pushTokens.userId, userId)));
+  }
+
+  async getPushTokensForUsers(userIds: string[]): Promise<Array<{ userId: string; token: string }>> {
+    if (userIds.length === 0) return [];
+    const rows = await db
+      .select({ userId: pushTokens.userId, token: pushTokens.token })
+      .from(pushTokens)
+      .where(inArray(pushTokens.userId, userIds));
+    return rows;
+  }
+
+  async deleteAllPushTokensForUser(userId: string): Promise<void> {
+    await db.delete(pushTokens).where(eq(pushTokens.userId, userId));
   }
 }
 

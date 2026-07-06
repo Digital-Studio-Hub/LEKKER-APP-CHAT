@@ -125,3 +125,35 @@ export async function setBadgeCount(count: number) {
     await N.setBadgeCountAsync(count);
   } catch (e) {}
 }
+
+const PUSH_TOKEN_KEY = "lekker_push_token";
+
+export async function getExpoPushToken(): Promise<string | null> {
+  if (Platform.OS === "web") return null;
+  try {
+    const N = await getNotifications();
+    if (!N) return null;
+
+    const { status } = await N.getPermissionsAsync();
+    if (status !== "granted") return null;
+
+    const cached = await AsyncStorage.getItem(PUSH_TOKEN_KEY);
+    if (cached) return cached;
+
+    const tokenData = await N.getExpoPushTokenAsync().catch(() => null);
+    if (!tokenData) return null;
+
+    const token = tokenData.data;
+    await AsyncStorage.setItem(PUSH_TOKEN_KEY, token);
+    return token;
+  } catch (e) {
+    console.warn("[Push] Failed to get Expo push token:", e);
+    return null;
+  }
+}
+
+export async function clearStoredPushToken(): Promise<string | null> {
+  const token = await AsyncStorage.getItem(PUSH_TOKEN_KEY);
+  await AsyncStorage.removeItem(PUSH_TOKEN_KEY);
+  return token;
+}

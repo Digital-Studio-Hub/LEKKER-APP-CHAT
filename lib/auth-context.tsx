@@ -4,6 +4,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as SecureStore from "expo-secure-store";
 import { getApiUrl } from "@/lib/query-client";
 import { getAuthToken, setAuthToken } from "@/lib/auth-token";
+import { getExpoPushToken, clearStoredPushToken } from "@/lib/notifications";
+import { registerPushToken, unregisterPushToken } from "@/lib/push-api";
 
 const TOKEN_KEY = "lekker_auth_token";
 const USER_KEY = "lekker_auth_user";
@@ -216,6 +218,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { success: true };
   }
 
+  async function maybeRegisterPush(user: AuthUser) {
+    if (!user.notificationsEnabled) return;
+    try {
+      const token = await getExpoPushToken();
+      if (token) await registerPushToken(token);
+    } catch {}
+  }
+
   async function verifyWhatsApp(
     data: WhatsAppVerifyData,
   ): Promise<{ success: boolean; needsDisplayName?: boolean; message?: string }> {
@@ -236,6 +246,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const enriched = enrichUser(body.user);
     await storeUser(enriched);
     setUser(enriched);
+    maybeRegisterPush(enriched);
     return { success: true };
   }
 
@@ -257,6 +268,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const enriched = enrichUser(body.user);
     await storeUser(enriched);
     setUser(enriched);
+    maybeRegisterPush(enriched);
     return { success: true };
   }
 
@@ -313,6 +325,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function logout() {
     try {
+      const pushToken = await clearStoredPushToken();
+      if (pushToken) await unregisterPushToken(pushToken).catch(() => {});
+
       const baseUrl = getApiUrl();
       const token = getAuthToken();
       if (token) {
