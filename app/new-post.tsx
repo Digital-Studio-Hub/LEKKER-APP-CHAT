@@ -20,6 +20,7 @@ import * as ImagePicker from "expo-image-picker";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/lib/auth-context";
 import { createFeedPost } from "@/lib/feed-api";
+import { containsBlockedContent, CONTENT_FILTER_MESSAGE } from "@shared/content-filter";
 
 export default function NewPostScreen() {
   const insets = useSafeAreaInsets();
@@ -121,6 +122,10 @@ export default function NewPostScreen() {
 
   async function handlePost() {
     if ((!content.trim() && !mediaUri) || !user) return;
+    if (content.trim() && containsBlockedContent(content.trim())) {
+      Alert.alert("Not allowed", CONTENT_FILTER_MESSAGE);
+      return;
+    }
 
     setIsPosting(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);

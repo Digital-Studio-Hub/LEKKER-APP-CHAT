@@ -7,6 +7,7 @@ import {
   Pressable,
   StyleSheet,
   ActivityIndicator,
+  Alert,
 } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -14,6 +15,7 @@ import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/lib/auth-context";
 import { fetchFeedPost, addFeedComment, type FeedPost } from "@/lib/feed-api";
+import { containsBlockedContent, CONTENT_FILTER_MESSAGE } from "@shared/content-filter";
 
 function formatTimeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -44,6 +46,10 @@ export default function PostCommentsScreen() {
 
   async function handleComment() {
     if (!commentText.trim() || !user || !postId) return;
+    if (containsBlockedContent(commentText.trim())) {
+      Alert.alert("Not allowed", CONTENT_FILTER_MESSAGE);
+      return;
+    }
 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     await addFeedComment(postId, commentText.trim());

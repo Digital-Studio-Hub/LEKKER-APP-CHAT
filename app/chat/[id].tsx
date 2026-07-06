@@ -27,6 +27,7 @@ import {
   isUserBlockedServer,
   promptContentReport,
 } from "@/lib/safety-api";
+import { containsBlockedContent, CONTENT_FILTER_MESSAGE } from "@shared/content-filter";
 import { isSmallScreen, fontScale } from "@/lib/responsive";
 import {
   pickImage,
@@ -764,10 +765,17 @@ export default function ChatDetailScreen() {
     });
   }
 
+  function warnBlockedContent(text: string): boolean {
+    if (!containsBlockedContent(text)) return false;
+    Alert.alert("Not allowed", CONTENT_FILTER_MESSAGE);
+    return true;
+  }
+
   async function handleSend() {
     if (editingMessage) {
       const text = inputText.trim();
       if (!text || !id) return;
+      if (warnBlockedContent(text)) return;
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       setInputText("");
       setEditingMessage(null);
@@ -777,6 +785,7 @@ export default function ChatDetailScreen() {
     }
     const text = inputText.trim();
     if (!text || !id || isBlocked) return;
+    if (warnBlockedContent(text)) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setInputText("");
     await sendChatMessage(id, text, "text");
@@ -951,6 +960,10 @@ export default function ChatDetailScreen() {
     }
     if (opts.length < 2) {
       Alert.alert("Error", "Please add at least 2 options.");
+      return;
+    }
+    if (warnBlockedContent(q) || opts.some((o) => containsBlockedContent(o))) {
+      Alert.alert("Not allowed", CONTENT_FILTER_MESSAGE);
       return;
     }
     setShowPollModal(false);

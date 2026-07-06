@@ -13,7 +13,7 @@
 
 Lekker Chat has been upgraded from a password-based messaging app to a **passwordless, ecosystem-connected mobile product**. Users sign in with **WhatsApp OTP** (phone + one-time code). New users add a **display name** only. The app now exposes **role-based tabs** tied to lekker.network identity: everyone gets Directory, Newsfeed, and Browse; verified lekkerpreneurs get Software (full lekker.network dashboard via SSO WebView); lekkerpreneurs with active workspace email get a **native Mail inbox**.
 
-This build is **iOS build 4** (`app.json` → `buildNumber: "4"`). It supersedes build 3 (App Store compliance pass at commit `95624b8`).
+This build is **iOS build 5** (`app.json` → `buildNumber: "5"`). Build 5 adds App Store rejection fixes (contacts consent, EULA checkbox, content filter). Supersedes build 4.
 
 ---
 

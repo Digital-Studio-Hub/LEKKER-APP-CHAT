@@ -3,7 +3,8 @@ import { Pool } from "pg";
 import { eq, or, and, ne, sql, asc, desc, count, inArray, gt, isNull, lt } from "drizzle-orm";
 import {
   users, authAuditLogs, chats, chatParticipants, chatMessages, userEmails,
-  userBlocks, contentReports,
+  userBlocks, contentReports, pushTokens,
+  feedPosts, feedLikes, feedComments, feedShares,
   type User, type InsertUser, type Chat, type ChatParticipant, type ChatMessage, type UserEmail,
 } from "@shared/schema";
 
@@ -540,6 +541,24 @@ class PgStorage implements IStorage {
     await db.delete(contentReports).where(
       or(eq(contentReports.reporterId, userId), eq(contentReports.reportedUserId, userId)),
     );
+    await db.delete(pushTokens).where(eq(pushTokens.userId, userId));
+    await db.delete(userEmails).where(eq(userEmails.userId, userId));
+
+    const authoredPosts = await db
+      .select({ id: feedPosts.id })
+      .from(feedPosts)
+      .where(eq(feedPosts.authorId, userId));
+    const postIds = authoredPosts.map((p) => p.id);
+    if (postIds.length > 0) {
+      await db.delete(feedComments).where(inArray(feedComments.postId, postIds));
+      await db.delete(feedLikes).where(inArray(feedLikes.postId, postIds));
+      await db.delete(feedShares).where(inArray(feedShares.postId, postIds));
+      await db.delete(feedPosts).where(eq(feedPosts.authorId, userId));
+    }
+    await db.delete(feedComments).where(eq(feedComments.authorId, userId));
+    await db.delete(feedLikes).where(eq(feedLikes.userId, userId));
+    await db.delete(feedShares).where(eq(feedShares.userId, userId));
+
     await db.delete(authAuditLogs).where(eq(authAuditLogs.userId, userId));
     await db.delete(users).where(eq(users.id, userId));
   }

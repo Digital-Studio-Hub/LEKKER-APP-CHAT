@@ -18,7 +18,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.lekker.chat",
-      "buildNumber": "4",
+      "buildNumber": "5",
       "infoPlist": {
         "UIRequiresFullScreen": false,
         "NSCameraUsageDescription": "Lekker Chat uses your camera to take photos and share them in conversations.",
@@ -27,7 +27,7 @@
         "NSMicrophoneUsageDescription": "Lekker Chat uses your microphone to record voice notes.",
         "NSLocationWhenInUseUsageDescription": "Lekker Chat uses your location to find nearby Lekkerpreneurs and share your location in conversations.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Lekker Chat uses your location to find nearby Lekkerpreneurs and enhance your networking experience.",
-        "NSContactsUsageDescription": "Lekker Chat accesses your contacts so you can share contact cards in conversations and find people you know.",
+        "NSContactsUsageDescription": "Lekker Chat reads contacts on your device to help you find people you know. If you choose to share a contact card in a chat, that contact's name and phone number will be uploaded to our servers and sent to conversation participants. Your full address book is never uploaded.",
         "ITSAppUsesNonExemptEncryption": false,
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true

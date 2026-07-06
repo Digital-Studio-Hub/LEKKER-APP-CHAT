@@ -20,7 +20,7 @@ import Colors from "@/constants/colors";
 import * as Haptics from "expo-haptics";
 import { isSmallScreen, fontScale } from "@/lib/responsive";
 import { getApiUrl } from "@/lib/query-client";
-import { PRIVACY_POLICY_URL } from "@/constants/safety";
+import { COMMUNITY_GUIDELINES_URL, PRIVACY_POLICY_URL } from "@/constants/safety";
 
 const lekkerLogo = require("../assets/images/lekker-logo.png");
 
@@ -36,6 +36,15 @@ export default function LoginScreen() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [isExistingUser, setIsExistingUser] = useState(false);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
+
+  const canSubmit = acceptedTerms && !isSubmitting;
+
+  function requireTermsAccepted(): boolean {
+    if (acceptedTerms) return true;
+    setError("You must accept the Terms, Privacy Policy, and Community Guidelines to continue.");
+    return false;
+  }
 
   React.useEffect(() => {
     if (!isLoading && isLoggedIn) {
@@ -54,6 +63,7 @@ export default function LoginScreen() {
   if (isLoggedIn) return null;
 
   async function handleSendCode() {
+    if (!requireTermsAccepted()) return;
     const trimmed = phone.trim();
     if (trimmed.length < 8) {
       setError("Enter a valid South African mobile number");
@@ -84,6 +94,7 @@ export default function LoginScreen() {
   }
 
   async function handleVerify() {
+    if (!requireTermsAccepted()) return;
     if (!code || code.length !== 6) {
       setError("Enter the 6-digit WhatsApp code");
       return;
@@ -114,6 +125,7 @@ export default function LoginScreen() {
   }
 
   async function handleCreateAccount() {
+    if (!requireTermsAccepted()) return;
     if (!displayName.trim() || displayName.trim().length < 2) {
       setError("Enter your display name (at least 2 characters)");
       return;
@@ -184,9 +196,9 @@ export default function LoginScreen() {
                 testID="login-phone"
               />
               <Pressable
-                style={({ pressed }) => [styles.button, pressed && styles.buttonPressed, isSubmitting && styles.buttonDisabled]}
+                style={({ pressed }) => [styles.button, pressed && styles.buttonPressed, !canSubmit && styles.buttonDisabled]}
                 onPress={handleSendCode}
-                disabled={isSubmitting}
+                disabled={!canSubmit}
               >
                 {isSubmitting ? (
                   <ActivityIndicator color={Colors.background} />
@@ -214,9 +226,9 @@ export default function LoginScreen() {
                 testID="login-code"
               />
               <Pressable
-                style={({ pressed }) => [styles.button, pressed && styles.buttonPressed, isSubmitting && styles.buttonDisabled]}
+                style={({ pressed }) => [styles.button, pressed && styles.buttonPressed, !canSubmit && styles.buttonDisabled]}
                 onPress={handleVerify}
-                disabled={isSubmitting}
+                disabled={!canSubmit}
               >
                 {isSubmitting ? (
                   <ActivityIndicator color={Colors.background} />
@@ -243,13 +255,15 @@ export default function LoginScreen() {
                 value={displayName}
                 onChangeText={(t) => { setDisplayName(t); setError(""); }}
                 autoCapitalize="words"
+                keyboardType="default"
+                textContentType="name"
                 autoFocus
                 testID="login-display-name"
               />
               <Pressable
-                style={({ pressed }) => [styles.button, pressed && styles.buttonPressed, isSubmitting && styles.buttonDisabled]}
+                style={({ pressed }) => [styles.button, pressed && styles.buttonPressed, !canSubmit && styles.buttonDisabled]}
                 onPress={handleCreateAccount}
-                disabled={isSubmitting}
+                disabled={!canSubmit}
               >
                 {isSubmitting ? (
                   <ActivityIndicator color={Colors.background} />
@@ -260,17 +274,35 @@ export default function LoginScreen() {
             </>
           )}
 
-          <Text style={styles.legal}>
-            By continuing you agree to our{" "}
-            <Text style={styles.legalLink} onPress={() => Linking.openURL("https://lekker.network/terms")}>
-              Terms
+          <Pressable
+            style={styles.termsRow}
+            onPress={() => {
+              setAcceptedTerms((v) => !v);
+              if (error.includes("accept the Terms")) setError("");
+            }}
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: acceptedTerms }}
+            testID="accept-terms-checkbox"
+          >
+            <View style={[styles.termsCheckbox, acceptedTerms && styles.termsCheckboxChecked]}>
+              {acceptedTerms ? <Feather name="check" size={14} color={Colors.background} /> : null}
+            </View>
+            <Text style={styles.termsText}>
+              I agree to the{" "}
+              <Text style={styles.legalAgreementLink} onPress={() => Linking.openURL("https://lekker.network/terms")}>
+                Terms & Conditions
+              </Text>
+              ,{" "}
+              <Text style={styles.legalAgreementLink} onPress={() => Linking.openURL(PRIVACY_POLICY_URL)}>
+                Privacy Policy
+              </Text>
+              , and{" "}
+              <Text style={styles.legalAgreementLink} onPress={() => Linking.openURL(COMMUNITY_GUIDELINES_URL)}>
+                Community Guidelines
+              </Text>
+              . There is no tolerance for objectionable content or abusive users.
             </Text>
-            {" "}and{" "}
-            <Text style={styles.legalLink} onPress={() => Linking.openURL(PRIVACY_POLICY_URL)}>
-              Privacy Policy
-            </Text>
-            .
-          </Text>
+          </Pressable>
         </View>
 
         <Text style={styles.footer}>Powered by Lekker Network</Text>
@@ -327,14 +359,35 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,59,48,0.3)",
   },
   errorBannerText: { fontFamily: "Poppins_400Regular", fontSize: fontScale(13), color: Colors.danger, textAlign: "center" },
-  legal: {
+  termsRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    marginTop: 20,
+    paddingHorizontal: 2,
+  },
+  termsCheckbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: Colors.border,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 1,
+    backgroundColor: Colors.inputBackground,
+  },
+  termsCheckboxChecked: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  termsText: {
+    flex: 1,
     fontFamily: "Poppins_400Regular",
     fontSize: fontScale(11),
     color: Colors.textMuted,
-    textAlign: "center",
-    marginTop: 20,
     lineHeight: 18,
   },
-  legalLink: { color: Colors.primary, fontFamily: "Poppins_500Medium" },
+  legalAgreementLink: { color: Colors.primary, fontFamily: "Poppins_500Medium" },
   footer: { marginTop: 24, fontFamily: "Poppins_400Regular", fontSize: fontScale(12), color: Colors.textMuted },
 });

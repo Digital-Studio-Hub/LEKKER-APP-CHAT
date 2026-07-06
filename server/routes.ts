@@ -45,6 +45,7 @@ import {
   addFeedComment,
 } from "./feed";
 import { registerPushToken, unregisterPushToken, notifyChatMessage } from "./push";
+import { containsBlockedContent, CONTENT_FILTER_MESSAGE } from "./content-filter";
 import {
   isConnectConfigured,
   submitContactToLekker,
@@ -60,6 +61,16 @@ import {
 } from "./lekker-connect";
 import { normaliseMobile, phoneToPlaceholderEmail, phoneToUsername } from "../shared/mobile-utils";
 import type { User } from "@shared/schema";
+
+function rejectBlockedContent(res: Response, ...texts: Array<string | null | undefined>): boolean {
+  for (const text of texts) {
+    if (text && containsBlockedContent(text)) {
+      res.status(400).json({ message: CONTENT_FILTER_MESSAGE, code: "CONTENT_BLOCKED" });
+      return true;
+    }
+  }
+  return false;
+}
 
 function normalizePhone(raw: string): string {
   const digits = raw.replace(/[\s\-().]/g, "");
@@ -1291,6 +1302,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Message content is required" });
       }
 
+      if (rejectBlockedContent(
+        res,
+        msgType === "text" ? content : null,
+        extras?.pollQuestion,
+        extras?.sharedContactName,
+      )) {
+        return;
+      }
+
       const chatParticipantsList = await storage.getChatParticipants(chatId);
       for (const p of chatParticipantsList) {
         if (p.userId !== userId && await storage.isEitherUserBlocked(userId, p.userId)) {
@@ -1400,6 +1420,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (!content || typeof content !== "string" || content.trim().length === 0) {
         return res.status(400).json({ message: "Content is required" });
+      }
+
+      if (rejectBlockedContent(res, content)) {
+        return;
       }
 
       const isParticipant = await storage.isUserInChat(chatId, userId);
@@ -2272,6 +2296,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!String(content || "").trim() && !mediaUrl) {
         return res.status(400).json({ message: "Post content or media is required" });
       }
+      if (rejectBlockedContent(res, String(content || ""))) {
+        return;
+      }
       const result = await createFeedPost({
         authorId: req.user!.userId,
         content: String(content || "").trim() || "📸",
@@ -2311,6 +2338,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const content = String(req.body?.content || "").trim();
       if (!content) return res.status(400).json({ message: "Comment is required" });
+      if (rejectBlockedContent(res, content)) {
+        return;
+      }
       await addFeedComment({
         postId: req.params.id,
         authorId: req.user!.userId,
