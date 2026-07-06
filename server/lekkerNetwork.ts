@@ -383,10 +383,46 @@ export async function fetchMobileEmailThreads(
 export async function fetchMobileEmailThread(
   workspaceId: string,
   threadId: string,
-): Promise<{ messages: Array<{ id: string; from: string; bodyText: string; createdAt: string; isOutbound: boolean }> } | null> {
+): Promise<{
+  subject: string;
+  messages: Array<{
+    id: string;
+    from: string;
+    fromAddress: string;
+    bodyText: string;
+    createdAt: string;
+    isOutbound: boolean;
+  }>;
+} | null> {
   return lekkerMobileFetch(
     `/api/v1/mobile/email/threads/${threadId}?workspaceId=${encodeURIComponent(workspaceId)}`,
   );
+}
+
+export async function sendMobileEmail(
+  workspaceId: string,
+  userId: string,
+  payload: {
+    to: string | string[];
+    subject: string;
+    bodyText: string;
+    inReplyTo?: string;
+    references?: string;
+  },
+): Promise<{ messageId: string; threadId: string } | null> {
+  const to = Array.isArray(payload.to) ? payload.to : [payload.to];
+  return lekkerMobileFetch("/api/v1/mobile/email/send", {
+    method: "POST",
+    body: JSON.stringify({
+      workspaceId,
+      userId,
+      to,
+      subject: payload.subject,
+      bodyText: payload.bodyText,
+      inReplyTo: payload.inReplyTo,
+      references: payload.references,
+    }),
+  });
 }
 
 export function buildSyncUserResponse(entry: LekkerNetworkEntry) {

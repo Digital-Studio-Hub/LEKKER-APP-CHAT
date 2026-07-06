@@ -19,7 +19,7 @@ import * as ImagePicker from "expo-image-picker";
 import Colors from "@/constants/colors";
 import { fontScale } from "@/lib/responsive";
 import { useAuth } from "@/lib/auth-context";
-import { storage, FeedPost } from "@/lib/storage";
+import { fetchFeedPosts, type FeedPost } from "@/lib/feed-api";
 
 function formatTimeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -50,8 +50,8 @@ export default function ProfileScreen() {
 
   async function loadMyPosts() {
     if (!user) return;
-    const allPosts = await storage.getFeedPosts();
-    setMyPosts(allPosts.filter((p) => p.authorId === user.id));
+    const allPosts = await fetchFeedPosts({ authorId: user.id });
+    setMyPosts(allPosts);
   }
 
   async function saveStatus() {

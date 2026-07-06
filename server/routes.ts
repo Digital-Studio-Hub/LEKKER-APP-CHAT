@@ -29,12 +29,21 @@ import {
   fetchWorkspaceEmailStatus,
   fetchMobileEmailThreads,
   fetchMobileEmailThread,
+  sendMobileEmail,
   type LekkerNetworkEntry,
   type WorkspaceDetail,
 } from "./lekkerNetwork";
 import { sendPasswordResetEmail, sendEmailVerificationEmail } from "./gmail";
 import { sendPasswordResetSMS, sendPhoneVerificationSMS } from "./twilio";
 import { sendWhatsAppOtp } from "./whatsapp-otp";
+import {
+  listFeedPosts,
+  getFeedPostById,
+  createFeedPost,
+  toggleFeedLike,
+  addFeedShare,
+  addFeedComment,
+} from "./feed";
 import { normaliseMobile, phoneToPlaceholderEmail, phoneToUsername } from "../shared/mobile-utils";
 import type { User } from "@shared/schema";
 
@@ -2188,6 +2197,111 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(data);
     } catch (e) {
       res.status(500).json({ message: "Failed to load thread" });
+    }
+  });
+
+  app.post("/api/lekker/email/send", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const user = await storage.getUser(req.user!.userId);
+      if (!user?.lekkerWorkspaceId || !user.workspaceEmailActive || !user.lekkerNetworkId) {
+        return res.status(403).json({ message: "Workspace email not active" });
+      }
+      const { to, subject, bodyText, inReplyTo, references } = req.body || {};
+      if (!to || !subject || !bodyText) {
+        return res.status(400).json({ message: "to, subject, and bodyText are required" });
+      }
+      const result = await sendMobileEmail(user.lekkerWorkspaceId, user.lekkerNetworkId, {
+        to,
+        subject,
+        bodyText,
+        inReplyTo,
+        references,
+      });
+      if (!result) return res.status(502).json({ message: "Could not send email" });
+      res.json({ success: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ message: e?.message || "Failed to send email" });
+    }
+  });
+
+  app.get("/api/feed", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const page = Math.max(1, parseInt(String(req.query.page || "1"), 10) || 1);
+      const authorId = typeof req.query.authorId === "string" ? req.query.authorId : undefined;
+      const posts = await listFeedPosts({
+        viewerId: req.user!.userId,
+        authorId,
+        page,
+      });
+      res.json({ posts });
+    } catch (e) {
+      res.status(500).json({ message: "Failed to load feed" });
+    }
+  });
+
+  app.get("/api/feed/:id", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const post = await getFeedPostById(req.params.id);
+      if (!post) return res.status(404).json({ message: "Post not found" });
+      res.json({ post });
+    } catch (e) {
+      res.status(500).json({ message: "Failed to load post" });
+    }
+  });
+
+  app.post("/api/feed", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { content, mediaUrl } = req.body || {};
+      if (!String(content || "").trim() && !mediaUrl) {
+        return res.status(400).json({ message: "Post content or media is required" });
+      }
+      const result = await createFeedPost({
+        authorId: req.user!.userId,
+        content: String(content || "").trim() || "📸",
+        mediaUrl: mediaUrl || null,
+      });
+      if (result === "duplicate") {
+        return res.status(409).json({
+          duplicate: true,
+          message: "You've already posted similar content in the last 24 hours.",
+        });
+      }
+      res.status(201).json({ post: result });
+    } catch (e) {
+      res.status(500).json({ message: "Failed to create post" });
+    }
+  });
+
+  app.post("/api/feed/:id/like", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      await toggleFeedLike(req.params.id, req.user!.userId);
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ message: "Failed to update like" });
+    }
+  });
+
+  app.post("/api/feed/:id/share", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      await addFeedShare(req.params.id, req.user!.userId);
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ message: "Failed to share post" });
+    }
+  });
+
+  app.post("/api/feed/:id/comments", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const content = String(req.body?.content || "").trim();
+      if (!content) return res.status(400).json({ message: "Comment is required" });
+      await addFeedComment({
+        postId: req.params.id,
+        authorId: req.user!.userId,
+        content,
+      });
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ message: "Failed to add comment" });
     }
   });
 

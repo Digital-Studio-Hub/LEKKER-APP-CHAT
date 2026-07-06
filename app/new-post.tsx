@@ -19,7 +19,7 @@ import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/lib/auth-context";
-import { storage } from "@/lib/storage";
+import { createFeedPost } from "@/lib/feed-api";
 
 export default function NewPostScreen() {
   const insets = useSafeAreaInsets();
@@ -127,16 +127,13 @@ export default function NewPostScreen() {
 
     try {
       const postContent = content.trim() || (mediaType === "video" ? "🎬" : "📸");
-      const post = await storage.createFeedPost(
-        user.id,
-        user.displayName,
-        user.avatarColor,
-        postContent,
-        mediaUri || undefined,
-      );
+      const result = await createFeedPost({
+        content: postContent,
+        mediaUrl: mediaUri || undefined,
+      });
 
-      if (post === null) {
-        const msg = "You've already posted similar content in the last 24 hours.";
+      if (result.duplicate || !result.post) {
+        const msg = result.message || "You've already posted similar content in the last 24 hours.";
         if (Platform.OS === "web") {
           alert(msg);
         } else {

@@ -204,8 +204,8 @@ Run: `npm run db:push` with production `DATABASE_URL`.
 |-----|----------|---------------|
 | EAS iOS build 4 | **P0** | You: `eas login` → `eas init` → `eas build --platform ios --profile production` |
 | `app.json` `projectId` | **P0** | Real Expo project UUID from `eas init` (currently `"lekker-chat"` placeholder) |
-| Mail compose/reply | P2 | Compose UI in `mail.tsx` + V3 `POST /api/v1/mobile/email/send` |
-| Server-backed Newsfeed | P2 | DB endpoint; replace AsyncStorage-only `feed.tsx` |
+| Mail compose/reply | ✅ P2 done | Compose + reply in `mail.tsx`; V3 `POST /api/v1/mobile/email/send` |
+| Server-backed Newsfeed | ✅ P2 done | `feed_posts` tables + `/api/feed/*`; client uses `lib/feed-api.ts` |
 | Push notifications | P3 | Expo push token registration + server send |
 | Connect API wiring | P3 | Expose `server/lekker-connect.ts` via routes |
 | iCloud `LEKKER-APP-CHAT` mirror | P1 | Stash local changes, `git pull` from `main` |

@@ -21,7 +21,7 @@ import {
   promptContentReport,
   unblockUserServer,
 } from "@/lib/safety-api";
-import { storage, FeedPost } from "@/lib/storage";
+import { fetchFeedPosts, type FeedPost } from "@/lib/feed-api";
 import { fetchDirectoryCached } from "@/lib/query-client";
 import {
   fetchUserProfile,
@@ -127,8 +127,7 @@ export default function UserProfileScreen() {
   }
 
   async function loadUserPosts() {
-    const allPosts = await storage.getFeedPosts();
-    const userPosts = allPosts.filter((p) => p.authorId === id);
+    const userPosts = await fetchFeedPosts({ authorId: id });
     setPosts(userPosts);
   }
 

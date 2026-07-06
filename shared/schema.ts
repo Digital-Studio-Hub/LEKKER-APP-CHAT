@@ -168,6 +168,58 @@ export const contentReports = pgTable("content_reports", {
   index("idx_content_reports_reporter").on(table.reporterId),
 ]);
 
+export const feedPosts = pgTable("feed_posts", {
+  id: varchar("id", { length: 36 })
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  authorId: varchar("author_id", { length: 36 }).notNull(),
+  content: text("content").notNull(),
+  mediaUrl: text("media_url"),
+  contentHash: varchar("content_hash", { length: 64 }).notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("idx_feed_posts_created").on(table.createdAt),
+  index("idx_feed_posts_author").on(table.authorId),
+  index("idx_feed_posts_author_hash").on(table.authorId, table.contentHash),
+]);
+
+export const feedLikes = pgTable("feed_likes", {
+  id: varchar("id", { length: 36 })
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  postId: varchar("post_id", { length: 36 }).notNull(),
+  userId: varchar("user_id", { length: 36 }).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("idx_feed_likes_unique").on(table.postId, table.userId),
+  index("idx_feed_likes_post").on(table.postId),
+]);
+
+export const feedComments = pgTable("feed_comments", {
+  id: varchar("id", { length: 36 })
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  postId: varchar("post_id", { length: 36 }).notNull(),
+  authorId: varchar("author_id", { length: 36 }).notNull(),
+  content: text("content").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("idx_feed_comments_post").on(table.postId),
+]);
+
+export const feedShares = pgTable("feed_shares", {
+  id: varchar("id", { length: 36 })
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  postId: varchar("post_id", { length: 36 }).notNull(),
+  userId: varchar("user_id", { length: 36 }).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("idx_feed_shares_unique").on(table.postId, table.userId),
+  index("idx_feed_shares_post").on(table.postId),
+]);
+
 export const chatMessages = pgTable("chat_messages", {
   id: varchar("id", { length: 36 })
     .primaryKey()
@@ -266,3 +318,7 @@ export type UserEmail = typeof userEmails.$inferSelect;
 export type Chat = typeof chats.$inferSelect;
 export type ChatParticipant = typeof chatParticipants.$inferSelect;
 export type ChatMessage = typeof chatMessages.$inferSelect;
+export type FeedPost = typeof feedPosts.$inferSelect;
+export type FeedLike = typeof feedLikes.$inferSelect;
+export type FeedComment = typeof feedComments.$inferSelect;
+export type FeedShare = typeof feedShares.$inferSelect;

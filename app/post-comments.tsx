@@ -13,7 +13,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/lib/auth-context";
-import { storage, FeedPost, FeedComment } from "@/lib/storage";
+import { fetchFeedPost, addFeedComment, type FeedPost } from "@/lib/feed-api";
 
 function formatTimeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -37,8 +37,8 @@ export default function PostCommentsScreen() {
   }, [postId]);
 
   async function loadPost() {
-    const posts = await storage.getFeedPosts();
-    const found = posts.find((p) => p.id === postId);
+    if (!postId) return;
+    const found = await fetchFeedPost(postId);
     if (found) setPost(found);
   }
 
@@ -46,7 +46,7 @@ export default function PostCommentsScreen() {
     if (!commentText.trim() || !user || !postId) return;
 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    await storage.addComment(postId, user.id, user.displayName, commentText.trim());
+    await addFeedComment(postId, commentText.trim());
     setCommentText("");
     await loadPost();
   }
