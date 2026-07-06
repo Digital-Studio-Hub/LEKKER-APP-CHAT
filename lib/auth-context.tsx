@@ -4,6 +4,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as SecureStore from "expo-secure-store";
 import { getApiUrl } from "@/lib/query-client";
 import { getAuthToken, setAuthToken } from "@/lib/auth-token";
+import { registerDevicePushToken, unregisterDevicePushToken } from "@/lib/notifications";
 
 const TOKEN_KEY = "lekker_auth_token";
 const USER_KEY = "lekker_auth_user";
@@ -114,6 +115,11 @@ function enrichUser(user: AuthUser): AuthUser {
   };
 }
 
+function syncPushRegistration(user: AuthUser | null) {
+  if (!user?.notificationsEnabled) return;
+  void registerDevicePushToken();
+}
+
 async function storeToken(token: string) {
   setAuthToken(token);
   await secureSetItem(TOKEN_KEY, token);
@@ -179,6 +185,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const enriched = enrichUser(data.user);
           setUser(enriched);
           await storeUser(enriched);
+          syncPushRegistration(enriched);
         } else if (res.status === 401) {
           await clearStorage();
           setUser(null);
@@ -213,6 +220,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const enriched = enrichUser(body.user);
     await storeUser(enriched);
     setUser(enriched);
+    syncPushRegistration(enriched);
     return { success: true };
   }
 
@@ -236,6 +244,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const enriched = enrichUser(body.user);
     await storeUser(enriched);
     setUser(enriched);
+    syncPushRegistration(enriched);
     return { success: true };
   }
 
@@ -257,6 +266,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const enriched = enrichUser(body.user);
     await storeUser(enriched);
     setUser(enriched);
+    syncPushRegistration(enriched);
     return { success: true };
   }
 
@@ -322,6 +332,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }).catch(() => {});
       }
     } finally {
+      await unregisterDevicePushToken();
       await clearStorage();
       setUser(null);
     }

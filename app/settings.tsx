@@ -22,7 +22,7 @@ import * as ImagePicker from "expo-image-picker";
 import Colors from "@/constants/colors";
 import { fontScale } from "@/lib/responsive";
 import { useAuth } from "@/lib/auth-context";
-import { requestNotificationPermissions, areNotificationsEnabled, disableNotifications, canAskForNotifications } from "@/lib/notifications";
+import { requestNotificationPermissions, areNotificationsEnabled, disableNotifications, canAskForNotifications, registerDevicePushToken } from "@/lib/notifications";
 import { requestLocationPermissions, isLocationEnabled, getLastLocation, disableLocation, UserLocation } from "@/lib/location";
 import { fetchBlockedUsers, unblockUserServer, type BlockedUserRow } from "@/lib/safety-api";
 import { ABUSE_CONTACT_EMAIL, COMMUNITY_GUIDELINES_URL, PRIVACY_POLICY_URL } from "@/constants/safety";
@@ -950,6 +950,7 @@ export default function SettingsScreen() {
                     }
                     const granted = await requestNotificationPermissions();
                     setNotificationsOn(granted);
+                    if (granted) await registerDevicePushToken();
                     await updateProfile({ notificationsEnabled: granted });
                     if (!granted) {
                       Alert.alert("Notifications Disabled", "Please enable notifications in your device settings to receive message alerts.",

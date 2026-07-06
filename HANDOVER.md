@@ -4,8 +4,8 @@
 **Prepared by:** Grok (Digital Studio Hub agent session)  
 **Repo:** `Digital-Studio-Hub/LEKKER-APP-CHAT`  
 **Canonical build path:** `~/Projects/LEKKER-APP-CHAT`  
-**Latest commit:** `979ef25` — *Update API URL in build configuration* (Replit)  
-**Synergy commit:** `e6da2c4` — *feat: ecosystem synergy — WhatsApp OTP, role-based tabs, mail SSO*
+**Latest commit:** P3 — *push notifications + Connect API routes*  
+**Prior:** `049b5ab` (P2 feed + mail compose), `979ef25` (Replit API URL), `e6da2c4` (synergy)
 
 ---
 
@@ -61,15 +61,47 @@ This build is **iOS build 4** (`app.json` → `buildNumber: "4"`). It supersedes
 | Mail status/threads | `lib/mail-api.ts` | `GET /api/lekker/email/*` |
 | Directory | `directory.tsx` | `GET /api/directory` → V3 lekkerpreneurs API |
 
-### Phase 4 — Native mail inbox ✅ (read-only)
+### Phase 4 — Native mail inbox ✅
 
 - `mail.tsx`: thread list + thread detail (pull-to-refresh)
-- **Not built:** compose/reply (`POST /api/v1/mobile/email/send` on V3)
+- Compose/reply via `POST /api/lekker/email/send` → V3 mobile email send (P2)
 
 ### Phase 5 — Documentation ✅
 
 - Knowledge hub: `user knowledge/infra/LEKKER-CHAT.md`, `KNOWLEDGE_HUB.md` (iCloud, 2026-07-05)
 - This handover doc
+
+---
+
+## P3 — Push notifications + Connect API ✅
+
+### Push notifications
+
+| Item | Location |
+|------|----------|
+| Schema | `push_tokens` in `shared/schema.ts` |
+| Register / unregister | `POST` / `DELETE` `/api/push/register` |
+| Server send on new message | `server/push.ts` → Expo Push API |
+| Client token + registration | `lib/notifications.ts`, `lib/push-api.ts` |
+| Auto-register after login | `lib/auth-context.tsx` (when `notificationsEnabled`) |
+| Settings toggle | `app/settings.tsx` |
+
+**Note:** Expo push tokens require a real EAS `projectId` in `app.json` (`eas init`). Until then, registration is skipped with a console warning.
+
+### Connect API (lekker.network Standard Connector)
+
+| Route | Proxies to |
+|-------|------------|
+| `GET /api/connect/feed` | `getFeed()` |
+| `POST /api/connect/contacts` | `submitContactToLekker()` |
+| `GET /api/connect/products/search` | `searchProducts()` |
+| `POST /api/connect/orders` | `submitOrder()` |
+| `POST /api/connect/checkout` | `createCheckout()` |
+| `POST /api/connect/shipping/quote` | `getShippingQuote()` |
+| `GET /api/connect/gift-cards/validate` | `validateGiftCard()` |
+| `POST /api/connect/portal/*` | Portal OTP + `GET /api/connect/portal/me` |
+
+Client helpers: `lib/connect-api.ts`. Requires Replit secrets `LEKKER_WORKSPACE_ID` + `LEKKER_TOKEN`.
 
 ---
 
@@ -144,6 +176,7 @@ eas submit --platform ios
 - `LEKKER_NETWORK_API_KEY` (matches V3 `MOBILE_API_KEY`)
 - `TWILIO_WHATSAPP_FROM`, `TWILIO_CONTENT_SID`, Twilio creds (WhatsApp OTP)
 - OpenRouter / object storage vars per `replit.md`
+- `LEKKER_WORKSPACE_ID` + `LEKKER_TOKEN` (Connect API — optional for Browse/marketplace)
 
 **Smoke test after deploy:**
 
@@ -154,6 +187,8 @@ eas submit --platform ios
 5. Lekkerpreneur + mail: Mail tab shows inbox threads
 6. Start chat from directory
 7. Report/block still works (build 3 compliance)
+8. Push: enable notifications in Settings → send test message from another account
+9. Connect API (if env set): `GET /api/connect/feed` returns workspace feed
 
 ---
 
@@ -175,8 +210,14 @@ See `APP_STORE_COMPLIANCE.md` for UGC/safety copy (still valid).
 
 ```sql
 -- users table
-password_hash     -- now nullable (phone-only users)
+password_hash           -- nullable (phone-only users)
 workspace_email_active  -- boolean, default false
+
+-- P2 feed
+feed_posts, feed_likes, feed_comments, feed_shares
+
+-- P3 push
+push_tokens (user_id, expo_push_token, platform)
 ```
 
 Run: `npm run db:push` with production `DATABASE_URL`.
@@ -206,8 +247,8 @@ Run: `npm run db:push` with production `DATABASE_URL`.
 | `app.json` `projectId` | **P0** | Real Expo project UUID from `eas init` (currently `"lekker-chat"` placeholder) |
 | Mail compose/reply | ✅ P2 done | Compose + reply in `mail.tsx`; V3 `POST /api/v1/mobile/email/send` |
 | Server-backed Newsfeed | ✅ P2 done | `feed_posts` tables + `/api/feed/*`; client uses `lib/feed-api.ts` |
-| Push notifications | P3 | Expo push token registration + server send |
-| Connect API wiring | P3 | Expose `server/lekker-connect.ts` via routes |
+| Push notifications | ✅ P3 done | `push_tokens` + `/api/push/register`; Expo send on new chat messages |
+| Connect API wiring | ✅ P3 done | `/api/connect/*` proxies `server/lekker-connect.ts`; client `lib/connect-api.ts` |
 | iCloud `LEKKER-APP-CHAT` mirror | P1 | Stash local changes, `git pull` from `main` |
 
 ---

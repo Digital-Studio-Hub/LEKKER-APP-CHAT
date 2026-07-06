@@ -17,6 +17,10 @@ if (!WID || !TOKEN) {
   console.warn('LEKKER_WORKSPACE_ID or LEKKER_TOKEN not set - Connect API calls will fail');
 }
 
+export function isConnectConfigured(): boolean {
+  return Boolean(WID && TOKEN);
+}
+
 const BASE = `https://lekker.network/api/connect/${WID}`;
 
 async function call(path: string, method = 'GET', body?: any, extraHeaders?: any) {
