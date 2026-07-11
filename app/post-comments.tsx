@@ -16,6 +16,8 @@ import Colors from "@/constants/colors";
 import { useAuth } from "@/lib/auth-context";
 import { fetchFeedPost, addFeedComment, type FeedPost } from "@/lib/feed-api";
 import { containsBlockedContent, CONTENT_FILTER_MESSAGE } from "@shared/content-filter";
+import { useAgeGate } from "@/lib/age-gate-context";
+import { SocialAccessBlocked } from "@/components/SocialAccessBlocked";
 
 function formatTimeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();

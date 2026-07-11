@@ -2,6 +2,7 @@ import { createHash } from "crypto";
 import { and, desc, eq, gt, inArray, or, sql } from "drizzle-orm";
 import { db } from "./storage";
 import { feedComments, feedLikes, feedPosts, feedShares, users } from "@shared/schema";
+import { isSocialMediaAllowed } from "../shared/age-gate";
 
 export type FeedPostDto = {
   id: string;
@@ -136,10 +137,35 @@ export async function listFeedPosts(opts: {
     .from(feedPosts)
     .where(and(...conditions))
     .orderBy(desc(feedPosts.createdAt))
-    .limit(limit)
+    .limit(limit * 2)
     .offset(offset);
 
-  return hydratePosts(rows);
+  const authorIds = [...new Set(rows.map((r) => r.authorId))];
+  const authorRows = authorIds.length
+    ? await db
+        .select({
+          id: users.id,
+          ageRangeLowerBound: users.ageRangeLowerBound,
+          ageRangeUpperBound: users.ageRangeUpperBound,
+          dateOfBirth: users.dateOfBirth,
+          socialMediaAllowed: users.socialMediaAllowed,
+        })
+        .from(users)
+        .where(inArray(users.id, authorIds))
+    : [];
+  const allowedAuthors = new Set(
+    authorRows
+      .filter((a) => isSocialMediaAllowed({
+        lowerBound: a.ageRangeLowerBound,
+        upperBound: a.ageRangeUpperBound,
+        dateOfBirth: a.dateOfBirth,
+        socialMediaAllowed: a.socialMediaAllowed,
+      }))
+      .map((a) => a.id),
+  );
+
+  const filtered = rows.filter((r) => allowedAuthors.has(r.authorId)).slice(0, limit);
+  return hydratePosts(filtered);
 }
 
 export async function getFeedPostById(postId: string): Promise<FeedPostDto | null> {

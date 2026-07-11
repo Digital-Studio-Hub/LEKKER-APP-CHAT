@@ -19,12 +19,19 @@ import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/lib/auth-context";
+import { useAgeGate } from "@/lib/age-gate-context";
+import { SocialAccessBlocked } from "@/components/SocialAccessBlocked";
 import { createFeedPost } from "@/lib/feed-api";
 import { containsBlockedContent, CONTENT_FILTER_MESSAGE } from "@shared/content-filter";
 
 export default function NewPostScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
+  const { socialMediaAllowed } = useAgeGate();
+
+  if (!socialMediaAllowed) {
+    return <SocialAccessBlocked feature="Creating posts" />;
+  }
   const [content, setContent] = useState("");
   const [mediaUri, setMediaUri] = useState<string | null>(null);
   const [mediaType, setMediaType] = useState<"image" | "video" | null>(null);

@@ -43,6 +43,12 @@ export const users = pgTable("users", {
   locationCity: varchar("location_city", { length: 100 }),
   locationRegion: varchar("location_region", { length: 100 }),
   profileImageUpdatedAt: timestamp("profile_image_updated_at"),
+  dateOfBirth: text("date_of_birth"),
+  ageRangeLowerBound: integer("age_range_lower_bound"),
+  ageRangeUpperBound: integer("age_range_upper_bound"),
+  ageRangeSource: varchar("age_range_source", { length: 20 }),
+  ageRangeDeclaredAt: timestamp("age_range_declared_at"),
+  socialMediaAllowed: boolean("social_media_allowed"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => [

@@ -51,6 +51,8 @@ import {
 } from "./feed";
 import { registerPushToken, unregisterPushToken, notifyChatMessage } from "./push";
 import { containsBlockedContent, CONTENT_FILTER_MESSAGE } from "./content-filter";
+import { isSocialMediaAllowed, type AgeRangeSource } from "../shared/age-gate";
+import { requireSocialMediaAccess } from "./age-gate";
 import {
   isConnectConfigured,
   submitContactToLekker,
@@ -2352,7 +2354,82 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/feed", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  app.post("/api/user/age-range", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const {
+        lowerBound,
+        upperBound,
+        dateOfBirth,
+        source,
+      } = req.body || {};
+
+      const parsedLower = lowerBound === null || lowerBound === undefined
+        ? null
+        : Number(lowerBound);
+      const parsedUpper = upperBound === null || upperBound === undefined
+        ? null
+        : Number(upperBound);
+
+      if (parsedLower != null && Number.isNaN(parsedLower)) {
+        return res.status(400).json({ message: "Invalid lowerBound" });
+      }
+      if (parsedUpper != null && Number.isNaN(parsedUpper)) {
+        return res.status(400).json({ message: "Invalid upperBound" });
+      }
+
+      const allowedSources: AgeRangeSource[] = ["apple", "google", "dob", "unknown"];
+      const ageSource: AgeRangeSource = allowedSources.includes(source)
+        ? source
+        : dateOfBirth
+          ? "dob"
+          : "unknown";
+
+      const socialMediaAllowed = isSocialMediaAllowed({
+        lowerBound: parsedLower,
+        upperBound: parsedUpper,
+        dateOfBirth: typeof dateOfBirth === "string" ? dateOfBirth : null,
+      });
+
+      const updated = await storage.updateUser(req.user!.userId, {
+        ageRangeLowerBound: parsedLower,
+        ageRangeUpperBound: parsedUpper,
+        dateOfBirth: typeof dateOfBirth === "string" ? dateOfBirth : undefined,
+        ageRangeSource: ageSource,
+        ageRangeDeclaredAt: new Date(),
+        socialMediaAllowed,
+      });
+
+      if (!updated) return res.status(404).json({ message: "User not found" });
+      res.json({
+        socialMediaAllowed,
+        user: sanitizeUser(updated),
+      });
+    } catch (e: any) {
+      res.status(500).json({ message: e?.message || "Failed to save age range" });
+    }
+  });
+
+  app.get("/api/user/social-access", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const user = await storage.getUser(req.user!.userId);
+      if (!user) return res.status(404).json({ message: "User not found" });
+      const socialMediaAllowed = isSocialMediaAllowed({
+        lowerBound: user.ageRangeLowerBound,
+        upperBound: user.ageRangeUpperBound,
+        dateOfBirth: user.dateOfBirth,
+        socialMediaAllowed: user.socialMediaAllowed,
+      });
+      res.json({
+        socialMediaAllowed,
+        ageRangeDeclared: !!user.ageRangeDeclaredAt,
+        needsAgeDeclaration: !user.ageRangeDeclaredAt && user.socialMediaAllowed == null,
+      });
+    } catch {
+      res.status(500).json({ message: "Failed to check social access" });
+    }
+  });
+
+  app.get("/api/feed", authMiddleware, requireSocialMediaAccess, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const page = Math.max(1, parseInt(String(req.query.page || "1"), 10) || 1);
       const authorId = typeof req.query.authorId === "string" ? req.query.authorId : undefined;
@@ -2367,7 +2444,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/feed/:id", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  app.get("/api/feed/:id", authMiddleware, requireSocialMediaAccess, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const post = await getFeedPostById(req.params.id);
       if (!post) return res.status(404).json({ message: "Post not found" });
@@ -2377,7 +2454,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/feed", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  app.post("/api/feed", authMiddleware, requireSocialMediaAccess, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { content, mediaUrl } = req.body || {};
       if (!String(content || "").trim() && !mediaUrl) {
@@ -2403,7 +2480,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/feed/:id/like", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  app.post("/api/feed/:id/like", authMiddleware, requireSocialMediaAccess, async (req: AuthenticatedRequest, res: Response) => {
     try {
       await toggleFeedLike(req.params.id, req.user!.userId);
       res.json({ ok: true });
@@ -2412,7 +2489,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/feed/:id/share", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  app.post("/api/feed/:id/share", authMiddleware, requireSocialMediaAccess, async (req: AuthenticatedRequest, res: Response) => {
     try {
       await addFeedShare(req.params.id, req.user!.userId);
       res.json({ ok: true });
@@ -2421,7 +2498,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/feed/:id/comments", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  app.post("/api/feed/:id/comments", authMiddleware, requireSocialMediaAccess, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const content = String(req.body?.content || "").trim();
       if (!content) return res.status(400).json({ message: "Comment is required" });

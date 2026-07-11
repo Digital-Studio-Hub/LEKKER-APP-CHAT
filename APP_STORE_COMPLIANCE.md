@@ -1,6 +1,6 @@
 # Lekker Chat — App Store Compliance (Resubmission)
 
-Last updated: 2026-07-06 · iOS build **5** (compliance pass + synergy)
+Last updated: 2026-07-11 · iOS build **5** (compliance pass + age gating)
 
 Maps Apple rejection letter (Submission `e6de2131`, reviewed 2026-05-29, v1.0 build 1) to fixes in this build.
 
@@ -57,7 +57,13 @@ Apple Review test account (no WhatsApp — set Replit secrets, then deploy):
 
 Optional pre-seed: `npx tsx --env-file=.env scripts/seed-apple-reviewer.ts`
 
-Screen recordings attached: login + name entry, report/block, account deletion.
+AGE GATING (social media under 13):
+- Newsfeed and Lekker Social require age verification on first use.
+- iOS 26+: Declared Age Range API via device verification (entitlement `com.apple.developer.declared-age-range`).
+- Android / fallback: date-of-birth entry; users under 13 cannot access feed or social browse.
+- Server enforces `requireSocialMediaAccess` on all feed endpoints; feed authors without access are filtered out.
+
+Screen recordings attached: login + name entry, report/block, account deletion, age gate.
 
 Lekker Chat is an independent app by Digital Studio Hub / Lekker Network.
 It is not affiliated with, endorsed by, or sponsored by Apple Inc.

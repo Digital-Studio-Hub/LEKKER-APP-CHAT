@@ -15,7 +15,9 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { fontScale } from "@/lib/responsive";
-import { ECOSYSTEM_SHORTCUTS, GOOGLE_SEARCH_URL } from "@/constants/ecosystem";
+import { ECOSYSTEM_SHORTCUTS, GOOGLE_SEARCH_URL, LEKKER_SOCIAL_URL } from "@/constants/ecosystem";
+import { useAgeGate } from "@/lib/age-gate-context";
+import { Alert } from "react-native";
 
 function normaliseUrl(input: string): string {
   const trimmed = input.trim();
@@ -27,14 +29,26 @@ function normaliseUrl(input: string): string {
 
 export default function BrowseScreen() {
   const insets = useSafeAreaInsets();
+  const { socialMediaAllowed } = useAgeGate();
   const webTopInset = Platform.OS === "web" ? 67 : 0;
   const [urlInput, setUrlInput] = useState("");
   const bottomPad = Platform.OS === "web" ? 84 : 49 + insets.bottom + 16;
 
   function openUrl(url: string, title: string) {
+    if (url === LEKKER_SOCIAL_URL && !socialMediaAllowed) {
+      Alert.alert(
+        "Social access unavailable",
+        "Lekker Social is not available for users under 13.",
+      );
+      return;
+    }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     router.push({ pathname: "/in-app-browser", params: { url, title } });
   }
+
+  const shortcuts = ECOSYSTEM_SHORTCUTS.filter(
+    (s) => s.id !== "social" || socialMediaAllowed,
+  );
 
   function handleGo() {
     const url = normaliseUrl(urlInput);
@@ -75,7 +89,7 @@ export default function BrowseScreen() {
 
         <Text style={styles.sectionLabel}>Shortcuts</Text>
         <View style={styles.shortcuts}>
-          {ECOSYSTEM_SHORTCUTS.map((shortcut) => (
+          {shortcuts.map((shortcut) => (
             <Pressable
               key={shortcut.id}
               style={({ pressed }) => [styles.shortcutCard, pressed && { opacity: 0.85 }]}

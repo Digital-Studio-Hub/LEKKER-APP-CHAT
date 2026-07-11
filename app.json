@@ -19,6 +19,9 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.lekker.chat",
       "buildNumber": "5",
+      "entitlements": {
+        "com.apple.developer.declared-age-range": true
+      },
       "infoPlist": {
         "UIRequiresFullScreen": false,
         "NSCameraUsageDescription": "Lekker Chat uses your camera to take photos and share them in conversations.",

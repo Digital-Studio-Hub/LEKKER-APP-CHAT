@@ -5,14 +5,17 @@ import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/lib/auth-context";
+import { useAgeGate } from "@/lib/age-gate-context";
 
 export default function TabLayout() {
   const isWeb = Platform.OS === "web";
   const isIOS = Platform.OS === "ios";
   const { user } = useAuth();
+  const { socialMediaAllowed } = useAgeGate();
 
   const isLekkerpreneur = !!user?.isVerifiedLekkerpreneur;
   const showMail = isLekkerpreneur && !!user?.workspaceEmailActive;
+  const showFeed = socialMediaAllowed;
 
   return (
     <Tabs
@@ -71,6 +74,7 @@ export default function TabLayout() {
         name="feed"
         options={{
           title: "Newsfeed",
+          href: showFeed ? undefined : null,
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="layers-outline" size={size} color={color} />
           ),

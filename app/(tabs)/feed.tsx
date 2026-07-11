@@ -17,6 +17,8 @@ import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { fontScale } from "@/lib/responsive";
 import { useAuth } from "@/lib/auth-context";
+import { useAgeGate } from "@/lib/age-gate-context";
+import { SocialAccessBlocked } from "@/components/SocialAccessBlocked";
 import {
   fetchFeedPosts,
   toggleFeedLike,
@@ -187,6 +189,11 @@ const PAGE_SIZE = 10;
 export default function FeedScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
+  const { socialMediaAllowed } = useAgeGate();
+
+  if (!socialMediaAllowed) {
+    return <SocialAccessBlocked feature="The Newsfeed" />;
+  }
   const [allPosts, setAllPosts] = useState<FeedPost[]>([]);
   const [visiblePosts, setVisiblePosts] = useState<FeedPost[]>([]);
   const [refreshing, setRefreshing] = useState(false);
