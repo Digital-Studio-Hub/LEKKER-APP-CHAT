@@ -68,6 +68,12 @@ import {
 } from "./lekker-connect";
 import { normaliseMobile, phoneToPlaceholderEmail, phoneToUsername } from "../shared/mobile-utils";
 import type { User } from "@shared/schema";
+import { sendPushNotifications } from "./push-sender";
+import {
+  submitContactToLekker, getFeed as getConnectFeed, searchProducts,
+  submitOrder, createCheckout, getShippingQuote, validateGiftCard,
+  requestPortalOtp, verifyPortalOtp, getPortalMe,
+} from "./lekker-connect";
 
 function rejectBlockedContent(res: Response, ...texts: Array<string | null | undefined>): boolean {
   for (const text of texts) {
@@ -1415,12 +1421,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
       void notifyChatMessage(chatId, userId, message);
 
       const participants = await storage.getChatParticipants(chatId);
+      const recipientIds: string[] = [];
       for (const p of participants) {
         if (p.userId !== userId) {
+          recipientIds.push(p.userId);
           const otherUser = await storage.getUser(p.userId);
           if (otherUser?.autoReplyEnabled && otherUser.autoReplyMessage) {
             const autoReply = await storage.sendMessage(chatId, p.userId, otherUser.autoReplyMessage, "text");
             void notifyChatMessage(chatId, p.userId, autoReply);
+          }
+        }
+      }
+
+      if (recipientIds.length > 0) {
+        const notifiableIds = await Promise.all(
+          recipientIds.map(async (rid) => {
+            const u = await storage.getUser(rid);
+            return u?.notificationsEnabled ? rid : null;
+          }),
+        ).then((ids) => ids.filter(Boolean) as string[]);
+
+        if (notifiableIds.length > 0) {
+          const tokens = await storage.getPushTokensForUsers(notifiableIds);
+          if (tokens.length > 0) {
+            const senderName = `${sender!.firstName} ${sender!.lastName}`.trim();
+            const preview = msgType !== "text"
+              ? `Sent a ${msgType}`
+              : (content || "").slice(0, 60);
+            sendPushNotifications(
+              tokens.map((t) => t.token),
+              senderName,
+              preview,
+              { chatId, type: "message" },
+            ).catch(() => {});
           }
         }
       }
@@ -2515,17 +2548,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: "Failed to add comment" });
     }
   });
-
   app.post("/api/push/register", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { expoPushToken, platform } = req.body || {};
-      if (!expoPushToken || typeof expoPushToken !== "string") {
-        return res.status(400).json({ message: "expoPushToken is required" });
+      const { token, deviceId } = req.body || {};
+      if (!token || typeof token !== "string") {
+        return res.status(400).json({ message: "token is required" });
       }
-      if (!expoPushToken.startsWith("ExponentPushToken") && !expoPushToken.startsWith("ExpoPushToken")) {
-        return res.status(400).json({ message: "Invalid Expo push token" });
-      }
-      await registerPushToken(req.user!.userId, expoPushToken, platform);
+      await storage.savePushToken(req.user!.userId, token, deviceId);
       res.json({ ok: true });
     } catch (e) {
       console.error("Push register error:", e);
@@ -2535,8 +2564,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete("/api/push/register", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const expoPushToken = typeof req.body?.expoPushToken === "string" ? req.body.expoPushToken : undefined;
-      await unregisterPushToken(req.user!.userId, expoPushToken);
+      const { token } = req.body || {};
+      if (!token || typeof token !== "string") {
+        return res.status(400).json({ message: "token is required" });
+      }
+      await storage.deletePushToken(token, req.user!.userId);
       res.json({ ok: true });
     } catch (e) {
       console.error("Push unregister error:", e);
@@ -2544,143 +2576,109 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  function connectUnavailable(res: Response) {
-    return res.status(503).json({
-      message: "Connect API not configured. Set LEKKER_WORKSPACE_ID and LEKKER_TOKEN.",
-    });
+  /** Connect API proxy — authenticated pass-through to lekker.network/api/connect */
+  const connectAvailable = !!(process.env.LEKKER_WORKSPACE_ID && process.env.LEKKER_TOKEN);
+
+  function connectGuard(_req: Request, res: Response, next: () => void) {
+    if (!connectAvailable) {
+      return res.status(503).json({ message: "Connect API not configured (LEKKER_WORKSPACE_ID / LEKKER_TOKEN missing)" });
+    }
+    next();
   }
 
-  app.get("/api/connect/feed", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    if (!isConnectConfigured()) return connectUnavailable(res);
+  app.get("/api/connect/feed", authMiddleware, connectGuard, async (req: Request, res: Response) => {
     try {
-      const params: Record<string, string> = {};
-      for (const [key, value] of Object.entries(req.query)) {
-        if (typeof value === "string") params[key] = value;
-      }
+      const params = req.query as Record<string, string>;
       const data = await getConnectFeed(params);
       res.json(data);
     } catch (e: any) {
-      console.error("Connect feed error:", e);
-      res.status(502).json({ message: e?.message || "Connect feed failed" });
+      res.status(502).json({ message: e.message || "Connect feed error" });
     }
   });
 
-  app.post("/api/connect/contacts", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    if (!isConnectConfigured()) return connectUnavailable(res);
+  app.post("/api/connect/contacts", authMiddleware, connectGuard, async (req: Request, res: Response) => {
     try {
-      const { name, email, phone, message, sourceUrl } = req.body || {};
-      if (!name || typeof name !== "string") {
-        return res.status(400).json({ message: "name is required" });
-      }
-      const data = await submitContactToLekker({ name, email, phone, message, sourceUrl });
+      const data = await submitContactToLekker(req.body);
       res.json(data);
     } catch (e: any) {
-      console.error("Connect contact error:", e);
-      res.status(502).json({ message: e?.message || "Contact submission failed" });
+      res.status(502).json({ message: e.message || "Connect contacts error" });
     }
   });
 
-  app.get("/api/connect/products/search", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    if (!isConnectConfigured()) return connectUnavailable(res);
+  app.get("/api/connect/products/search", authMiddleware, connectGuard, async (req: Request, res: Response) => {
     try {
-      const params: Record<string, string> = {};
-      for (const [key, value] of Object.entries(req.query)) {
-        if (typeof value === "string") params[key] = value;
-      }
+      const params = req.query as Record<string, string>;
       const data = await searchProducts(params);
       res.json(data);
     } catch (e: any) {
-      console.error("Connect product search error:", e);
-      res.status(502).json({ message: e?.message || "Product search failed" });
+      res.status(502).json({ message: e.message || "Connect products error" });
     }
   });
 
-  app.post("/api/connect/orders", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    if (!isConnectConfigured()) return connectUnavailable(res);
+  app.post("/api/connect/orders", authMiddleware, connectGuard, async (req: Request, res: Response) => {
     try {
       const data = await submitOrder(req.body);
       res.json(data);
     } catch (e: any) {
-      console.error("Connect order error:", e);
-      res.status(502).json({ message: e?.message || "Order submission failed" });
+      res.status(502).json({ message: e.message || "Connect orders error" });
     }
   });
 
-  app.post("/api/connect/checkout", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    if (!isConnectConfigured()) return connectUnavailable(res);
+  app.post("/api/connect/checkout", authMiddleware, connectGuard, async (req: Request, res: Response) => {
     try {
       const data = await createCheckout(req.body);
       res.json(data);
     } catch (e: any) {
-      console.error("Connect checkout error:", e);
-      res.status(502).json({ message: e?.message || "Checkout failed" });
+      res.status(502).json({ message: e.message || "Connect checkout error" });
     }
   });
 
-  app.post("/api/connect/shipping/quote", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    if (!isConnectConfigured()) return connectUnavailable(res);
+  app.post("/api/connect/shipping/quote", authMiddleware, connectGuard, async (req: Request, res: Response) => {
     try {
       const data = await getShippingQuote(req.body);
       res.json(data);
     } catch (e: any) {
-      console.error("Connect shipping quote error:", e);
-      res.status(502).json({ message: e?.message || "Shipping quote failed" });
+      res.status(502).json({ message: e.message || "Connect shipping error" });
     }
   });
 
-  app.get("/api/connect/gift-cards/validate", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    if (!isConnectConfigured()) return connectUnavailable(res);
+  app.get("/api/connect/gift-cards/validate", authMiddleware, connectGuard, async (req: Request, res: Response) => {
     try {
       const code = String(req.query.code || "");
       if (!code) return res.status(400).json({ message: "code is required" });
       const data = await validateGiftCard(code);
       res.json(data);
     } catch (e: any) {
-      console.error("Connect gift card error:", e);
-      res.status(502).json({ message: e?.message || "Gift card validation failed" });
+      res.status(502).json({ message: e.message || "Connect gift card error" });
     }
   });
 
-  app.post("/api/connect/portal/request-otp", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    if (!isConnectConfigured()) return connectUnavailable(res);
+  app.post("/api/connect/portal/request-otp", authMiddleware, connectGuard, async (req: Request, res: Response) => {
     try {
-      const { email, phone, channel } = req.body || {};
-      if (!channel || (channel !== "email" && channel !== "whatsapp")) {
-        return res.status(400).json({ message: "channel must be email or whatsapp" });
-      }
-      const data = await requestPortalOtp({ email, phone, channel });
+      const data = await requestPortalOtp(req.body);
       res.json(data);
     } catch (e: any) {
-      console.error("Connect portal OTP request error:", e);
-      res.status(502).json({ message: e?.message || "Portal OTP request failed" });
+      res.status(502).json({ message: e.message || "Connect portal error" });
     }
   });
 
-  app.post("/api/connect/portal/verify-otp", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    if (!isConnectConfigured()) return connectUnavailable(res);
+  app.post("/api/connect/portal/verify-otp", authMiddleware, connectGuard, async (req: Request, res: Response) => {
     try {
-      const { email, phone, code } = req.body || {};
-      if (!code) return res.status(400).json({ message: "code is required" });
-      const data = await verifyPortalOtp({ email, phone, code });
+      const data = await verifyPortalOtp(req.body);
       res.json(data);
     } catch (e: any) {
-      console.error("Connect portal OTP verify error:", e);
-      res.status(502).json({ message: e?.message || "Portal OTP verification failed" });
+      res.status(502).json({ message: e.message || "Connect portal verify error" });
     }
   });
 
-  app.get("/api/connect/portal/me", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    if (!isConnectConfigured()) return connectUnavailable(res);
+  app.get("/api/connect/portal/me", authMiddleware, connectGuard, async (req: Request, res: Response) => {
     try {
-      const sessionToken = req.headers["x-portal-token"];
-      if (!sessionToken || typeof sessionToken !== "string") {
-        return res.status(400).json({ message: "X-Portal-Token header is required" });
-      }
+      const sessionToken = String(req.query.sessionToken || "");
+      if (!sessionToken) return res.status(400).json({ message: "sessionToken is required" });
       const data = await getPortalMe(sessionToken);
       res.json(data);
     } catch (e: any) {
-      console.error("Connect portal me error:", e);
-      res.status(502).json({ message: e?.message || "Portal session failed" });
+      res.status(502).json({ message: e.message || "Connect portal me error" });
     }
   });
 

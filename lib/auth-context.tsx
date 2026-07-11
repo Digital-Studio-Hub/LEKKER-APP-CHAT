@@ -4,7 +4,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as SecureStore from "expo-secure-store";
 import { getApiUrl } from "@/lib/query-client";
 import { getAuthToken, setAuthToken } from "@/lib/auth-token";
-import { registerDevicePushToken, unregisterDevicePushToken } from "@/lib/notifications";
+import { getExpoPushToken, clearStoredPushToken } from "@/lib/notifications";
+import { registerPushToken, unregisterPushToken } from "@/lib/push-api";
 
 const TOKEN_KEY = "lekker_auth_token";
 const USER_KEY = "lekker_auth_user";
@@ -115,11 +116,6 @@ function enrichUser(user: AuthUser): AuthUser {
   };
 }
 
-function syncPushRegistration(user: AuthUser | null) {
-  if (!user?.notificationsEnabled) return;
-  void registerDevicePushToken();
-}
-
 async function storeToken(token: string) {
   setAuthToken(token);
   await secureSetItem(TOKEN_KEY, token);
@@ -185,7 +181,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const enriched = enrichUser(data.user);
           setUser(enriched);
           await storeUser(enriched);
-          syncPushRegistration(enriched);
         } else if (res.status === 401) {
           await clearStorage();
           setUser(null);
@@ -220,8 +215,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const enriched = enrichUser(body.user);
     await storeUser(enriched);
     setUser(enriched);
-    syncPushRegistration(enriched);
     return { success: true };
+  }
+
+  async function maybeRegisterPush(user: AuthUser) {
+    if (!user.notificationsEnabled) return;
+    try {
+      const token = await getExpoPushToken();
+      if (token) await registerPushToken(token);
+    } catch {}
   }
 
   async function verifyWhatsApp(
@@ -244,7 +246,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const enriched = enrichUser(body.user);
     await storeUser(enriched);
     setUser(enriched);
-    syncPushRegistration(enriched);
+    maybeRegisterPush(enriched);
     return { success: true };
   }
 
@@ -266,7 +268,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const enriched = enrichUser(body.user);
     await storeUser(enriched);
     setUser(enriched);
-    syncPushRegistration(enriched);
+    maybeRegisterPush(enriched);
     return { success: true };
   }
 
@@ -323,6 +325,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function logout() {
     try {
+      const pushToken = await clearStoredPushToken();
+      if (pushToken) await unregisterPushToken(pushToken).catch(() => {});
+
       const baseUrl = getApiUrl();
       const token = getAuthToken();
       if (token) {
@@ -332,7 +337,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }).catch(() => {});
       }
     } finally {
-      await unregisterDevicePushToken();
       await clearStorage();
       setUser(null);
     }

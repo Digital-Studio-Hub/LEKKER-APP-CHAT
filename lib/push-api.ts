@@ -1,24 +1,38 @@
-import { apiRequest } from "@/lib/query-client";
+import { getApiUrl } from "@/lib/query-client";
+import { getAuthToken } from "@/lib/auth-token";
 
-export async function registerPushTokenOnServer(
-  expoPushToken: string,
-  platform?: string,
-): Promise<boolean> {
+export async function registerPushToken(token: string, deviceId?: string): Promise<void> {
+  const baseUrl = getApiUrl();
+  const authToken = getAuthToken();
+  if (!authToken || !token) return;
   try {
-    const res = await apiRequest("POST", "/api/push/register", {
-      expoPushToken,
-      platform,
+    await fetch(`${baseUrl}api/push/register`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({ token, deviceId }),
     });
-    return res.ok;
-  } catch {
-    return false;
+  } catch (e) {
+    console.warn("[Push] Failed to register token:", e);
   }
 }
 
-export async function unregisterPushTokenOnServer(expoPushToken?: string): Promise<void> {
+export async function unregisterPushToken(token: string): Promise<void> {
+  const baseUrl = getApiUrl();
+  const authToken = getAuthToken();
+  if (!authToken || !token) return;
   try {
-    await apiRequest("DELETE", "/api/push/register", expoPushToken ? { expoPushToken } : undefined);
-  } catch {
-    // ignore
+    await fetch(`${baseUrl}api/push/register`, {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({ token }),
+    });
+  } catch (e) {
+    console.warn("[Push] Failed to unregister token:", e);
   }
 }
