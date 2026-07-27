@@ -57,7 +57,9 @@
         "android.permission.READ_CONTACTS",
         "android.permission.VIBRATE",
         "android.permission.RECEIVE_BOOT_COMPLETED",
-        "android.permission.POST_NOTIFICATIONS"
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.WRITE_CONTACTS",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
       ],
       "adaptiveIcon": {
         "backgroundColor": "#0D0D0D",
@@ -75,7 +77,10 @@
               "host": "lekker.network"
             }
           ],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
       ]
     },
@@ -132,9 +137,13 @@
     "extra": {
       "privacyPolicyUrl": "https://lekker.network/privacy",
       "termsUrl": "https://lekker.network/terms",
+      "router": {
+        "origin": "https://replit.com/"
+      },
       "eas": {
-        "projectId": "lekker-chat"
+        "projectId": "385aa478-8c87-4480-b7b6-2ecb4addc68c"
       }
-    }
+    },
+    "owner": "digital-studio-hub"
   }
 }
