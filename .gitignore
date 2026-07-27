@@ -40,3 +40,4 @@ yarn-error.*
 
 .env
 google-play-service-account.json
+expo-token
