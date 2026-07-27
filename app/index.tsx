@@ -249,6 +249,8 @@ export default function LoginScreen() {
               <Text style={styles.subtitle}>How should we display your name in chats?</Text>
               <Text style={styles.label}>Display name</Text>
               <TextInput
+                // key forces remount so iOS drops the number-pad from the code step (2.1a)
+                key="login-display-name-step"
                 style={styles.input}
                 placeholder="Your name"
                 placeholderTextColor={Colors.textMuted}
@@ -256,7 +258,9 @@ export default function LoginScreen() {
                 onChangeText={(t) => { setDisplayName(t); setError(""); }}
                 autoCapitalize="words"
                 keyboardType="default"
+                inputMode="text"
                 textContentType="name"
+                autoCorrect
                 autoFocus
                 testID="login-display-name"
               />

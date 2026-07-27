@@ -115,7 +115,7 @@
       [
         "expo-contacts",
         {
-          "contactsPermission": "Lekker Chat needs access to your contacts so you can share them in conversations."
+          "contactsPermission": "Lekker Chat reads contacts on your device to help you find people. If you share a contact card in a chat, that contact's name and phone are uploaded to our servers and sent to the conversation. Your full address book is never uploaded."
         }
       ],
       [

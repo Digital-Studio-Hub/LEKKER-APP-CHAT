@@ -5,7 +5,10 @@ import * as Location from "expo-location";
 import * as Contacts from "expo-contacts";
 import { Audio } from "expo-av";
 import { ChatMessage } from "@/lib/storage";
-import { confirmContactShareUpload } from "@/lib/contacts-consent";
+import {
+  confirmContactShareUpload,
+  ensureContactsBookConsent,
+} from "@/lib/contacts-consent";
 
 function showPermissionDeniedAlert(feature: string) {
   Alert.alert(
@@ -147,6 +150,9 @@ export async function shareContact(): Promise<Partial<ChatMessage> | null> {
     Alert.alert("Not Available", "Contact sharing is not available on web.");
     return null;
   }
+  // App Store 5.1.2: in-app disclosure before reading contacts (same as New Chat)
+  const bookConsent = await ensureContactsBookConsent();
+  if (!bookConsent) return null;
   const perm = await Contacts.requestPermissionsAsync();
   if (perm.status !== "granted") {
     showPermissionDeniedAlert("Contacts");
