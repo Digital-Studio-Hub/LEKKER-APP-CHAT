@@ -316,9 +316,28 @@ function resolveWorkspace(entry: LekkerNetworkEntry): LekkerWorkspace {
   };
 }
 
+/** Split "Jane Doe" → first/last for chat profile fields */
+export function splitPersonName(full?: string | null): { firstName: string; lastName: string } {
+  const t = (full || "").trim();
+  if (!t) return { firstName: "", lastName: "" };
+  const parts = t.split(/\s+/);
+  return { firstName: parts[0] || "", lastName: parts.slice(1).join(" ") };
+}
+
 export function extractLekkerpreneurProfile(entry: LekkerNetworkEntry) {
   const ws = resolveWorkspace(entry);
+  // Prefer owner/name; fall back to trading/business for display
+  let { firstName, lastName } = splitPersonName(entry.ownerName || entry.name);
+  if (!firstName) {
+    const biz = (ws.tradingName || entry.tradingName || ws.businessName || entry.businessName || "").trim();
+    if (biz) {
+      const b = splitPersonName(biz);
+      firstName = b.firstName;
+      lastName = b.lastName;
+    }
+  }
   return {
+    ...(firstName ? { firstName, lastName: lastName || "" } : {}),
     businessName: ws.businessName || entry.businessName,
     tradingName: ws.tradingName || entry.tradingName || null,
     lekkerNetworkId: entry.id,
@@ -331,6 +350,9 @@ export function extractLekkerpreneurProfile(entry: LekkerNetworkEntry) {
     businessProvince: ws.province || entry.province || entry.location?.province || null,
     businessCountry: entry.location?.country || "South Africa",
     lekkerVerifiedAt: new Date(),
+    ...(ws.logoUrl || entry.logoUrl
+      ? { profilePhoto: ws.logoUrl || entry.logoUrl || undefined }
+      : {}),
   };
 }
 

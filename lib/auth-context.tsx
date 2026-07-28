@@ -109,9 +109,17 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 function enrichUser(user: AuthUser): AuthUser {
+  const first = (user.firstName || "").trim();
+  const last = (user.lastName || "").trim();
+  const combined = `${first} ${last}`.trim();
+  // Avoid showing placeholder "User" when they can set a real name in Settings
+  const displayName =
+    combined && combined.toLowerCase() !== "user"
+      ? combined
+      : user.username || user.businessName || user.phone || "You";
   return {
     ...user,
-    displayName: `${user.firstName} ${user.lastName}`,
+    displayName,
     phoneNumber: user.phone,
   };
 }
@@ -236,8 +244,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       body: JSON.stringify(data),
     });
     const body = await res.json();
+    // Legacy: older servers asked for display name — no longer required
     if (body.needsDisplayName) {
-      return { success: false, needsDisplayName: true };
+      return {
+        success: false,
+        message: body.message || "Please update the app and try again.",
+      };
     }
     if (!res.ok) {
       return { success: false, message: body.message };

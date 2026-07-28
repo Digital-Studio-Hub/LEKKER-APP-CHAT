@@ -240,7 +240,7 @@ async function handleAppleReviewVerify(
   req: Request,
   res: Response,
   phone: string,
-  displayName?: string,
+  _displayName?: string,
 ): Promise<void> {
   const config = getAppleReviewConfig();
   if (!config) {
@@ -251,15 +251,8 @@ async function handleAppleReviewVerify(
   let user = await storage.getUserByPhone(phone);
 
   if (!user) {
-    const name = (displayName || config.displayName).trim();
-    if (!name || name.length < 2) {
-      res.status(200).json({
-        needsDisplayName: true,
-        message: "Enter your display name to create your account",
-      });
-      return;
-    }
-
+    // Passwordless WhatsApp-only: no name collection — use review config name if set
+    const name = (config.displayName || "Apple Reviewer").trim();
     const email = phoneToPlaceholderEmail(phone);
     const username = await resolveUniqueUsername(phone);
     const randomColor = AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)];
@@ -535,24 +528,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let user = await storage.getUserByPhone(phone);
 
       if (!user) {
-        const name = (displayName || "").trim();
-        if (!name || name.length < 2) {
-          return res.status(200).json({
-            needsDisplayName: true,
-            message: "Enter your display name to create your account",
-          });
-        }
-
+        // Passwordless: phone + OTP only. Do not require name/email/password at signup.
+        // Lekkerpreneurs get name/business from Network; others can set profile in Settings.
         const email = phoneToPlaceholderEmail(phone);
         const username = await resolveUniqueUsername(phone);
         const randomColor = AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)];
+
+        let firstName = "User";
+        let lastName = "";
+        let prefill: Record<string, unknown> = {};
+        try {
+          const lekkerMatch = await findLekkerpreneurByPhoneOrEmail(phone, email);
+          if (lekkerMatch) {
+            prefill = extractLekkerpreneurProfile(lekkerMatch) as Record<string, unknown>;
+            if (typeof prefill.firstName === "string" && prefill.firstName.trim()) {
+              firstName = String(prefill.firstName).trim();
+              lastName = typeof prefill.lastName === "string" ? String(prefill.lastName) : "";
+            }
+          }
+        } catch (e) {
+          console.error("Lekker prefill on WhatsApp register (non-fatal):", e);
+        }
+
+        // Optional legacy clients may still send displayName — use only if no Network name
+        const optionalName = (displayName || "").trim();
+        if (firstName === "User" && optionalName.length >= 2) {
+          firstName = optionalName;
+        }
 
         user = await storage.createUser({
           phone,
           email,
           username,
-          firstName: name,
-          lastName: "",
+          firstName,
+          lastName,
           passwordHash: null,
           avatarColor: randomColor,
           role: "user",
@@ -563,6 +572,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           notificationsEnabled: true,
           locationEnabled: false,
           presence: "online",
+          ...prefill,
         } as any);
 
         await storage.addUserEmail(user.id, email, true, false);

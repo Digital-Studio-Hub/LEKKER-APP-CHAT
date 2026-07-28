@@ -24,7 +24,7 @@ import { COMMUNITY_GUIDELINES_URL, PRIVACY_POLICY_URL } from "@/constants/safety
 
 const lekkerLogo = require("../assets/images/lekker-logo.png");
 
-type Step = "phone" | "code" | "name";
+type Step = "phone" | "code";
 
 export default function LoginScreen() {
   const insets = useSafeAreaInsets();
@@ -32,7 +32,6 @@ export default function LoginScreen() {
   const [step, setStep] = useState<Step>("phone");
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
-  const [displayName, setDisplayName] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [isExistingUser, setIsExistingUser] = useState(false);
@@ -103,43 +102,13 @@ export default function LoginScreen() {
     setError("");
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
+      // WhatsApp OTP only — no password, no required name/profile at signup
       const result = await verifyWhatsApp({
         phone: phone.trim(),
         code: code.trim(),
-        displayName: displayName.trim() || undefined,
       });
-      if (result.needsDisplayName) {
-        setStep("name");
-        return;
-      }
       if (!result.success) {
         setError(result.message || "Verification failed");
-        return;
-      }
-      router.replace("/(tabs)");
-    } catch {
-      setError("Connection failed. Check your network and try again.");
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-
-  async function handleCreateAccount() {
-    if (!requireTermsAccepted()) return;
-    if (!displayName.trim() || displayName.trim().length < 2) {
-      setError("Enter your display name (at least 2 characters)");
-      return;
-    }
-    setIsSubmitting(true);
-    setError("");
-    try {
-      const result = await verifyWhatsApp({
-        phone: phone.trim(),
-        code: code.trim(),
-        displayName: displayName.trim(),
-      });
-      if (!result.success) {
-        setError(result.message || "Could not create account");
         return;
       }
       router.replace("/(tabs)");
@@ -181,7 +150,8 @@ export default function LoginScreen() {
             <>
               <Text style={styles.title}>Sign in with WhatsApp</Text>
               <Text style={styles.subtitle}>
-                We&apos;ll send a one-time code to confirm your number. No password needed.
+                Enter your mobile number. We&apos;ll send a one-time code on WhatsApp.
+                No password. No name required to get started.
               </Text>
               <Text style={styles.label}>Mobile number</Text>
               <TextInput
@@ -189,14 +159,21 @@ export default function LoginScreen() {
                 placeholder="082 XXX XXXX or +27..."
                 placeholderTextColor={Colors.textMuted}
                 value={phone}
-                onChangeText={(t) => { setPhone(t); setError(""); }}
+                onChangeText={(t) => {
+                  setPhone(t);
+                  setError("");
+                }}
                 keyboardType="phone-pad"
                 textContentType="telephoneNumber"
                 autoFocus
                 testID="login-phone"
               />
               <Pressable
-                style={({ pressed }) => [styles.button, pressed && styles.buttonPressed, !canSubmit && styles.buttonDisabled]}
+                style={({ pressed }) => [
+                  styles.button,
+                  pressed && styles.buttonPressed,
+                  !canSubmit && styles.buttonDisabled,
+                ]}
                 onPress={handleSendCode}
                 disabled={!canSubmit}
               >
@@ -207,7 +184,7 @@ export default function LoginScreen() {
                 )}
               </Pressable>
             </>
-          ) : step === "code" ? (
+          ) : (
             <>
               <Text style={styles.title}>Enter your code</Text>
               <Text style={styles.subtitle}>
@@ -218,7 +195,10 @@ export default function LoginScreen() {
                 placeholder="000000"
                 placeholderTextColor={Colors.textMuted}
                 value={code}
-                onChangeText={(t) => { setCode(t.replace(/[^0-9]/g, "").slice(0, 6)); setError(""); }}
+                onChangeText={(t) => {
+                  setCode(t.replace(/[^0-9]/g, "").slice(0, 6));
+                  setError("");
+                }}
                 keyboardType="number-pad"
                 textContentType="oneTimeCode"
                 maxLength={6}
@@ -226,7 +206,11 @@ export default function LoginScreen() {
                 testID="login-code"
               />
               <Pressable
-                style={({ pressed }) => [styles.button, pressed && styles.buttonPressed, !canSubmit && styles.buttonDisabled]}
+                style={({ pressed }) => [
+                  styles.button,
+                  pressed && styles.buttonPressed,
+                  !canSubmit && styles.buttonDisabled,
+                ]}
                 onPress={handleVerify}
                 disabled={!canSubmit}
               >
@@ -236,44 +220,17 @@ export default function LoginScreen() {
                   <Text style={styles.buttonText}>{isExistingUser ? "Sign In" : "Continue"}</Text>
                 )}
               </Pressable>
-              <Pressable onPress={() => { setStep("phone"); setCode(""); }} style={styles.link}>
+              <Pressable
+                onPress={() => {
+                  setStep("phone");
+                  setCode("");
+                }}
+                style={styles.link}
+              >
                 <Text style={styles.linkText}>← Change number</Text>
               </Pressable>
               <Pressable onPress={handleSendCode} style={styles.link} disabled={isSubmitting}>
                 <Text style={styles.linkText}>Resend code</Text>
-              </Pressable>
-            </>
-          ) : (
-            <>
-              <Text style={styles.title}>Welcome!</Text>
-              <Text style={styles.subtitle}>How should we display your name in chats?</Text>
-              <Text style={styles.label}>Display name</Text>
-              <TextInput
-                // key forces remount so iOS drops the number-pad from the code step (2.1a)
-                key="login-display-name-step"
-                style={styles.input}
-                placeholder="Your name"
-                placeholderTextColor={Colors.textMuted}
-                value={displayName}
-                onChangeText={(t) => { setDisplayName(t); setError(""); }}
-                autoCapitalize="words"
-                keyboardType="default"
-                inputMode="text"
-                textContentType="name"
-                autoCorrect
-                autoFocus
-                testID="login-display-name"
-              />
-              <Pressable
-                style={({ pressed }) => [styles.button, pressed && styles.buttonPressed, !canSubmit && styles.buttonDisabled]}
-                onPress={handleCreateAccount}
-                disabled={!canSubmit}
-              >
-                {isSubmitting ? (
-                  <ActivityIndicator color={Colors.background} />
-                ) : (
-                  <Text style={styles.buttonText}>Get Started</Text>
-                )}
               </Pressable>
             </>
           )}
@@ -293,15 +250,24 @@ export default function LoginScreen() {
             </View>
             <Text style={styles.termsText}>
               I agree to the{" "}
-              <Text style={styles.legalAgreementLink} onPress={() => Linking.openURL("https://lekker.network/terms")}>
+              <Text
+                style={styles.legalAgreementLink}
+                onPress={() => Linking.openURL("https://lekker.network/terms")}
+              >
                 Terms & Conditions
               </Text>
               ,{" "}
-              <Text style={styles.legalAgreementLink} onPress={() => Linking.openURL(PRIVACY_POLICY_URL)}>
+              <Text
+                style={styles.legalAgreementLink}
+                onPress={() => Linking.openURL(PRIVACY_POLICY_URL)}
+              >
                 Privacy Policy
               </Text>
               , and{" "}
-              <Text style={styles.legalAgreementLink} onPress={() => Linking.openURL(COMMUNITY_GUIDELINES_URL)}>
+              <Text
+                style={styles.legalAgreementLink}
+                onPress={() => Linking.openURL(COMMUNITY_GUIDELINES_URL)}
+              >
                 Community Guidelines
               </Text>
               . There is no tolerance for objectionable content or abusive users.
@@ -316,70 +282,116 @@ export default function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background, alignItems: "center", justifyContent: "center" },
-  scrollContent: { alignItems: "center", paddingHorizontal: isSmallScreen ? 20 : 32, flexGrow: 1 },
+  container: {
+    flex: 1,
+    backgroundColor: Colors.background,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  scrollContent: {
+    alignItems: "center",
+    paddingHorizontal: isSmallScreen ? 20 : 32,
+    flexGrow: 1,
+  },
   logoContainer: { alignItems: "center", marginBottom: isSmallScreen ? 24 : 36 },
-  logo: { width: isSmallScreen ? 140 : 180, height: isSmallScreen ? 56 : 72, marginBottom: 10 },
-  appName: { fontFamily: "Poppins_700Bold", fontSize: fontScale(26), color: Colors.text },
-  tagline: { fontFamily: "Poppins_400Regular", fontSize: fontScale(13), color: Colors.primary },
-  formContainer: { width: "100%", maxWidth: 400 },
-  title: { fontFamily: "Poppins_600SemiBold", fontSize: fontScale(20), color: Colors.text, textAlign: "center", marginBottom: 8 },
-  subtitle: { fontFamily: "Poppins_400Regular", fontSize: fontScale(13), color: Colors.textSecondary, textAlign: "center", marginBottom: 24, lineHeight: 20 },
-  label: { fontFamily: "Poppins_500Medium", fontSize: fontScale(13), color: Colors.textSecondary, marginBottom: 6 },
-  input: {
-    backgroundColor: Colors.inputBackground,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: fontScale(15),
+  logo: {
+    width: isSmallScreen ? 140 : 180,
+    height: isSmallScreen ? 56 : 72,
+    marginBottom: 10,
+  },
+  appName: {
+    fontFamily: "Poppins_700Bold",
+    fontSize: fontScale(26),
     color: Colors.text,
+  },
+  tagline: {
     fontFamily: "Poppins_400Regular",
-    marginBottom: 12,
+    fontSize: fontScale(13),
+    color: Colors.primary,
+  },
+  formContainer: { width: "100%", maxWidth: 400 },
+  title: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: fontScale(20),
+    color: Colors.text,
+    marginBottom: 8,
+  },
+  subtitle: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: fontScale(13),
+    color: Colors.textMuted,
+    marginBottom: 20,
+    lineHeight: 20,
+  },
+  label: {
+    fontFamily: "Poppins_500Medium",
+    fontSize: fontScale(12),
+    color: Colors.textMuted,
+    marginBottom: 6,
+  },
+  input: {
+    backgroundColor: Colors.card,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: Colors.border,
-    minHeight: 48,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontFamily: "Poppins_400Regular",
+    fontSize: fontScale(16),
+    color: Colors.text,
+    marginBottom: 16,
   },
-  codeInput: { fontSize: fontScale(24), textAlign: "center", letterSpacing: 8, fontFamily: "Poppins_600SemiBold" },
+  codeInput: {
+    letterSpacing: 8,
+    textAlign: "center",
+    fontSize: fontScale(22),
+  },
   button: {
     backgroundColor: Colors.primary,
     borderRadius: 12,
     paddingVertical: 16,
     alignItems: "center",
-    minHeight: 48,
-    justifyContent: "center",
-    marginTop: 8,
+    marginBottom: 12,
   },
-  buttonPressed: { opacity: 0.8 },
+  buttonPressed: { opacity: 0.9 },
   buttonDisabled: { opacity: 0.5 },
-  buttonText: { fontFamily: "Poppins_600SemiBold", fontSize: fontScale(16), color: Colors.background },
-  link: { alignSelf: "center", marginTop: 14, paddingVertical: 8 },
-  linkText: { fontFamily: "Poppins_500Medium", fontSize: fontScale(14), color: Colors.primary },
+  buttonText: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: fontScale(16),
+    color: Colors.background,
+  },
+  link: { alignItems: "center", paddingVertical: 8 },
+  linkText: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: fontScale(13),
+    color: Colors.primary,
+  },
   errorBanner: {
-    backgroundColor: "rgba(255,59,48,0.15)",
+    backgroundColor: "rgba(255,80,80,0.15)",
     borderRadius: 10,
     padding: 12,
     marginBottom: 16,
-    borderWidth: 1,
-    borderColor: "rgba(255,59,48,0.3)",
   },
-  errorBannerText: { fontFamily: "Poppins_400Regular", fontSize: fontScale(13), color: Colors.danger, textAlign: "center" },
+  errorBannerText: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: fontScale(13),
+    color: "#FF6B6B",
+  },
   termsRow: {
     flexDirection: "row",
     alignItems: "flex-start",
     gap: 10,
     marginTop: 20,
-    paddingHorizontal: 2,
   },
   termsCheckbox: {
     width: 22,
     height: 22,
     borderRadius: 6,
-    borderWidth: 2,
+    borderWidth: 1.5,
     borderColor: Colors.border,
     alignItems: "center",
     justifyContent: "center",
-    marginTop: 1,
-    backgroundColor: Colors.inputBackground,
+    marginTop: 2,
   },
   termsCheckboxChecked: {
     backgroundColor: Colors.primary,
@@ -388,10 +400,18 @@ const styles = StyleSheet.create({
   termsText: {
     flex: 1,
     fontFamily: "Poppins_400Regular",
-    fontSize: fontScale(11),
+    fontSize: fontScale(12),
     color: Colors.textMuted,
     lineHeight: 18,
   },
-  legalAgreementLink: { color: Colors.primary, fontFamily: "Poppins_500Medium" },
-  footer: { marginTop: 24, fontFamily: "Poppins_400Regular", fontSize: fontScale(12), color: Colors.textMuted },
+  legalAgreementLink: {
+    color: Colors.primary,
+    textDecorationLine: "underline",
+  },
+  footer: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: fontScale(11),
+    color: Colors.textMuted,
+    marginTop: 32,
+  },
 });
