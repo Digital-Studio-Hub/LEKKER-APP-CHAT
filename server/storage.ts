@@ -119,11 +119,24 @@ class PgStorage implements IStorage {
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
-    const [user] = await db.insert(users).values({
-      ...insertUser,
-      email: insertUser.email.toLowerCase(),
-      username: insertUser.username.toLowerCase(),
-    }).returning();
+    const email =
+      insertUser.email && String(insertUser.email).trim()
+        ? String(insertUser.email).trim().toLowerCase()
+        : null;
+    const username =
+      insertUser.username && String(insertUser.username).trim()
+        ? String(insertUser.username).trim().toLowerCase()
+        : null;
+    const [user] = await db
+      .insert(users)
+      .values({
+        ...insertUser,
+        email,
+        username,
+        firstName: insertUser.firstName ?? "",
+        lastName: insertUser.lastName ?? "",
+      })
+      .returning();
     return user;
   }
 

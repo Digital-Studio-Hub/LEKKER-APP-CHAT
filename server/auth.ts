@@ -11,6 +11,7 @@ const BCRYPT_ROUNDS = 12;
 
 export interface TokenPayload {
   userId: string;
+  /** May be empty when user signed up with phone only */
   email: string;
   role: string;
 }

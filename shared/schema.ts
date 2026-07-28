@@ -7,11 +7,14 @@ export const users = pgTable("users", {
   id: varchar("id", { length: 36 })
     .primaryKey()
     .default(sql`gen_random_uuid()`),
+  /** Primary account identity — only required unique key for WhatsApp OTP users */
   phone: varchar("phone", { length: 20 }).notNull().unique(),
-  email: varchar("email", { length: 255 }).notNull().unique(),
-  username: varchar("username", { length: 50 }).notNull().unique(),
-  firstName: varchar("first_name", { length: 100 }).notNull(),
-  lastName: varchar("last_name", { length: 100 }).notNull(),
+  /** Optional — set in Settings or from Lekker Network */
+  email: varchar("email", { length: 255 }).unique(),
+  /** Optional — set in Settings when the user chooses a handle */
+  username: varchar("username", { length: 50 }).unique(),
+  firstName: varchar("first_name", { length: 100 }).notNull().default(""),
+  lastName: varchar("last_name", { length: 100 }).notNull().default(""),
   passwordHash: text("password_hash"),
   workspaceEmailActive: boolean("workspace_email_active").default(false),
   emailVerified: boolean("email_verified").default(false).notNull(),

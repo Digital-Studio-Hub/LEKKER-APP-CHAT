@@ -248,6 +248,7 @@ export async function getChatDetail(chatId: string): Promise<{ chat: ServerChat;
 export function getDisplayName(participant: ChatParticipant): string {
   const combined = `${participant.firstName || ""} ${participant.lastName || ""}`.trim();
   if (combined && combined.toLowerCase() !== "user") return combined;
+  // Phone is primary identity when name/username not set yet
   return participant.username || participant.phone || "User";
 }
 

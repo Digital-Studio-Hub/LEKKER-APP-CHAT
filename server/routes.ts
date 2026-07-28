@@ -183,7 +183,10 @@ const AVATAR_COLORS = ["#4ECDC4", "#FF6B6B", "#45B7D1", "#96CEB4", "#FFEAA7", "#
 async function applyLekkerSync(user: User, req: Request): Promise<User> {
   let finalUser = user;
   try {
-    const lekkerMatch = await findLekkerpreneurByPhoneOrEmail(user.phone, user.email);
+    const lekkerMatch = await findLekkerpreneurByPhoneOrEmail(
+      user.phone,
+      user.email || "",
+    );
     if (lekkerMatch) {
       const profileData = extractLekkerpreneurProfile(lekkerMatch);
       let workspaceEmailActive = false;
@@ -191,12 +194,23 @@ async function applyLekkerSync(user: User, req: Request): Promise<User> {
         const emailStatus = await fetchWorkspaceEmailStatus(profileData.lekkerWorkspaceId);
         workspaceEmailActive = emailStatus.active;
       }
-      const updated = await storage.updateUser(user.id, {
+      // Don't overwrite a user-chosen email/username with empty Network values
+      const patch: Record<string, unknown> = {
         ...profileData,
         workspaceEmailActive,
-      });
+      };
+      if (!profileData.email && user.email) delete patch.email;
+      const updated = await storage.updateUser(user.id, patch as any);
       if (updated) {
         finalUser = updated;
+        // Store Network email as a secondary email row when new
+        if (profileData.email && profileData.email !== user.email) {
+          try {
+            await storage.addUserEmail(user.id, profileData.email, !user.email, !!profileData.emailVerified);
+          } catch {
+            /* unique conflict — ignore */
+          }
+        }
         await storage.logAuthEvent(
           "lekker_network_match",
           user.id,
@@ -251,16 +265,14 @@ async function handleAppleReviewVerify(
   let user = await storage.getUserByPhone(phone);
 
   if (!user) {
-    // Passwordless WhatsApp-only: no name collection — use review config name if set
+    // Passwordless: phone is the only required unique field
     const name = (config.displayName || "Apple Reviewer").trim();
-    const email = phoneToPlaceholderEmail(phone);
-    const username = await resolveUniqueUsername(phone);
     const randomColor = AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)];
 
     user = await storage.createUser({
       phone,
-      email,
-      username,
+      email: null,
+      username: null,
       firstName: name,
       lastName: "",
       passwordHash: null,
@@ -275,7 +287,6 @@ async function handleAppleReviewVerify(
       presence: "online",
     } as any);
 
-    await storage.addUserEmail(user.id, email, true, true);
     await storage.logAuthEvent("register_apple_review", user.id, req.ip, req.headers["user-agent"]?.toString());
   } else {
     await storage.updateUser(user.id, { phoneVerified: true, emailVerified: true });
@@ -290,7 +301,11 @@ async function handleAppleReviewVerify(
   }
 
   const synced = await applyLekkerSync(user, req);
-  const token = generateToken({ userId: synced.id, email: synced.email, role: synced.role });
+  const token = generateToken({
+    userId: synced.id,
+    email: synced.email || synced.phone || "",
+    role: synced.role,
+  });
   res.json({ user: sanitizeUser(synced), token });
 }
 
@@ -528,44 +543,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let user = await storage.getUserByPhone(phone);
 
       if (!user) {
-        // Passwordless: phone + OTP only. Do not require name/email/password at signup.
-        // Lekkerpreneurs get name/business from Network; others can set profile in Settings.
-        const email = phoneToPlaceholderEmail(phone);
-        const username = await resolveUniqueUsername(phone);
+        // Identity = mobile number only. Email/username optional (Settings or Lekker Network).
         const randomColor = AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)];
 
-        let firstName = "User";
+        let firstName = "";
         let lastName = "";
+        let email: string | null = null;
         let prefill: Record<string, unknown> = {};
         try {
-          const lekkerMatch = await findLekkerpreneurByPhoneOrEmail(phone, email);
+          const lekkerMatch = await findLekkerpreneurByPhoneOrEmail(phone, "");
           if (lekkerMatch) {
             prefill = extractLekkerpreneurProfile(lekkerMatch) as Record<string, unknown>;
             if (typeof prefill.firstName === "string" && prefill.firstName.trim()) {
               firstName = String(prefill.firstName).trim();
               lastName = typeof prefill.lastName === "string" ? String(prefill.lastName) : "";
             }
+            if (typeof prefill.email === "string" && prefill.email.trim()) {
+              email = String(prefill.email).trim().toLowerCase();
+            }
           }
         } catch (e) {
           console.error("Lekker prefill on WhatsApp register (non-fatal):", e);
         }
 
-        // Optional legacy clients may still send displayName — use only if no Network name
         const optionalName = (displayName || "").trim();
-        if (firstName === "User" && optionalName.length >= 2) {
+        if (!firstName && optionalName.length >= 2) {
           firstName = optionalName;
         }
 
         user = await storage.createUser({
           phone,
           email,
-          username,
+          username: null,
           firstName,
           lastName,
           passwordHash: null,
           avatarColor: randomColor,
           role: "user",
-          emailVerified: false,
+          emailVerified: !!(prefill.emailVerified && email),
           phoneVerified: true,
           lekkerNetworkAccess: false,
           autoReplyEnabled: false,
@@ -573,9 +588,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
           locationEnabled: false,
           presence: "online",
           ...prefill,
+          // Ensure phone-based nulls win over empty prefill
+          email: email ?? (typeof prefill.email === "string" ? prefill.email : null),
+          username: null,
         } as any);
 
-        await storage.addUserEmail(user.id, email, true, false);
+        if (user.email) {
+          try {
+            await storage.addUserEmail(user.id, user.email, true, !!user.emailVerified);
+          } catch {
+            /* ignore duplicate */
+          }
+        }
         await storage.logAuthEvent("register_whatsapp", user.id, req.ip, req.headers["user-agent"]?.toString());
       } else {
         if (!user.phoneVerified) {
@@ -586,7 +610,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const synced = await applyLekkerSync(user, req);
-      const token = generateToken({ userId: synced.id, email: synced.email, role: synced.role });
+      const token = generateToken({
+        userId: synced.id,
+        email: synced.email || synced.phone || "",
+        role: synced.role,
+      });
       res.json({ user: sanitizeUser(synced), token });
     } catch (err) {
       console.error("WhatsApp verify error:", err);

@@ -336,8 +336,25 @@ export function extractLekkerpreneurProfile(entry: LekkerNetworkEntry) {
       lastName = b.lastName;
     }
   }
+  const networkEmail = (
+    entry.email ||
+    entry.businessEmail ||
+    ws.businessEmail ||
+    ""
+  )
+    .trim()
+    .toLowerCase();
+  // Ignore fake/placeholder emails if any
+  const realEmail =
+    networkEmail &&
+    !networkEmail.endsWith("@lekker.chat.placeholder") &&
+    !networkEmail.includes("placeholder")
+      ? networkEmail
+      : null;
+
   return {
     ...(firstName ? { firstName, lastName: lastName || "" } : {}),
+    ...(realEmail ? { email: realEmail, emailVerified: !!entry.emailVerified } : {}),
     businessName: ws.businessName || entry.businessName,
     tradingName: ws.tradingName || entry.tradingName || null,
     lekkerNetworkId: entry.id,

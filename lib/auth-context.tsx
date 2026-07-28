@@ -116,7 +116,7 @@ function enrichUser(user: AuthUser): AuthUser {
   const displayName =
     combined && combined.toLowerCase() !== "user"
       ? combined
-      : user.username || user.businessName || user.phone || "You";
+      : (user.username || user.businessName || user.phone || "You");
   return {
     ...user,
     displayName,
