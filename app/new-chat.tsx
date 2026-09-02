@@ -407,7 +407,7 @@ export default function NewChatScreen() {
         >
           <Ionicons name="alert-circle-outline" size={18} color={Colors.primary} />
           <Text style={styles.permissionText}>
-            Enable contacts access in Settings to find friends on Lekker Chat
+            Enable contacts access in Settings to find friends on your device (your address book is never uploaded)
           </Text>
           <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
         </Pressable>

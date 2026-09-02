@@ -80,6 +80,7 @@ export interface LekkerNetworkEntry {
   /** Marketplace Instant Match path ids — same directory as lekker.network Settings */
   marketplaceServiceSlugs?: string[];
   marketplaceServiceLabels?: string[];
+  servicesOffered?: string;
   website?: string;
   province?: string;
   location?: {
@@ -327,21 +328,152 @@ function resolveWorkspace(entry: LekkerNetworkEntry): LekkerWorkspace {
   };
 }
 
+/** Split "Jane Doe" → first/last for chat profile fields */
+export function splitPersonName(full?: string | null): { firstName: string; lastName: string } {
+  const t = (full || "").trim();
+  if (!t) return { firstName: "", lastName: "" };
+  const parts = t.split(/\s+/);
+  return { firstName: parts[0] || "", lastName: parts.slice(1).join(" ") };
+}
+
 export function extractLekkerpreneurProfile(entry: LekkerNetworkEntry) {
   const ws = resolveWorkspace(entry);
+  // Prefer owner/name; fall back to trading/business for display
+  let { firstName, lastName } = splitPersonName(entry.ownerName || entry.name);
+  if (!firstName) {
+    const biz = (ws.tradingName || entry.tradingName || ws.businessName || entry.businessName || "").trim();
+    if (biz) {
+      const b = splitPersonName(biz);
+      firstName = b.firstName;
+      lastName = b.lastName;
+    }
+  }
+  const networkEmail = (
+    entry.email ||
+    entry.businessEmail ||
+    ws.businessEmail ||
+    ""
+  )
+    .trim()
+    .toLowerCase();
+  // Ignore fake/placeholder emails if any
+  const realEmail =
+    networkEmail &&
+    !networkEmail.endsWith("@lekker.chat.placeholder") &&
+    !networkEmail.includes("placeholder")
+      ? networkEmail
+      : null;
+
   return {
+    ...(firstName ? { firstName, lastName: lastName || "" } : {}),
+    ...(realEmail ? { email: realEmail, emailVerified: !!entry.emailVerified } : {}),
     businessName: ws.businessName || entry.businessName,
     tradingName: ws.tradingName || entry.tradingName || null,
     lekkerNetworkId: entry.id,
     lekkerWorkspaceId: entry.workspaceId || entry.workspace?.id || null,
     isVerifiedLekkerpreneur: true,
+    lekkerNetworkAccess: true,
     businessCategory: ws.category || entry.category || null,
     businessWebsite: ws.businessWebsite || ws.websiteUrl || entry.website || null,
     businessLogoUrl: ws.logoUrl || entry.logoUrl || null,
     businessProvince: ws.province || entry.province || entry.location?.province || null,
     businessCountry: entry.location?.country || "South Africa",
     lekkerVerifiedAt: new Date(),
+    ...(ws.logoUrl || entry.logoUrl
+      ? { profilePhoto: ws.logoUrl || entry.logoUrl || undefined }
+      : {}),
   };
+}
+
+const LEKKER_MOBILE_BASE = process.env.LEKKER_API_BASE_URL || "https://lekker.network";
+
+async function lekkerMobileFetch<T>(path: string, init?: RequestInit): Promise<T | null> {
+  if (!LEKKER_API_KEY) return null;
+  try {
+    const res = await fetch(`${LEKKER_MOBILE_BASE}${path}`, {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-Key": LEKKER_API_KEY,
+        ...(init?.headers || {}),
+      },
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as T;
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchMobileSessionToken(lekkerNetworkUserId: string): Promise<string | null> {
+  const data = await lekkerMobileFetch<{ token?: string }>("/api/v1/mobile/session-token", {
+    method: "POST",
+    body: JSON.stringify({ userId: lekkerNetworkUserId }),
+  });
+  return data?.token || null;
+}
+
+export async function fetchWorkspaceEmailStatus(
+  workspaceId: string,
+): Promise<{ active: boolean; unreadCount?: number }> {
+  const data = await lekkerMobileFetch<{ active: boolean; unreadCount?: number }>(
+    `/api/v1/mobile/email/status?workspaceId=${encodeURIComponent(workspaceId)}`,
+  );
+  return data || { active: false };
+}
+
+export async function fetchMobileEmailThreads(
+  workspaceId: string,
+  page = 1,
+): Promise<{ threads: Array<{ id: string; subject: string; snippet: string; fromName: string; unread: boolean; updatedAt: string }> } | null> {
+  return lekkerMobileFetch(
+    `/api/v1/mobile/email/threads?workspaceId=${encodeURIComponent(workspaceId)}&page=${page}`,
+  );
+}
+
+export async function fetchMobileEmailThread(
+  workspaceId: string,
+  threadId: string,
+): Promise<{
+  subject: string;
+  messages: Array<{
+    id: string;
+    from: string;
+    fromAddress: string;
+    bodyText: string;
+    createdAt: string;
+    isOutbound: boolean;
+  }>;
+} | null> {
+  return lekkerMobileFetch(
+    `/api/v1/mobile/email/threads/${threadId}?workspaceId=${encodeURIComponent(workspaceId)}`,
+  );
+}
+
+export async function sendMobileEmail(
+  workspaceId: string,
+  userId: string,
+  payload: {
+    to: string | string[];
+    subject: string;
+    bodyText: string;
+    inReplyTo?: string;
+    references?: string;
+  },
+): Promise<{ messageId: string; threadId: string } | null> {
+  const to = Array.isArray(payload.to) ? payload.to : [payload.to];
+  return lekkerMobileFetch("/api/v1/mobile/email/send", {
+    method: "POST",
+    body: JSON.stringify({
+      workspaceId,
+      userId,
+      to,
+      subject: payload.subject,
+      bodyText: payload.bodyText,
+      inReplyTo: payload.inReplyTo,
+      references: payload.references,
+    }),
+  });
 }
 
 export function buildSyncUserResponse(entry: LekkerNetworkEntry) {

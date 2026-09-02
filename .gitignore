@@ -40,3 +40,27 @@ yarn-error.*
 
 .env
 google-play-service-account.json
+expo-token
+
+# Accidental root copies (Expo app lives under app/)
+/(tabs)/
+/+native-intent.tsx
+/+not-found.tsx
+/_layout.tsx
+/chat/
+/colors.ts
+/in-app-browser.tsx
+/index.tsx
+/landing-page.html
+/new-chat.tsx
+/new-group.tsx
+/new-post.tsx
+/post-comments.tsx
+/profile.tsx
+/routes.ts
+/safety-api.ts
+/safety.ts
+/schema.ts
+/settings.tsx
+/storage.ts
+/user-profile/

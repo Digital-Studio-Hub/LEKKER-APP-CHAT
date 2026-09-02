@@ -19,11 +19,19 @@ import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/lib/auth-context";
-import { storage } from "@/lib/storage";
+import { useAgeGate } from "@/lib/age-gate-context";
+import { SocialAccessBlocked } from "@/components/SocialAccessBlocked";
+import { createFeedPost } from "@/lib/feed-api";
+import { containsBlockedContent, CONTENT_FILTER_MESSAGE } from "@shared/content-filter";
 
 export default function NewPostScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
+  const { socialMediaAllowed } = useAgeGate();
+
+  if (!socialMediaAllowed) {
+    return <SocialAccessBlocked feature="Creating posts" />;
+  }
   const [content, setContent] = useState("");
   const [mediaUri, setMediaUri] = useState<string | null>(null);
   const [mediaType, setMediaType] = useState<"image" | "video" | null>(null);
@@ -121,22 +129,23 @@ export default function NewPostScreen() {
 
   async function handlePost() {
     if ((!content.trim() && !mediaUri) || !user) return;
+    if (content.trim() && containsBlockedContent(content.trim())) {
+      Alert.alert("Not allowed", CONTENT_FILTER_MESSAGE);
+      return;
+    }
 
     setIsPosting(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     try {
       const postContent = content.trim() || (mediaType === "video" ? "🎬" : "📸");
-      const post = await storage.createFeedPost(
-        user.id,
-        user.displayName,
-        user.avatarColor,
-        postContent,
-        mediaUri || undefined,
-      );
+      const result = await createFeedPost({
+        content: postContent,
+        mediaUrl: mediaUri || undefined,
+      });
 
-      if (post === null) {
-        const msg = "You've already posted similar content in the last 24 hours.";
+      if (result.duplicate || !result.post) {
+        const msg = result.message || "You've already posted similar content in the last 24 hours.";
         if (Platform.OS === "web") {
           alert(msg);
         } else {

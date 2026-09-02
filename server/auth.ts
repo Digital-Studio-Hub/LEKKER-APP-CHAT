@@ -11,6 +11,7 @@ const BCRYPT_ROUNDS = 12;
 
 export interface TokenPayload {
   userId: string;
+  /** May be empty when user signed up with phone only */
   email: string;
   role: string;
 }
@@ -19,7 +20,8 @@ export async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, BCRYPT_ROUNDS);
 }
 
-export async function verifyPassword(password: string, hash: string): Promise<boolean> {
+export async function verifyPassword(password: string, hash: string | null | undefined): Promise<boolean> {
+  if (!hash) return false;
   return bcrypt.compare(password, hash);
 }
 

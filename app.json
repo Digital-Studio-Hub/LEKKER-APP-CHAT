@@ -2,8 +2,8 @@
   "expo": {
     "name": "Lekker Chat",
     "slug": "lekker-chat",
-    "version": "1.0.0",
-    "runtimeVersion": "1.0.0",
+    "version": "1.1.0",
+    "runtimeVersion": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "lekkerchat",
@@ -18,7 +18,10 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.lekker.chat",
-      "buildNumber": "3",
+      "buildNumber": "5",
+      "entitlements": {
+        "com.apple.developer.declared-age-range": true
+      },
       "infoPlist": {
         "UIRequiresFullScreen": false,
         "NSCameraUsageDescription": "Lekker Chat uses your camera to take photos and share them in conversations.",
@@ -27,7 +30,7 @@
         "NSMicrophoneUsageDescription": "Lekker Chat uses your microphone to record voice notes.",
         "NSLocationWhenInUseUsageDescription": "Lekker Chat uses your location to find nearby Lekkerpreneurs and share your location in conversations.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Lekker Chat uses your location to find nearby Lekkerpreneurs and enhance your networking experience.",
-        "NSContactsUsageDescription": "Lekker Chat accesses your contacts so you can share contact cards in conversations and find people you know.",
+        "NSContactsUsageDescription": "Lekker Chat reads contacts on your device to help you find people you know. If you choose to share a contact card in a chat, that contact's name and phone number will be uploaded to our servers and sent to conversation participants. Your full address book is never uploaded.",
         "ITSAppUsesNonExemptEncryption": false,
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true
@@ -36,7 +39,7 @@
     },
     "android": {
       "package": "com.lekker.chat",
-      "versionCode": 1,
+      "versionCode": 17,
       "compileSdkVersion": 35,
       "targetSdkVersion": 35,
       "minSdkVersion": 23,
@@ -54,7 +57,9 @@
         "android.permission.READ_CONTACTS",
         "android.permission.VIBRATE",
         "android.permission.RECEIVE_BOOT_COMPLETED",
-        "android.permission.POST_NOTIFICATIONS"
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.WRITE_CONTACTS",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
       ],
       "adaptiveIcon": {
         "backgroundColor": "#0D0D0D",
@@ -72,7 +77,10 @@
               "host": "lekker.network"
             }
           ],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
       ]
     },
@@ -112,7 +120,7 @@
       [
         "expo-contacts",
         {
-          "contactsPermission": "Lekker Chat needs access to your contacts so you can share them in conversations."
+          "contactsPermission": "Lekker Chat reads contacts on your device to help you find people. If you share a contact card in a chat, that contact's name and phone are uploaded to our servers and sent to the conversation. Your full address book is never uploaded."
         }
       ],
       [
@@ -129,9 +137,13 @@
     "extra": {
       "privacyPolicyUrl": "https://lekker.network/privacy",
       "termsUrl": "https://lekker.network/terms",
+      "router": {
+        "origin": "https://replit.com/"
+      },
       "eas": {
-        "projectId": "lekker-chat"
+        "projectId": "385aa478-8c87-4480-b7b6-2ecb4addc68c"
       }
-    }
+    },
+    "owner": "digital-studio-hub"
   }
 }

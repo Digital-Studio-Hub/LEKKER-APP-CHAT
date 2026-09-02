@@ -7,6 +7,8 @@ import { KeyboardProvider } from "react-native-keyboard-controller";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { queryClient } from "@/lib/query-client";
 import { AuthProvider } from "@/lib/auth-context";
+import { AgeGateProvider } from "@/lib/age-gate-context";
+import { SocialAgeGateModal } from "@/components/SocialAgeGateModal";
 import { StatusBar } from "expo-status-bar";
 import {
   useFonts,
@@ -59,8 +61,11 @@ export default function RootLayout() {
         <GestureHandlerRootView>
           <KeyboardProvider>
             <AuthProvider>
-              <StatusBar style="light" />
-              <RootLayoutNav />
+              <AgeGateProvider>
+                <StatusBar style="light" />
+                <RootLayoutNav />
+                <SocialAgeGateModal />
+              </AgeGateProvider>
             </AuthProvider>
           </KeyboardProvider>
         </GestureHandlerRootView>

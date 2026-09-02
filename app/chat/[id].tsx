@@ -21,7 +21,13 @@ import * as Haptics from "expo-haptics";
 import { Audio } from "expo-av";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/lib/auth-context";
-import { storage } from "@/lib/storage";
+import {
+  blockUserServer,
+  unblockUserServer,
+  isUserBlockedServer,
+  promptContentReport,
+} from "@/lib/safety-api";
+import { containsBlockedContent, CONTENT_FILTER_MESSAGE } from "@shared/content-filter";
 import { isSmallScreen, fontScale } from "@/lib/responsive";
 import {
   pickImage,
@@ -295,6 +301,7 @@ function MessageBubbleInner({
   onReload,
   onEdit,
   onDelete,
+  onReport,
   isSelecting,
   isSelected,
   onToggleSelect,
@@ -308,6 +315,7 @@ function MessageBubbleInner({
   onReload: () => void;
   onEdit: (msg: ServerMessage) => void;
   onDelete: (msg: ServerMessage) => void;
+  onReport?: (msg: ServerMessage) => void;
   isSelecting: boolean;
   isSelected: boolean;
   onToggleSelect: (msg: ServerMessage) => void;
@@ -332,9 +340,22 @@ function MessageBubbleInner({
       return;
     }
 
-    if (!isMe) return;
-
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+    if (!isMe) {
+      if (Platform.OS === "ios") {
+        ActionSheetIOS.showActionSheetWithOptions(
+          { options: ["Report message", "Cancel"], cancelButtonIndex: 1, destructiveButtonIndex: 0 },
+          (idx) => { if (idx === 0) onReport?.(message); },
+        );
+      } else {
+        Alert.alert("Message", undefined, [
+          { text: "Report message", style: "destructive", onPress: () => onReport?.(message) },
+          { text: "Cancel", style: "cancel" },
+        ]);
+      }
+      return;
+    }
 
     if (Platform.OS === "ios") {
       const options: string[] = [];
@@ -680,7 +701,7 @@ export default function ChatDetailScreen() {
     if (chat.type !== "group") {
       const other = getOtherParticipant(chat, myUserId);
       if (other) {
-        const blocked = await storage.isUserBlocked(other.id);
+        const blocked = await isUserBlockedServer(other.id);
         setIsBlocked(blocked);
       }
     }
@@ -703,7 +724,7 @@ export default function ChatDetailScreen() {
     if (!chat || isGroup || !otherParticipant) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     if (isBlocked) {
-      await storage.unblockUser(otherParticipant.id);
+      await unblockUserServer(otherParticipant.id);
       setIsBlocked(false);
     } else {
       Alert.alert(
@@ -715,8 +736,8 @@ export default function ChatDetailScreen() {
             text: "Block",
             style: "destructive",
             onPress: async () => {
-              await storage.blockUser(chatName, otherParticipant.id);
-              setIsBlocked(true);
+              const ok = await blockUserServer(otherParticipant.id);
+              if (ok) setIsBlocked(true);
             },
           },
         ],
@@ -724,10 +745,37 @@ export default function ChatDetailScreen() {
     }
   }
 
+  function handleReportUser() {
+    if (!otherParticipant) return;
+    promptContentReport({
+      reportType: "user",
+      reportedUserId: otherParticipant.id,
+      chatId: id,
+      subjectLabel: chatName,
+    });
+  }
+
+  function handleReportMessage(msg: ServerMessage) {
+    promptContentReport({
+      reportType: "message",
+      reportedUserId: msg.senderId,
+      messageId: msg.id,
+      chatId: id,
+      subjectLabel: "message",
+    });
+  }
+
+  function warnBlockedContent(text: string): boolean {
+    if (!containsBlockedContent(text)) return false;
+    Alert.alert("Not allowed", CONTENT_FILTER_MESSAGE);
+    return true;
+  }
+
   async function handleSend() {
     if (editingMessage) {
       const text = inputText.trim();
       if (!text || !id) return;
+      if (warnBlockedContent(text)) return;
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       setInputText("");
       setEditingMessage(null);
@@ -737,6 +785,7 @@ export default function ChatDetailScreen() {
     }
     const text = inputText.trim();
     if (!text || !id || isBlocked) return;
+    if (warnBlockedContent(text)) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setInputText("");
     await sendChatMessage(id, text, "text");
@@ -913,6 +962,10 @@ export default function ChatDetailScreen() {
       Alert.alert("Error", "Please add at least 2 options.");
       return;
     }
+    if (warnBlockedContent(q) || opts.some((o) => containsBlockedContent(o))) {
+      Alert.alert("Not allowed", CONTENT_FILTER_MESSAGE);
+      return;
+    }
     setShowPollModal(false);
     const pollOpts = opts.map((text) => ({
       id: generateId(),
@@ -1084,13 +1137,18 @@ export default function ChatDetailScreen() {
             </Pressable>
           )}
           {chat && !isGroup ? (
-            <Pressable onPress={handleToggleBlock} style={styles.backButton}>
-              <Ionicons
-                name={isBlocked ? "ban" : "ban-outline"}
-                size={22}
-                color={isBlocked ? Colors.danger : Colors.textMuted}
-              />
-            </Pressable>
+            <View style={{ flexDirection: "row", alignItems: "center" }}>
+              <Pressable onPress={handleReportUser} style={styles.backButton}>
+                <Ionicons name="flag-outline" size={20} color={Colors.textMuted} />
+              </Pressable>
+              <Pressable onPress={handleToggleBlock} style={styles.backButton}>
+                <Ionicons
+                  name={isBlocked ? "ban" : "ban-outline"}
+                  size={22}
+                  color={isBlocked ? Colors.danger : Colors.textMuted}
+                />
+              </Pressable>
+            </View>
           ) : (
             <View style={styles.backButton} />
           )}
@@ -1110,6 +1168,7 @@ export default function ChatDetailScreen() {
             onReload={loadMessages}
             onEdit={handleEditMessage}
             onDelete={handleDeleteMessage}
+            onReport={handleReportMessage}
             isSelecting={isSelecting}
             isSelected={selectedMessageIds.has(item.id)}
             onToggleSelect={handleToggleSelect}

@@ -17,7 +17,14 @@ import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { fontScale } from "@/lib/responsive";
 import { useAuth } from "@/lib/auth-context";
-import { storage, FeedPost } from "@/lib/storage";
+import { useAgeGate } from "@/lib/age-gate-context";
+import { SocialAccessBlocked } from "@/components/SocialAccessBlocked";
+import {
+  fetchFeedPosts,
+  toggleFeedLike,
+  shareFeedPost,
+  type FeedPost,
+} from "@/lib/feed-api";
 
 function Avatar({ name, color, size = 40, photo }: { name: string; color: string; size?: number; photo?: string }) {
   if (photo) {
@@ -57,7 +64,10 @@ function PostCard({
   onShare: () => void;
 }) {
   const isLiked = post.likes.includes(userId);
-  const photo = post.authorId === userId ? userPhoto : undefined;
+  const photo =
+    post.authorId === userId
+      ? userPhoto
+      : post.authorProfilePhoto || undefined;
 
   return (
     <View style={postStyles.card}>
@@ -179,6 +189,11 @@ const PAGE_SIZE = 10;
 export default function FeedScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
+  const { socialMediaAllowed } = useAgeGate();
+
+  if (!socialMediaAllowed) {
+    return <SocialAccessBlocked feature="The Newsfeed" />;
+  }
   const [allPosts, setAllPosts] = useState<FeedPost[]>([]);
   const [visiblePosts, setVisiblePosts] = useState<FeedPost[]>([]);
   const [refreshing, setRefreshing] = useState(false);
@@ -191,7 +206,7 @@ export default function FeedScreen() {
   );
 
   async function loadPosts() {
-    const feedPosts = await storage.getFeedPosts();
+    const feedPosts = await fetchFeedPosts({ page: 1 });
     setAllPosts(feedPosts);
     setVisiblePosts(feedPosts.slice(0, PAGE_SIZE));
   }
@@ -213,14 +228,14 @@ export default function FeedScreen() {
   async function handleLike(postId: string) {
     if (!user) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    await storage.toggleLike(postId, user.id);
+    await toggleFeedLike(postId);
     await loadPosts();
   }
 
   async function handleShare(postId: string) {
     if (!user) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    await storage.sharePost(postId, user.id);
+    await shareFeedPost(postId);
     await loadPosts();
   }
 
@@ -264,10 +279,6 @@ export default function FeedScreen() {
         ]}
         onEndReached={loadMore}
         onEndReachedThreshold={0.5}
-        initialNumToRender={PAGE_SIZE}
-        maxToRenderPerBatch={PAGE_SIZE}
-        windowSize={5}
-        removeClippedSubviews={Platform.OS !== "web"}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}

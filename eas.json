@@ -29,7 +29,7 @@
         "resourceClass": "m-medium"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://YOUR-REPLIT-SLUG.replit.app"
+        "EXPO_PUBLIC_API_URL": "https://lekkerchat.replit.app"
       }
     }
   },
@@ -37,7 +37,8 @@
     "production": {
       "android": {
         "serviceAccountKeyPath": "./google-play-service-account.json",
-        "track": "internal"
+        "track": "internal",
+        "releaseStatus": "completed"
       }
     }
   }

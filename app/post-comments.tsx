@@ -7,13 +7,17 @@ import {
   Pressable,
   StyleSheet,
   ActivityIndicator,
+  Alert,
 } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/lib/auth-context";
-import { storage, FeedPost, FeedComment } from "@/lib/storage";
+import { fetchFeedPost, addFeedComment, type FeedPost } from "@/lib/feed-api";
+import { containsBlockedContent, CONTENT_FILTER_MESSAGE } from "@shared/content-filter";
+import { useAgeGate } from "@/lib/age-gate-context";
+import { SocialAccessBlocked } from "@/components/SocialAccessBlocked";
 
 function formatTimeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -37,16 +41,20 @@ export default function PostCommentsScreen() {
   }, [postId]);
 
   async function loadPost() {
-    const posts = await storage.getFeedPosts();
-    const found = posts.find((p) => p.id === postId);
+    if (!postId) return;
+    const found = await fetchFeedPost(postId);
     if (found) setPost(found);
   }
 
   async function handleComment() {
     if (!commentText.trim() || !user || !postId) return;
+    if (containsBlockedContent(commentText.trim())) {
+      Alert.alert("Not allowed", CONTENT_FILTER_MESSAGE);
+      return;
+    }
 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    await storage.addComment(postId, user.id, user.displayName, commentText.trim());
+    await addFeedComment(postId, commentText.trim());
     setCommentText("");
     await loadPost();
   }
