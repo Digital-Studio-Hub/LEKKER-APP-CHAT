@@ -10,6 +10,7 @@ import {
   TextInput,
   Image,
   ScrollView,
+  Alert,
 } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -18,8 +19,9 @@ import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { fontScale } from "@/lib/responsive";
 import { getApiUrl } from "@/lib/query-client";
-import { storage } from "@/lib/storage";
+import { startChatWithContact } from "@/lib/chat-api";
 import { useAuth } from "@/lib/auth-context";
+import { getAuthToken } from "@/lib/auth-token";
 
 let WebView: any = null;
 if (Platform.OS !== "web") {
@@ -28,20 +30,30 @@ if (Platform.OS !== "web") {
 
 interface DirectoryEntry {
   id: string;
+  workspaceId?: string | null;
   name: string;
   businessName: string;
+  tradingName?: string;
   serviceType: string;
+  marketplaceServiceLabels?: string[];
+  servicesOffered?: string;
   location: string;
   province: string;
   phone: string;
+  email?: string;
+  website?: string;
+  address?: string;
   bio: string;
   avatarColor: string;
   isVerified?: boolean;
   memberSince?: string;
+  logoUrl?: string;
 }
 
 interface FiltersData {
+  /** Marketplace Instant Match parent category names (same as lekker.network Settings) */
   serviceTypes: string[];
+  serviceCategories?: Array<{ id: string; name: string }>;
   provinces: string[];
 }
 
@@ -93,6 +105,7 @@ const chipStyles = StyleSheet.create({
 
 function DirectoryView() {
   const dirInsets = useSafeAreaInsets();
+  const { user } = useAuth();
   const [entries, setEntries] = useState<DirectoryEntry[]>([]);
   const [filters, setFilters] = useState<FiltersData>({ serviceTypes: [], provinces: [] });
   const [selectedService, setSelectedService] = useState<string | null>(null);
@@ -100,6 +113,10 @@ function DirectoryView() {
   const [searchText, setSearchText] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [startingChat, setStartingChat] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [enquireFor, setEnquireFor] = useState<DirectoryEntry | null>(null);
+  const [enquiryText, setEnquiryText] = useState("");
+  const [sendingEnquiry, setSendingEnquiry] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -121,8 +138,8 @@ function DirectoryView() {
       const res = await fetch(url.toString(), { signal: controller.signal });
       clearTimeout(timeout);
       const data = await res.json();
-      setEntries(data.entries);
-      setFilters(data.filters);
+      setEntries(data.entries || []);
+      setFilters(data.filters || { serviceTypes: [], provinces: [] });
     } catch (e) {
       if (retries > 0) {
         await new Promise((r) => setTimeout(r, 1000));
@@ -138,12 +155,84 @@ function DirectoryView() {
     setStartingChat(entry.id);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
-      const conversation = await storage.addConversation(entry.name, entry.id, entry.avatarColor);
-      router.push({ pathname: "/chat/[id]", params: { id: conversation.id } });
+      const { chat, message, code } = await startChatWithContact({
+        lekkerNetworkId: entry.id,
+        phone: entry.phone || undefined,
+      });
+      if (chat?.id) {
+        router.push({ pathname: "/chat/[id]", params: { id: chat.id } });
+        return;
+      }
+      if (code === "USER_NOT_REGISTERED") {
+        Alert.alert(
+          "Message on Marketplace instead",
+          "They're listed as a lekkerpreneur but don't have Lekker Chat yet. Send a private enquiry — it appears in Marketplace Chat and their Leads inbox.",
+          [
+            { text: "Cancel", style: "cancel" },
+            { text: "Enquire", onPress: () => openEnquire(entry) },
+          ],
+        );
+      } else {
+        Alert.alert("Couldn't start chat", message || "Please try again.");
+      }
     } catch (e) {
       console.error("Start chat error:", e);
+      Alert.alert("Couldn't start chat", "Please try again.");
     } finally {
       setStartingChat(null);
+    }
+  }
+
+  function openEnquire(entry: DirectoryEntry) {
+    if (!entry.workspaceId) {
+      Alert.alert("Unavailable", "This listing isn't linked to a workspace yet.");
+      return;
+    }
+    setEnquireFor(entry);
+    setEnquiryText("");
+  }
+
+  async function submitEnquiry() {
+    if (!enquireFor?.workspaceId || enquiryText.trim().length < 3) {
+      Alert.alert("Add a brief", "Write a short note about what you need (at least 3 characters).");
+      return;
+    }
+    setSendingEnquiry(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    try {
+      const url = new URL("/api/directory/enquire", getApiUrl());
+      const res = await fetch(url.toString(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getAuthToken() || ""}` },
+        body: JSON.stringify({
+          targetWorkspaceId: enquireFor.workspaceId,
+          summary: enquiryText.trim(),
+          province: enquireFor.province || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        Alert.alert("Enquiry failed", data.message || "Please try again.");
+        return;
+      }
+      setEnquireFor(null);
+      Alert.alert(
+        "Enquiry sent",
+        "Your phone stays private until you reveal it. The lekkerpreneur can reply in Marketplace Chat — and you'll see it in Enquiries.",
+        [
+          {
+            text: "Open enquiry",
+            onPress: () =>
+              router.push({ pathname: "/enquiry/[id]", params: { id: data.leadId } }),
+          },
+          { text: "OK" },
+        ],
+      );
+    } catch (e) {
+      console.error("Enquiry error:", e);
+      Alert.alert("Enquiry failed", "Please try again.");
+    } finally {
+      setSendingEnquiry(false);
     }
   }
 
@@ -155,6 +244,11 @@ function DirectoryView() {
   function toggleProvince(province: string) {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setSelectedProvince((prev) => (prev === province ? null : province));
+  }
+
+  function toggleExpand(id: string) {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setExpandedId((prev) => (prev === id ? null : id));
   }
 
   return (
@@ -204,53 +298,91 @@ function DirectoryView() {
           windowSize={5}
           removeClippedSubviews={Platform.OS !== "web"}
           initialNumToRender={12}
-          renderItem={({ item }) => (
-            <View style={dirStyles.card}>
-              <Pressable
-                style={dirStyles.cardHeader}
-                onPress={() =>
-                  router.push({
-                    pathname: "/user-profile/[id]",
-                    params: { id: item.id, name: item.name || item.businessName, avatarColor: item.avatarColor },
-                  })
-                }
-              >
-                <Avatar name={item.name || item.businessName} color={item.avatarColor} size={50} />
-                <View style={dirStyles.cardInfo}>
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                    <Text style={dirStyles.cardName}>{item.name || item.businessName}</Text>
-                    {item.isVerified && (
-                      <Ionicons name="checkmark-circle" size={16} color={Colors.primary} />
+          renderItem={({ item }) => {
+            const expanded = expandedId === item.id;
+            const labels = item.marketplaceServiceLabels?.length
+              ? item.marketplaceServiceLabels
+              : item.serviceType
+                ? [item.serviceType]
+                : [];
+            return (
+              <View style={dirStyles.card}>
+                <Pressable style={dirStyles.cardHeader} onPress={() => toggleExpand(item.id)}>
+                  <Avatar name={item.name || item.businessName} color={item.avatarColor} size={50} />
+                  <View style={dirStyles.cardInfo}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                      <Text style={dirStyles.cardName}>{item.businessName}</Text>
+                      {item.isVerified && (
+                        <Ionicons name="checkmark-circle" size={16} color={Colors.primary} />
+                      )}
+                    </View>
+                    {!!item.tradingName && item.tradingName !== item.businessName && (
+                      <Text style={dirStyles.cardBusiness}>t/a {item.tradingName}</Text>
                     )}
+                    <View style={dirStyles.cardMeta}>
+                      <Ionicons name="location-outline" size={13} color={Colors.textMuted} />
+                      <Text style={dirStyles.cardLocation}>
+                        {[item.location, item.province].filter(Boolean).join(", ")}
+                      </Text>
+                    </View>
                   </View>
-                  <Text style={dirStyles.cardBusiness}>{item.businessName}</Text>
-                  <View style={dirStyles.cardMeta}>
-                    <Ionicons name="location-outline" size={13} color={Colors.textMuted} />
-                    <Text style={dirStyles.cardLocation}>{item.location}, {item.province}</Text>
-                  </View>
+                  <Ionicons
+                    name={expanded ? "chevron-up" : "chevron-down"}
+                    size={20}
+                    color={Colors.textMuted}
+                  />
+                </Pressable>
+
+                <View style={dirStyles.serviceBadge}>
+                  <Ionicons name="briefcase-outline" size={12} color={Colors.primary} />
+                  <Text style={dirStyles.serviceText} numberOfLines={expanded ? 4 : 1}>
+                    {labels.slice(0, expanded ? 6 : 1).join(" · ")}
+                  </Text>
                 </View>
-              </Pressable>
-              <View style={dirStyles.serviceBadge}>
-                <Ionicons name="briefcase-outline" size={12} color={Colors.primary} />
-                <Text style={dirStyles.serviceText}>{item.serviceType}</Text>
-              </View>
-              <Text style={dirStyles.cardBio}>{item.bio}</Text>
-              <Pressable
-                style={({ pressed }) => [dirStyles.chatButton, pressed && { opacity: 0.8 }]}
-                onPress={() => handleStartChat(item)}
-                disabled={startingChat === item.id}
-              >
-                {startingChat === item.id ? (
-                  <ActivityIndicator size="small" color={Colors.background} />
-                ) : (
-                  <>
-                    <Ionicons name="chatbubble-outline" size={16} color={Colors.background} />
-                    <Text style={dirStyles.chatButtonText}>Start Chat</Text>
-                  </>
+
+                {expanded && (
+                  <View style={dirStyles.expandedBlock}>
+                    {!!(item.servicesOffered || item.bio) && (
+                      <Text style={dirStyles.cardBio}>{item.servicesOffered || item.bio}</Text>
+                    )}
+                    {!!item.website && (
+                      <Text style={dirStyles.detailLine}>Website: {item.website}</Text>
+                    )}
+                    {!!item.address && (
+                      <Text style={dirStyles.detailLine}>Address: {item.address}</Text>
+                    )}
+                    <Text style={dirStyles.privacyHint}>
+                      Enquiries keep your number private until you choose to share it — same as Marketplace Instant Match.
+                    </Text>
+                  </View>
                 )}
-              </Pressable>
-            </View>
-          )}
+
+                <View style={dirStyles.cardActions}>
+                  <Pressable
+                    style={({ pressed }) => [dirStyles.enquireButton, pressed && { opacity: 0.85 }]}
+                    onPress={() => openEnquire(item)}
+                  >
+                    <Ionicons name="document-text-outline" size={16} color={Colors.background} />
+                    <Text style={dirStyles.chatButtonText}>Enquire</Text>
+                  </Pressable>
+                  <Pressable
+                    style={({ pressed }) => [dirStyles.chatButtonOutline, pressed && { opacity: 0.85 }]}
+                    onPress={() => handleStartChat(item)}
+                    disabled={startingChat === item.id}
+                  >
+                    {startingChat === item.id ? (
+                      <ActivityIndicator size="small" color={Colors.primary} />
+                    ) : (
+                      <>
+                        <Ionicons name="chatbubble-outline" size={16} color={Colors.primary} />
+                        <Text style={dirStyles.chatOutlineText}>Message</Text>
+                      </>
+                    )}
+                  </Pressable>
+                </View>
+              </View>
+            );
+          }}
           contentContainerStyle={[
             dirStyles.listContent,
             { paddingBottom: Platform.OS === "web" ? 84 : 49 + dirInsets.bottom + 8 },
@@ -263,6 +395,42 @@ function DirectoryView() {
             </View>
           }
         />
+      )}
+
+      {enquireFor && (
+        <View style={dirStyles.modalOverlay}>
+          <View style={dirStyles.modalCard}>
+            <Text style={dirStyles.modalTitle}>Enquire — {enquireFor.businessName}</Text>
+            <Text style={dirStyles.privacyHint}>
+              Signed in as {user?.firstName || "you"}. Your phone stays hidden until you reveal it in the chat.
+            </Text>
+            <TextInput
+              style={dirStyles.enquiryInput}
+              placeholder="What do you need? (short brief)"
+              placeholderTextColor={Colors.textMuted}
+              value={enquiryText}
+              onChangeText={setEnquiryText}
+              multiline
+              maxLength={800}
+            />
+            <View style={dirStyles.modalActions}>
+              <Pressable onPress={() => setEnquireFor(null)} style={dirStyles.modalCancel}>
+                <Text style={dirStyles.chatOutlineText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[dirStyles.enquireButton, { flex: 1 }]}
+                onPress={submitEnquiry}
+                disabled={sendingEnquiry}
+              >
+                {sendingEnquiry ? (
+                  <ActivityIndicator size="small" color={Colors.background} />
+                ) : (
+                  <Text style={dirStyles.chatButtonText}>Send enquiry</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </View>
       )}
     </View>
   );
@@ -382,6 +550,78 @@ const dirStyles = StyleSheet.create({
     fontSize: 14,
     color: Colors.background,
   },
+  cardActions: { flexDirection: "row", gap: 8, marginTop: 4 },
+  enquireButton: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    backgroundColor: Colors.primary,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  chatButtonOutline: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderColor: Colors.primary,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  chatOutlineText: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 14,
+    color: Colors.primary,
+  },
+  expandedBlock: { marginBottom: 10, gap: 6 },
+  detailLine: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12,
+    color: Colors.textSecondary,
+  },
+  privacyHint: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 11,
+    color: Colors.textMuted,
+    marginTop: 4,
+    lineHeight: 16,
+  },
+  modalOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.65)",
+    justifyContent: "flex-end",
+    zIndex: 50,
+  },
+  modalCard: {
+    backgroundColor: Colors.card,
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    padding: 20,
+    paddingBottom: 36,
+    gap: 10,
+  },
+  modalTitle: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 17,
+    color: Colors.text,
+  },
+  enquiryInput: {
+    minHeight: 100,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: 12,
+    padding: 12,
+    color: Colors.text,
+    fontFamily: "Poppins_400Regular",
+    fontSize: 14,
+    textAlignVertical: "top",
+  },
+  modalActions: { flexDirection: "row", gap: 10, alignItems: "center" },
+  modalCancel: { paddingVertical: 10, paddingHorizontal: 12 },
   emptyState: {
     alignItems: "center",
     paddingTop: 60,

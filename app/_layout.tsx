@@ -24,9 +24,12 @@ function RootLayoutNav() {
       <Stack.Screen name="index" />
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="chat/[id]" options={{ animation: "slide_from_right" }} />
+      <Stack.Screen name="enquiry/[id]" options={{ animation: "slide_from_right" }} />
+      <Stack.Screen name="user-profile/[id]" options={{ animation: "slide_from_right" }} />
       <Stack.Screen name="settings" options={{ animation: "slide_from_right" }} />
       <Stack.Screen name="profile" options={{ animation: "slide_from_right" }} />
-      <Stack.Screen name="new-chat" options={{ presentation: "formSheet", sheetAllowedDetents: [0.6], sheetGrabberVisible: true }} />
+      <Stack.Screen name="new-chat" options={{ presentation: "formSheet", sheetAllowedDetents: [0.85], sheetGrabberVisible: true }} />
+      <Stack.Screen name="new-group" options={{ presentation: "formSheet", sheetAllowedDetents: [0.85], sheetGrabberVisible: true }} />
       <Stack.Screen name="new-post" options={{ presentation: "formSheet", sheetAllowedDetents: [0.5], sheetGrabberVisible: true }} />
       <Stack.Screen name="post-comments" options={{ presentation: "formSheet", sheetAllowedDetents: [0.75, 1], sheetGrabberVisible: true }} />
       <Stack.Screen name="in-app-browser" options={{ animation: "slide_from_bottom" }} />

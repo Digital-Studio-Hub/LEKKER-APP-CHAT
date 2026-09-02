@@ -29,7 +29,7 @@
         "resourceClass": "m-medium"
       },
       "env": {
-        "EXPO_PUBLIC_DOMAIN": "your-production-domain.replit.app:5000"
+        "EXPO_PUBLIC_API_URL": "https://YOUR-REPLIT-SLUG.replit.app"
       }
     }
   },

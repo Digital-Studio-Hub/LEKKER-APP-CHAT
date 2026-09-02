@@ -249,11 +249,13 @@ function setupErrorHandler(app: express.Application) {
   setupErrorHandler(app);
 
   const port = parseInt(process.env.PORT || "5000", 10);
+  const onReplit = !!(process.env.REPLIT_DEV_DOMAIN || process.env.REPL_ID);
   server.listen(
     {
       port,
-      host: "0.0.0.0",
-      reusePort: true,
+      // Replit needs 0.0.0.0 + reusePort; macOS local rejects both.
+      host: onReplit ? "0.0.0.0" : "127.0.0.1",
+      ...(onReplit ? { reusePort: true } : {}),
     },
     () => {
       log(`express server serving on port ${port}`);

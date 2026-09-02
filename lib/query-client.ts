@@ -3,15 +3,28 @@ import { QueryClient, QueryFunction } from "@tanstack/react-query";
 import { getAuthToken } from "@/lib/auth-token";
 
 export function getApiUrl(): string {
-  let host = process.env.EXPO_PUBLIC_DOMAIN;
-
-  if (!host) {
-    throw new Error("EXPO_PUBLIC_DOMAIN is not set");
+  const explicit = process.env.EXPO_PUBLIC_API_URL;
+  if (explicit) {
+    return new URL(explicit).href;
   }
 
-  let url = new URL(`https://${host}`);
+  const host = process.env.EXPO_PUBLIC_DOMAIN;
+  if (!host) {
+    throw new Error("EXPO_PUBLIC_DOMAIN or EXPO_PUBLIC_API_URL is not set");
+  }
 
-  return url.href;
+  if (host.startsWith("http://") || host.startsWith("https://")) {
+    return new URL(host).href;
+  }
+
+  const isLocal =
+    host.startsWith("localhost") ||
+    host.startsWith("127.0.0.1") ||
+    host.startsWith("10.") ||
+    host.startsWith("192.168.");
+
+  const protocol = isLocal ? "http" : "https";
+  return new URL(`${protocol}://${host}`).href;
 }
 
 function getAuthHeaders(): Record<string, string> {

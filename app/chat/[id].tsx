@@ -51,6 +51,7 @@ import {
   editMessage,
   deleteMessage,
   uploadChatAttachment,
+  voteOnPoll,
 } from "@/lib/chat-api";
 
 function ReceiptIcon({ status }: { status?: string }) {
@@ -238,9 +239,10 @@ function PollBubble({ message, isMe, myUserId, onVote }: { message: ServerMessag
   } catch {}
   const totalVotes = options.reduce((sum, o) => sum + (o.votes?.length || 0), 0);
 
-  async function handleVote(_optionId: string) {
+  async function handleVote(optionId: string) {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    onVote();
+    const updated = await voteOnPoll(message.chatId, message.id, optionId);
+    if (updated) onVote();
   }
 
   const tColor = isMe ? Colors.background : Colors.text;

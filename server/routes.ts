@@ -4,7 +4,7 @@ import OpenAI from "openai";
 import rateLimit, { type Options } from "express-rate-limit";
 import { registerSchema, loginSchema, updateProfileSchema, users, chatMessages, passwordResetCodes, phoneVerificationCodes, emailVerificationCodes, userEmails } from "@shared/schema";
 import { storage, db } from "./storage";
-import { sql, or, and, ne, eq } from "drizzle-orm";
+import { sql, or, and, ne, eq, inArray } from "drizzle-orm";
 import {
   hashPassword,
   verifyPassword,
@@ -26,6 +26,47 @@ function normalizePhone(raw: string): string {
   if (digits.startsWith("27")) return "+" + digits;
   if (digits.length >= 7) return "+27" + digits;
   return digits;
+}
+
+/** SA-friendly phone variants so contact book formats still resolve registered users. */
+function phoneLookupVariants(raw: string): string[] {
+  const trimmed = (raw || "").trim();
+  if (!trimmed) return [];
+  const digits = trimmed.replace(/\D/g, "");
+  const variants = new Set<string>([
+    trimmed,
+    trimmed.replace(/\s/g, ""),
+    normalizePhone(trimmed),
+  ]);
+  if (digits.startsWith("27") && digits.length >= 11) {
+    variants.add(`+${digits}`);
+    variants.add(digits);
+    variants.add(`0${digits.slice(2)}`);
+  } else if (digits.startsWith("0") && digits.length >= 10) {
+    variants.add(`+27${digits.slice(1)}`);
+    variants.add(`27${digits.slice(1)}`);
+    variants.add(digits);
+  } else if (digits.length >= 9 && digits.length <= 11) {
+    variants.add(`+27${digits}`);
+    variants.add(`0${digits}`);
+    variants.add(`27${digits}`);
+  }
+  return [...variants].filter(Boolean);
+}
+
+async function findUserByPhoneFlexible(phone: string) {
+  const variants = phoneLookupVariants(phone);
+  for (const variant of variants) {
+    const match = await storage.getUserByPhone(variant);
+    if (match) return match;
+  }
+  if (variants.length === 0) return undefined;
+  const [row] = await db
+    .select()
+    .from(users)
+    .where(inArray(users.phone, variants))
+    .limit(1);
+  return row;
 }
 
 async function enrichParticipants(chatId: string) {
@@ -50,10 +91,20 @@ async function enrichParticipants(chatId: string) {
   return participantUsers;
 }
 
-const openrouter = new OpenAI({
-  baseURL: process.env.AI_INTEGRATIONS_OPENROUTER_BASE_URL,
-  apiKey: process.env.AI_INTEGRATIONS_OPENROUTER_API_KEY,
-});
+// Lazy so local messaging smoke tests can boot without OpenRouter secrets.
+let _openrouter: OpenAI | null = null;
+function getOpenRouter(): OpenAI {
+  if (_openrouter) return _openrouter;
+  const apiKey = process.env.AI_INTEGRATIONS_OPENROUTER_API_KEY;
+  if (!apiKey) {
+    throw new Error("AI_INTEGRATIONS_OPENROUTER_API_KEY is not configured");
+  }
+  _openrouter = new OpenAI({
+    baseURL: process.env.AI_INTEGRATIONS_OPENROUTER_BASE_URL,
+    apiKey,
+  });
+  return _openrouter;
+}
 
 interface DirectoryEntry {
   id: string;
@@ -805,6 +856,133 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  async function resolveOrCreateP2PChat(userId: string, participantId: string) {
+    if (participantId === userId) {
+      return { error: "Cannot create chat with yourself", status: 400 as const };
+    }
+    const otherUser = await storage.getUser(participantId);
+    if (!otherUser) {
+      return { error: "User not found", status: 404 as const };
+    }
+    const existing = await storage.findExistingP2PChat(userId, participantId);
+    if (existing) {
+      const participants = await enrichParticipants(existing.id);
+      return { chat: { ...existing, participants }, status: 200 as const };
+    }
+    const chat = await storage.createChat("p2p", userId);
+    await storage.addChatParticipant(chat.id, userId, "owner");
+    await storage.addChatParticipant(chat.id, participantId, "member");
+    const participants = await enrichParticipants(chat.id);
+    return { chat: { ...chat, participants }, status: 201 as const };
+  }
+
+  /**
+   * WhatsApp-style: given phone numbers from the device address book, return
+   * which ones belong to registered Lekker Chat users. Anyone with an account
+   * is messageable — no mutual friendship required.
+   */
+  app.post("/api/contacts/match", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const userId = req.user!.userId;
+      const rawPhones = Array.isArray(req.body?.phones) ? req.body.phones : [];
+      if (rawPhones.length === 0) {
+        return res.json({ matches: [] });
+      }
+      if (rawPhones.length > 1000) {
+        return res.status(400).json({ message: "Too many phone numbers (max 1000)" });
+      }
+
+      const requestPhones = rawPhones
+        .filter((p: unknown): p is string => typeof p === "string" && p.trim().length > 0)
+        .map((p: string) => p.trim())
+        .slice(0, 1000);
+
+      const variantToRequestPhone = new Map<string, string>();
+      const allVariants: string[] = [];
+      for (const phone of requestPhones) {
+        for (const variant of phoneLookupVariants(phone)) {
+          if (!variantToRequestPhone.has(variant)) {
+            variantToRequestPhone.set(variant, normalizePhone(phone));
+            allVariants.push(variant);
+          }
+        }
+      }
+
+      if (allVariants.length === 0) {
+        return res.json({ matches: [] });
+      }
+
+      const found = await db
+        .select({
+          id: users.id,
+          phone: users.phone,
+          firstName: users.firstName,
+          lastName: users.lastName,
+          username: users.username,
+          avatarColor: users.avatarColor,
+          profilePhoto: users.profilePhoto,
+          isVerifiedLekkerpreneur: users.isVerifiedLekkerpreneur,
+          businessName: users.businessName,
+          presence: users.presence,
+        })
+        .from(users)
+        .where(and(inArray(users.phone, allVariants), ne(users.id, userId)));
+
+      const matches = found.map((u) => ({
+        phone: variantToRequestPhone.get(u.phone) || normalizePhone(u.phone),
+        userId: u.id,
+        firstName: u.firstName,
+        lastName: u.lastName,
+        username: u.username,
+        avatarColor: u.avatarColor,
+        profilePhoto: u.profilePhoto,
+        isVerifiedLekkerpreneur: u.isVerifiedLekkerpreneur,
+        businessName: u.businessName,
+        presence: u.presence,
+      }));
+
+      res.json({ matches });
+    } catch (error) {
+      console.error("Contacts match error:", error);
+      res.status(500).json({ message: "Failed to match contacts" });
+    }
+  });
+
+  app.post("/api/chats/start-with-contact", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const userId = req.user!.userId;
+      const { userId: bodyUserId, lekkerNetworkId, phone } = req.body || {};
+
+      let participantId: string | undefined = typeof bodyUserId === "string" ? bodyUserId : undefined;
+
+      if (!participantId && typeof lekkerNetworkId === "string" && lekkerNetworkId.trim()) {
+        const match = await storage.getUserByLekkerNetworkId(lekkerNetworkId.trim());
+        participantId = match?.id;
+      }
+
+      if (!participantId && typeof phone === "string" && phone.trim()) {
+        const match = await findUserByPhoneFlexible(phone.trim());
+        participantId = match?.id;
+      }
+
+      if (!participantId) {
+        return res.status(404).json({
+          message: "This person is not on Lekker Chat yet. Ask them to install the app and register with the same phone or email.",
+          code: "USER_NOT_REGISTERED",
+        });
+      }
+
+      const result = await resolveOrCreateP2PChat(userId, participantId);
+      if ("error" in result && result.error) {
+        return res.status(result.status).json({ message: result.error });
+      }
+      return res.status(result.status).json({ chat: result.chat });
+    } catch (error) {
+      console.error("Start-with-contact error:", error);
+      res.status(500).json({ message: "Failed to start chat" });
+    }
+  });
+
   app.post("/api/chats", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { participantId, type, name } = req.body;
@@ -815,23 +993,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (!participantId) {
           return res.status(400).json({ message: "participantId is required for P2P chat" });
         }
-        if (participantId === userId) {
-          return res.status(400).json({ message: "Cannot create chat with yourself" });
+        const result = await resolveOrCreateP2PChat(userId, participantId);
+        if ("error" in result && result.error) {
+          return res.status(result.status).json({ message: result.error });
         }
-        const otherUser = await storage.getUser(participantId);
-        if (!otherUser) {
-          return res.status(404).json({ message: "User not found" });
-        }
-        const existing = await storage.findExistingP2PChat(userId, participantId);
-        if (existing) {
-          const participants = await enrichParticipants(existing.id);
-          return res.json({ chat: { ...existing, participants } });
-        }
-        const chat = await storage.createChat("p2p", userId);
-        await storage.addChatParticipant(chat.id, userId, "owner");
-        await storage.addChatParticipant(chat.id, participantId, "member");
-        const participants = await enrichParticipants(chat.id);
-        return res.status(201).json({ chat: { ...chat, participants } });
+        return res.status(result.status).json({ chat: result.chat });
       }
 
       if (chatType === "group") {
@@ -947,10 +1113,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const sender = await storage.getUser(userId);
-      if (!sender?.phoneVerified || !sender?.emailVerified) {
+      // WhatsApp-style: phone is the sole identity needed to message.
+      // Email remains optional for mail/SSO features.
+      if (!sender?.phoneVerified) {
         return res.status(403).json({
-          message: "You must verify both your phone number and at least one email address before sending messages.",
-          code: "UNVERIFIED"
+          message: "Verify your phone number before sending messages.",
+          code: "UNVERIFIED",
         });
       }
 
@@ -995,6 +1163,57 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Mark read error:", error);
       res.status(500).json({ message: "Failed to mark messages as read" });
+    }
+  });
+
+  app.post("/api/chats/:chatId/messages/:messageId/poll-vote", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { chatId, messageId } = req.params;
+      const userId = req.user!.userId;
+      const { optionId } = req.body || {};
+
+      if (!optionId || typeof optionId !== "string") {
+        return res.status(400).json({ message: "optionId is required" });
+      }
+
+      const isParticipant = await storage.isUserInChat(chatId, userId);
+      if (!isParticipant) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const [msg] = await db.select().from(chatMessages).where(
+        and(eq(chatMessages.id, messageId), eq(chatMessages.chatId, chatId)),
+      ).limit(1);
+
+      if (!msg || msg.type !== "poll" || msg.isDeleted) {
+        return res.status(404).json({ message: "Poll not found" });
+      }
+
+      let options: Array<{ id: string; text: string; votes?: string[] }> = [];
+      try {
+        options = msg.pollOptions ? JSON.parse(msg.pollOptions) : [];
+      } catch {
+        return res.status(400).json({ message: "Invalid poll data" });
+      }
+
+      for (const opt of options) {
+        opt.votes = (opt.votes || []).filter((v) => v !== userId);
+      }
+      const target = options.find((o) => o.id === optionId);
+      if (!target) {
+        return res.status(404).json({ message: "Poll option not found" });
+      }
+      target.votes = [...(target.votes || []), userId];
+
+      const [updated] = await db.update(chatMessages)
+        .set({ pollOptions: JSON.stringify(options) })
+        .where(eq(chatMessages.id, messageId))
+        .returning();
+
+      res.json({ message: updated });
+    } catch (error) {
+      console.error("Poll vote error:", error);
+      res.status(500).json({ message: "Failed to record vote" });
     }
   });
 
@@ -1319,24 +1538,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const { serviceType, province, search, page, limit: limitParam, sort } = req.query;
 
     try {
-      const apiResult = await fetchLekkerDirectory({
-        page: page ? Number(page) : 1,
-        limit: limitParam ? Math.min(Number(limitParam), 100) : 20,
-        search: typeof search === "string" ? search : undefined,
-        location: typeof province === "string" ? province : undefined,
-        category: typeof serviceType === "string" ? serviceType : undefined,
-        sort: typeof sort === "string" ? sort : undefined,
-      });
+      const { fetchMarketplaceServiceCategories } = await import("./lekkerNetwork");
+      const [apiResult, marketplaceParents] = await Promise.all([
+        fetchLekkerDirectory({
+          page: page ? Number(page) : 1,
+          limit: limitParam ? Math.min(Number(limitParam), 100) : 20,
+          search: typeof search === "string" ? search : undefined,
+          location: typeof province === "string" ? province : undefined,
+          // Pass slug or name — LN resolves Marketplace parents
+          category: typeof serviceType === "string" ? serviceType : undefined,
+          sort: typeof sort === "string" ? sort : undefined,
+        }),
+        fetchMarketplaceServiceCategories().catch(() => null),
+      ]);
 
       if (apiResult?.success && apiResult.data) {
         const entries = apiResult.data.map((d) => buildDirectoryEntry(d));
+        const fromApi =
+          apiResult.filters?.serviceCategories?.map((c) => c.name) ||
+          apiResult.filters?.serviceTypes ||
+          marketplaceParents?.map((c) => c.name) ||
+          SERVICE_TYPES;
 
         return res.json({
           entries,
           total: apiResult.total,
           page: apiResult.page,
           limit: apiResult.limit,
-          filters: { serviceTypes: SERVICE_TYPES, provinces: PROVINCES },
+          filters: {
+            serviceTypes: fromApi,
+            serviceCategories: apiResult.filters?.serviceCategories || marketplaceParents || [],
+            provinces: PROVINCES,
+          },
           source: "lekker_network",
         });
       }
@@ -1366,6 +1599,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/directory/:id", async (req: Request, res: Response) => {
     try {
+      const { fetchLekkerpreneurDetail } = await import("./lekkerNetwork");
+      const detail = await fetchLekkerpreneurDetail(req.params.id);
+      if (detail) {
+        return res.json({
+          ...buildDirectoryEntry(detail),
+          source: "lekker_network",
+        });
+      }
       const apiEntry = await fetchLekkerpreneurById(req.params.id);
       if (apiEntry) {
         return res.json({
@@ -1380,6 +1621,133 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const entry = DIRECTORY_DATA.find((d) => d.id === req.params.id);
     if (!entry) return res.status(404).json({ error: "Not found" });
     res.json(entry);
+  });
+
+  /** Directory → Instant Match lead on lekker.network (privacy-first enquiry). */
+  app.post("/api/directory/enquire", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const userId = req.user!.userId;
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(401).json({ success: false, message: "Unauthorized" });
+
+      const targetWorkspaceId = String(req.body?.targetWorkspaceId || "").trim();
+      const summary = String(req.body?.summary || "").trim();
+      if (!targetWorkspaceId || summary.length < 3) {
+        return res.status(400).json({
+          success: false,
+          message: "targetWorkspaceId and a short summary are required",
+        });
+      }
+
+      const { createDirectoryEnquiry } = await import("./lekkerNetwork");
+      const result = await createDirectoryEnquiry({
+        targetWorkspaceId,
+        seekerName: `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.username || "Lekker Chat user",
+        seekerEmail: user.email || null,
+        seekerPhone: user.phone || null,
+        summary,
+        province: req.body?.province || user.businessProvince || null,
+        serviceCategorySlugs: Array.isArray(req.body?.serviceCategorySlugs)
+          ? req.body.serviceCategorySlugs
+          : undefined,
+      });
+
+      if (!result?.success || !result.leadId) {
+        return res.status(400).json({
+          success: false,
+          message: result?.message || "Could not create enquiry on lekker.network",
+        });
+      }
+
+      return res.status(201).json({
+        success: true,
+        leadId: result.leadId,
+        lead: result.lead,
+      });
+    } catch (error: any) {
+      console.error("Directory enquire error:", error);
+      res.status(500).json({ success: false, message: "Failed to send enquiry" });
+    }
+  });
+
+  app.get("/api/enquiries", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const user = await storage.getUser(req.user!.userId);
+      if (!user) return res.status(401).json({ success: false, message: "Unauthorized" });
+      const { fetchSeekerEnquiries } = await import("./lekkerNetwork");
+      const result = await fetchSeekerEnquiries(user.email, user.phone);
+      return res.json({ success: true, leads: result?.leads || [] });
+    } catch (error) {
+      console.error("List enquiries error:", error);
+      res.status(500).json({ success: false, message: "Failed to list enquiries" });
+    }
+  });
+
+  app.get("/api/enquiries/:id", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const user = await storage.getUser(req.user!.userId);
+      if (!user) return res.status(401).json({ success: false, message: "Unauthorized" });
+      const url = new URL(
+        `${process.env.LEKKER_API_BASE_URL || "https://lekker.network"}/api/v1/chat/enquiries/${req.params.id}`,
+      );
+      if (user.email) url.searchParams.set("email", user.email);
+      if (user.phone) url.searchParams.set("phone", user.phone);
+      if (user.lekkerWorkspaceId) url.searchParams.set("workspaceId", user.lekkerWorkspaceId);
+      const apiKey = process.env.LEKKER_NETWORK_API_KEY || "";
+      const r = await fetch(url.toString(), { headers: { "X-API-Key": apiKey, Accept: "application/json" } });
+      const data = await r.json();
+      return res.status(r.status).json(data);
+    } catch (error) {
+      console.error("Get enquiry error:", error);
+      res.status(500).json({ success: false, message: "Failed to load enquiry" });
+    }
+  });
+
+  app.post("/api/enquiries/:id/messages", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const user = await storage.getUser(req.user!.userId);
+      if (!user) return res.status(401).json({ success: false, message: "Unauthorized" });
+      const content = String(req.body?.content || "").trim();
+      if (!content) return res.status(400).json({ success: false, message: "content required" });
+
+      const asProvider = !!req.body?.asProvider && !!user.lekkerWorkspaceId;
+      const { sendEnquiryMessage } = await import("./lekkerNetwork");
+      const result = await sendEnquiryMessage(req.params.id, {
+        content,
+        role: asProvider ? "provider" : "seeker",
+        email: user.email,
+        phone: user.phone,
+        workspaceId: asProvider ? user.lekkerWorkspaceId! : undefined,
+      });
+      if (!result?.success) {
+        return res.status(400).json({ success: false, message: (result as any)?.message || "Failed" });
+      }
+      return res.json(result);
+    } catch (error) {
+      console.error("Enquiry message error:", error);
+      res.status(500).json({ success: false, message: "Failed to send" });
+    }
+  });
+
+  app.patch("/api/enquiries/:id/privacy", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const user = await storage.getUser(req.user!.userId);
+      if (!user) return res.status(401).json({ success: false, message: "Unauthorized" });
+      const { updateEnquiryPrivacy } = await import("./lekkerNetwork");
+      const result = await updateEnquiryPrivacy(req.params.id, {
+        email: user.email,
+        phone: user.phone,
+        sharePhone: req.body?.sharePhone === true,
+        shareEmail: req.body?.shareEmail === true,
+      });
+      if (!result?.success) {
+        return res.status(400).json({ success: false, message: (result as any)?.message || "Failed" });
+      }
+      return res.json(result);
+    } catch (error) {
+      console.error("Enquiry privacy error:", error);
+      res.status(500).json({ success: false, message: "Failed to update privacy" });
+    }
   });
 
   app.post("/api/verify-lekkerpreneur", async (req: Request, res: Response) => {
@@ -1725,7 +2093,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.setHeader("X-Accel-Buffering", "no");
       res.flushHeaders();
 
-      const stream = await openrouter.chat.completions.create({
+      const stream = await getOpenRouter().chat.completions.create({
         model: "x-ai/grok-4.3",
         messages: [systemMessage, ...messages],
         stream: true,

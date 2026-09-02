@@ -76,6 +76,10 @@ export interface LekkerNetworkEntry {
   memberSince?: string;
   logoUrl?: string;
   category?: string;
+  directoryCategory?: string | null;
+  /** Marketplace Instant Match path ids — same directory as lekker.network Settings */
+  marketplaceServiceSlugs?: string[];
+  marketplaceServiceLabels?: string[];
   website?: string;
   province?: string;
   location?: {
@@ -88,12 +92,21 @@ export interface LekkerNetworkEntry {
   workspace?: LekkerWorkspace;
 }
 
+export interface MarketplaceParentCategory {
+  id: string;
+  name: string;
+}
+
 interface LekkerNetworkResponse {
   success?: boolean;
   total: number;
   page: number;
   limit: number;
   data: LekkerNetworkEntry[];
+  filters?: {
+    serviceCategories?: MarketplaceParentCategory[];
+    serviceTypes?: string[];
+  };
 }
 
 interface WorkspacesResponse {
@@ -344,20 +357,31 @@ export function buildSyncUserResponse(entry: LekkerNetworkEntry) {
   };
 }
 
-export function buildDirectoryEntry(d: LekkerNetworkEntry) {
+export function buildDirectoryEntry(d: LekkerNetworkEntry & { servicesOffered?: string | null; address?: string | null }) {
   const ws = resolveWorkspace(d);
+  const labels = d.marketplaceServiceLabels || [];
+  const serviceType =
+    labels[0] ||
+    d.directoryCategory ||
+    d.category ||
+    ws.category ||
+    "General";
   return {
     id: d.id,
     workspaceId: d.workspaceId || null,
     name: d.ownerName || d.businessName || "Unknown",
     businessName: d.businessName || d.ownerName || "Unknown Business",
-    tradingName: ws.tradingName || "",
-    serviceType: ws.category || "General",
+    tradingName: ws.tradingName || d.tradingName || "",
+    serviceType,
+    marketplaceServiceSlugs: d.marketplaceServiceSlugs || [],
+    marketplaceServiceLabels: labels,
+    servicesOffered: d.servicesOffered || "",
     location: ws.province || d.location?.province || "South Africa",
     province: ws.province || d.location?.province || "",
     phone: ws.businessPhone || d.phone || "",
     email: ws.businessEmail || d.email || "",
-    bio: "",
+    bio: d.servicesOffered || "",
+    address: d.address || "",
     avatarColor: "#F5B800",
     website: ws.businessWebsite || ws.websiteUrl || d.website || "",
     logoUrl: ws.logoUrl || d.logoUrl || "",
@@ -366,6 +390,55 @@ export function buildDirectoryEntry(d: LekkerNetworkEntry) {
     memberSince: d.memberSince || d.createdAt || "",
     workspace: ws,
   };
+}
+
+export async function fetchLekkerpreneurDetail(id: string): Promise<any | null> {
+  const url = `${LEKKER_API_BASE}/api/v1/lekkerpreneurs/${encodeURIComponent(id)}`;
+  const result = await apiFetch<{ success?: boolean; data?: any }>(url);
+  return result?.data || null;
+}
+
+export async function createDirectoryEnquiry(body: {
+  targetWorkspaceId: string;
+  seekerName: string;
+  seekerEmail?: string | null;
+  seekerPhone?: string | null;
+  summary: string;
+  serviceCategorySlugs?: string[];
+  province?: string | null;
+}): Promise<{ success: boolean; leadId?: string; lead?: any; message?: string } | null> {
+  const url = `${LEKKER_API_BASE}/api/v1/chat/enquiries`;
+  return apiFetch(url, { method: "POST", body: JSON.stringify(body) });
+}
+
+export async function fetchSeekerEnquiries(email?: string | null, phone?: string | null) {
+  const url = new URL(`${LEKKER_API_BASE}/api/v1/chat/enquiries`);
+  if (email) url.searchParams.set("email", email);
+  if (phone) url.searchParams.set("phone", phone);
+  return apiFetch<{ success?: boolean; leads?: any[] }>(url.toString());
+}
+
+export async function sendEnquiryMessage(
+  leadId: string,
+  body: { content: string; role: "seeker" | "provider"; email?: string; phone?: string; workspaceId?: string },
+) {
+  const url = `${LEKKER_API_BASE}/api/v1/chat/enquiries/${encodeURIComponent(leadId)}/messages`;
+  return apiFetch(url, { method: "POST", body: JSON.stringify(body) });
+}
+
+export async function updateEnquiryPrivacy(
+  leadId: string,
+  body: { email?: string; phone?: string; sharePhone?: boolean; shareEmail?: boolean },
+) {
+  const url = `${LEKKER_API_BASE}/api/v1/chat/enquiries/${encodeURIComponent(leadId)}/privacy`;
+  return apiFetch(url, { method: "PATCH", body: JSON.stringify(body) });
+}
+
+/** Shared Marketplace parent categories for directory filter chips. */
+export async function fetchMarketplaceServiceCategories(): Promise<MarketplaceParentCategory[] | null> {
+  const url = `${LEKKER_API_BASE}/api/v1/marketplace-service-categories`;
+  const result = await apiFetch<{ success?: boolean; parents?: MarketplaceParentCategory[] }>(url);
+  return result?.parents?.length ? result.parents : null;
 }
 
 export function buildWorkspaceDirectoryEntry(ws: WorkspaceListItem) {

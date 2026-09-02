@@ -19,13 +19,22 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/lib/auth-context";
-import { searchUsers, createP2PChat, SearchUser } from "@/lib/chat-api";
+import {
+  searchUsers,
+  createP2PChat,
+  startChatWithContact,
+  matchContacts,
+  SearchUser,
+} from "@/lib/chat-api";
 import { getApiUrl } from "@/lib/query-client";
 
 interface MatchedContact {
   id: string;
   name: string;
   phone: string;
+  /** Set when this phone belongs to a registered Lekker Chat account. */
+  userId?: string;
+  isOnLekkerChat: boolean;
   isLekkerpreneur: boolean;
   avatarColor: string;
 }
@@ -95,6 +104,13 @@ export default function NewChatScreen() {
       return;
     }
 
+    const { ensureContactsBookConsent } = await import("@/lib/contacts-consent");
+    const consented = await ensureContactsBookConsent();
+    if (!consented) {
+      await loadDirectoryOnly();
+      return;
+    }
+
     setIsLoadingContacts(true);
     try {
       const Contacts = await import("expo-contacts");
@@ -110,61 +126,76 @@ export default function NewChatScreen() {
         fields: [Contacts.Fields.PhoneNumbers, Contacts.Fields.Name],
       });
 
-      const url = new URL("/api/directory", getApiUrl());
-      const res = await fetch(url.toString());
-      const dirData = await res.json();
-      const dirPhones = new Map<string, any>();
-      for (const entry of dirData.entries) {
-        dirPhones.set(normalizePhone(entry.phone), entry);
-      }
-
-      const matched: MatchedContact[] = [];
-      const others: MatchedContact[] = [];
+      // Device contacts → normalize phones
+      const deviceContacts: { name: string; phone: string }[] = [];
       const seen = new Set<string>();
-
       for (const contact of data) {
         if (!contact.phoneNumbers || !contact.name) continue;
-
         for (const pn of contact.phoneNumbers) {
           if (!pn.number) continue;
           const normalized = normalizePhone(pn.number);
           if (seen.has(normalized)) continue;
           seen.add(normalized);
-
-          const dirEntry = dirPhones.get(normalized);
-          const contactItem: MatchedContact = {
-            id: normalized,
-            name: contact.name,
-            phone: normalized,
-            isLekkerpreneur: !!dirEntry,
-            avatarColor: dirEntry?.avatarColor || randomColor(),
-          };
-
-          if (dirEntry) {
-            matched.push(contactItem);
-          } else {
-            others.push(contactItem);
-          }
+          deviceContacts.push({ name: contact.name, phone: normalized });
         }
       }
 
-      for (const [phone, entry] of dirPhones) {
-        if (!seen.has(phone)) {
-          matched.push({
-            id: phone,
-            name: entry.name,
-            phone,
-            isLekkerpreneur: true,
-            avatarColor: entry.avatarColor,
+      // WhatsApp-style: match against ALL registered Chat users (not only directory)
+      const registered = await matchContacts(deviceContacts.map((c) => c.phone));
+      const registeredByPhone = new Map(
+        registered.map((m) => [normalizePhone(m.phone), m]),
+      );
+
+      // Optional: lekkerpreneur badge from Instant Match directory
+      let dirPhones = new Map<string, any>();
+      try {
+        const url = new URL("/api/directory", getApiUrl());
+        const res = await fetch(url.toString());
+        const dirData = await res.json();
+        for (const entry of dirData.entries || []) {
+          if (entry.phone) dirPhones.set(normalizePhone(entry.phone), entry);
+        }
+      } catch {
+        /* directory enrichment is optional */
+      }
+
+      const onApp: MatchedContact[] = [];
+      const invite: MatchedContact[] = [];
+
+      for (const dc of deviceContacts) {
+        const match = registeredByPhone.get(dc.phone);
+        const dirEntry = dirPhones.get(dc.phone);
+        if (match) {
+          const displayName =
+            `${match.firstName || ""} ${match.lastName || ""}`.trim() ||
+            match.username ||
+            dc.name;
+          onApp.push({
+            id: match.userId,
+            name: displayName,
+            phone: dc.phone,
+            userId: match.userId,
+            isOnLekkerChat: true,
+            isLekkerpreneur: !!match.isVerifiedLekkerpreneur || !!dirEntry,
+            avatarColor: match.avatarColor || dirEntry?.avatarColor || randomColor(),
+          });
+        } else {
+          invite.push({
+            id: dc.phone,
+            name: dc.name,
+            phone: dc.phone,
+            isOnLekkerChat: false,
+            isLekkerpreneur: !!dirEntry,
+            avatarColor: dirEntry?.avatarColor || randomColor(),
           });
         }
       }
 
-      matched.sort((a, b) => a.name.localeCompare(b.name));
-      others.sort((a, b) => a.name.localeCompare(b.name));
+      onApp.sort((a, b) => a.name.localeCompare(b.name));
+      invite.sort((a, b) => a.name.localeCompare(b.name));
 
-      setMatchedContacts(matched);
-      setOtherContacts(others);
+      setMatchedContacts(onApp);
+      setOtherContacts(invite);
     } catch (e) {
       console.error("Error loading contacts:", e);
       await loadDirectoryOnly();
@@ -175,20 +206,44 @@ export default function NewChatScreen() {
 
   async function loadDirectoryOnly() {
     try {
+      // Fallback when contacts unavailable: show Instant Match directory.
+      // Users can still search any registered account by name/phone/email.
       const url = new URL("/api/directory", getApiUrl());
       const res = await fetch(url.toString());
       const dirData = await res.json();
-      const entries: MatchedContact[] = dirData.entries.map((e: any) => ({
-        id: e.phone,
-        name: e.name,
-        phone: e.phone,
-        isLekkerpreneur: true,
-        avatarColor: e.avatarColor,
-      }));
-      setMatchedContacts(entries);
+      const phones = (dirData.entries || [])
+        .map((e: any) => e.phone)
+        .filter(Boolean) as string[];
+      const registered = phones.length ? await matchContacts(phones) : [];
+      const byPhone = new Map(registered.map((m) => [normalizePhone(m.phone), m]));
+
+      const entries: MatchedContact[] = (dirData.entries || []).map((e: any) => {
+        const phone = normalizePhone(e.phone || "");
+        const match = byPhone.get(phone);
+        return {
+          id: match?.userId || phone,
+          name: match
+            ? `${match.firstName || ""} ${match.lastName || ""}`.trim() || match.username || e.name
+            : e.name,
+          phone,
+          userId: match?.userId,
+          isOnLekkerChat: !!match,
+          isLekkerpreneur: true,
+          avatarColor: match?.avatarColor || e.avatarColor || randomColor(),
+        };
+      });
+      setMatchedContacts(entries.filter((e) => e.isOnLekkerChat));
+      setOtherContacts(entries.filter((e) => !e.isOnLekkerChat));
     } catch (e) {
       console.error("Error loading directory:", e);
     }
+  }
+
+  function openChat(chatId: string) {
+    router.back();
+    setTimeout(() => {
+      router.push({ pathname: "/chat/[id]", params: { id: chatId } });
+    }, 100);
   }
 
   async function handleStartChatWithUser(searchUser: SearchUser) {
@@ -197,10 +252,7 @@ export default function NewChatScreen() {
     try {
       const chat = await createP2PChat(searchUser.id);
       if (chat) {
-        router.back();
-        setTimeout(() => {
-          router.push({ pathname: "/chat/[id]", params: { id: chat.id } });
-        }, 100);
+        openChat(chat.id);
       } else {
         Alert.alert("Error", "Could not start chat. Please try again.");
       }
@@ -213,25 +265,27 @@ export default function NewChatScreen() {
   }
 
   async function handleStartChat(contact: MatchedContact) {
-    if (!contact.isLekkerpreneur) {
+    if (!contact.isOnLekkerChat) {
       handleInvite(contact);
       return;
     }
     setStartingChat(contact.id);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
-      const results = await searchUsers(contact.phone);
-      if (results.length > 0) {
-        const chat = await createP2PChat(results[0].id);
-        if (chat) {
-          router.back();
-          setTimeout(() => {
-            router.push({ pathname: "/chat/[id]", params: { id: chat.id } });
-          }, 100);
-          return;
-        }
+      const result = await startChatWithContact(
+        contact.userId
+          ? { userId: contact.userId }
+          : { phone: contact.phone },
+      );
+      if (result.chat) {
+        openChat(result.chat.id);
+        return;
       }
-      Alert.alert("Not Found", "This user is not registered on Lekker Chat yet.");
+      if (result.code === "USER_NOT_REGISTERED") {
+        handleInvite(contact);
+        return;
+      }
+      Alert.alert("Error", result.message || "Could not start chat. Please try again.");
     } catch (e) {
       console.error("Start chat error:", e);
       Alert.alert("Error", "Could not start chat. Please try again.");
@@ -266,20 +320,15 @@ export default function NewChatScreen() {
 
     Alert.alert(
       "Invite to Lekker Chat",
-      `${contact.name} is not on Lekker Chat yet. Send them an invite?`,
+      `${contact.name} is not on Lekker Chat yet. Invite them on WhatsApp?`,
       [
         { text: "Cancel", style: "cancel" },
         {
-          text: "Send via SMS",
-          onPress: () => {
-            const smsUrl = Platform.OS === "ios"
-              ? `sms:${contact.phone}&body=${encodeURIComponent(inviteMessage)}`
-              : `sms:${contact.phone}?body=${encodeURIComponent(inviteMessage)}`;
-            Linking.openURL(smsUrl).catch(() => shareInvite(inviteMessage));
-          },
+          text: "Copy link",
+          onPress: () => shareInvite(inviteMessage),
         },
         {
-          text: "Send via WhatsApp",
+          text: "WhatsApp",
           onPress: () => {
             const cleaned = contact.phone.replace(/\D/g, "");
             const waUrl = `https://wa.me/${cleaned}?text=${encodeURIComponent(inviteMessage)}`;
@@ -309,9 +358,15 @@ export default function NewChatScreen() {
   type SectionItem = { _isSearchUser: boolean } & Record<string, any>;
 
   const sections: { title: string; data: SectionItem[] }[] = [
-    ...(searchResults.length > 0 ? [{ title: "Lekker Chat Users", data: searchResults.map(u => ({ ...u, _isSearchUser: true })) as SectionItem[] }] : []),
-    ...(filteredMatched.length > 0 ? [{ title: "Lekkerpreneurs", data: filteredMatched.map(c => ({ ...c, _isSearchUser: false })) as SectionItem[] }] : []),
-    ...(filteredOthers.length > 0 ? [{ title: "Contacts", data: filteredOthers.map(c => ({ ...c, _isSearchUser: false })) as SectionItem[] }] : []),
+    ...(searchResults.length > 0
+      ? [{ title: "Search results", data: searchResults.map((u) => ({ ...u, _isSearchUser: true })) as SectionItem[] }]
+      : []),
+    ...(filteredMatched.length > 0
+      ? [{ title: "On Lekker Chat", data: filteredMatched.map((c) => ({ ...c, _isSearchUser: false })) as SectionItem[] }]
+      : []),
+    ...(filteredOthers.length > 0
+      ? [{ title: "Invite to Lekker Chat", data: filteredOthers.map((c) => ({ ...c, _isSearchUser: false })) as SectionItem[] }]
+      : []),
   ];
 
   function getSearchUserDisplayName(u: SearchUser): string {
@@ -419,17 +474,20 @@ export default function NewChatScreen() {
                       <Ionicons name="checkmark-circle" size={16} color={Colors.primary} />
                     )}
                   </View>
-                  <Text style={styles.contactPhone}>{contact.phone}</Text>
+                  <Text style={styles.contactPhone}>
+                    {contact.isOnLekkerChat ? "Available on Lekker Chat · " : ""}
+                    {contact.phone}
+                  </Text>
                 </View>
                 {startingChat === contact.id ? (
                   <ActivityIndicator size="small" color={Colors.primary} />
-                ) : contact.isLekkerpreneur ? (
+                ) : contact.isOnLekkerChat ? (
                   <View style={styles.chatIcon}>
                     <Ionicons name="chatbubble" size={16} color={Colors.background} />
                   </View>
                 ) : (
                   <View style={styles.inviteIcon}>
-                    <Ionicons name="paper-plane" size={14} color={Colors.primary} />
+                    <Ionicons name="logo-whatsapp" size={16} color={Colors.primary} />
                   </View>
                 )}
               </Pressable>
@@ -449,7 +507,7 @@ export default function NewChatScreen() {
               <View style={styles.searchNote}>
                 <Ionicons name="search-outline" size={20} color={Colors.textMuted} />
                 <Text style={styles.searchNoteText}>
-                  Search for registered users above by name, username, phone, or email
+                  Anyone with a Lekker Chat account can be messaged — search by name, username, phone, or email
                 </Text>
               </View>
             </View>
