@@ -68,8 +68,6 @@ import {
 } from "./lekker-connect";
 import { normaliseMobile, phoneToPlaceholderEmail, phoneToUsername } from "../shared/mobile-utils";
 import type { User } from "@shared/schema";
-import { sendPushNotifications } from "./push-sender";
-
 function rejectBlockedContent(res: Response, ...texts: Array<string | null | undefined>): boolean {
   for (const text of texts) {
     if (text && containsBlockedContent(text)) {
@@ -1575,42 +1573,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const message = await storage.sendMessage(chatId, userId, content || null, msgType, extras);
 
+      // Expo push via push.ts (uses expoPushToken schema)
       void notifyChatMessage(chatId, userId, message);
 
       const participants = await storage.getChatParticipants(chatId);
-      const recipientIds: string[] = [];
       for (const p of participants) {
         if (p.userId !== userId) {
-          recipientIds.push(p.userId);
           const otherUser = await storage.getUser(p.userId);
           if (otherUser?.autoReplyEnabled && otherUser.autoReplyMessage) {
             const autoReply = await storage.sendMessage(chatId, p.userId, otherUser.autoReplyMessage, "text");
             void notifyChatMessage(chatId, p.userId, autoReply);
-          }
-        }
-      }
-
-      if (recipientIds.length > 0) {
-        const notifiableIds = await Promise.all(
-          recipientIds.map(async (rid) => {
-            const u = await storage.getUser(rid);
-            return u?.notificationsEnabled ? rid : null;
-          }),
-        ).then((ids) => ids.filter(Boolean) as string[]);
-
-        if (notifiableIds.length > 0) {
-          const tokens = await storage.getPushTokensForUsers(notifiableIds);
-          if (tokens.length > 0) {
-            const senderName = `${sender!.firstName} ${sender!.lastName}`.trim();
-            const preview = msgType !== "text"
-              ? `Sent a ${msgType}`
-              : (content || "").slice(0, 60);
-            sendPushNotifications(
-              tokens.map((t) => t.token),
-              senderName,
-              preview,
-              { chatId, type: "message" },
-            ).catch(() => {});
           }
         }
       }

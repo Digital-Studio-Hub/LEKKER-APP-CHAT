@@ -103,7 +103,8 @@ const chipStyles = StyleSheet.create({
   },
 });
 
-function DirectoryView() {
+/** Shared Instant Match directory — used by Directory tab and Network. */
+export function DirectoryView() {
   const dirInsets = useSafeAreaInsets();
   const { user } = useAuth();
   const [entries, setEntries] = useState<DirectoryEntry[]>([]);
@@ -261,7 +262,7 @@ function DirectoryView() {
           placeholderTextColor={Colors.textMuted}
           value={searchText}
           onChangeText={setSearchText}
-          onSubmitEditing={fetchDirectory}
+          onSubmitEditing={() => { void fetchDirectory(); }}
           returnKeyType="search"
         />
         {searchText.length > 0 && (

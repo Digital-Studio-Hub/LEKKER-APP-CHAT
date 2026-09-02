@@ -104,12 +104,23 @@ function ReceiptIcon({ chat, myUserId }: { chat: ServerChat; myUserId: string })
   return <Ionicons name="checkmark-done" size={14} color="#4CD964" />;
 }
 
+type EnquiryPreview = {
+  id: string;
+  summary?: string;
+  serviceLabel?: string;
+  status?: string;
+  provider?: { businessName?: string };
+  lastMessageAt?: string;
+  updatedAt?: string;
+};
+
 export default function ChatsScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const [chats, setChats] = useState<ServerChat[]>([]);
   const [blockedIds, setBlockedIds] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState("");
+  const [enquiries, setEnquiries] = useState<EnquiryPreview[]>([]);
 
   const filteredChats = useMemo(() => {
     if (!searchQuery.trim()) return chats;
@@ -126,7 +137,11 @@ export default function ChatsScreen() {
     useCallback(() => {
       loadChats();
       loadBlockedUsers();
-      const interval = setInterval(loadChats, 5000);
+      loadEnquiries();
+      const interval = setInterval(() => {
+        loadChats();
+        loadEnquiries();
+      }, 5000);
       return () => clearInterval(interval);
     }, []),
   );
@@ -134,6 +149,22 @@ export default function ChatsScreen() {
   async function loadChats() {
     const serverChats = await fetchChats();
     setChats(serverChats);
+  }
+
+  async function loadEnquiries() {
+    try {
+      const { getApiUrl } = await import("@/lib/query-client");
+      const { getAuthToken } = await import("@/lib/auth-token");
+      const res = await fetch(new URL("/api/enquiries", getApiUrl()).toString(), {
+        headers: { Authorization: `Bearer ${getAuthToken() || ""}` },
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      const list = (data.leads || data.enquiries || []) as EnquiryPreview[];
+      setEnquiries(Array.isArray(list) ? list.slice(0, 20) : []);
+    } catch {
+      /* optional strip — ignore offline */
+    }
   }
 
   async function loadBlockedUsers() {
@@ -270,6 +301,40 @@ export default function ChatsScreen() {
         windowSize={5}
         removeClippedSubviews={Platform.OS !== "web"}
         initialNumToRender={15}
+        ListHeaderComponent={
+          enquiries.length > 0 ? (
+            <View style={styles.enquiriesSection}>
+              <View style={styles.enquiriesHeader}>
+                <Text style={styles.enquiriesTitle}>Enquiries</Text>
+                <Text style={styles.enquiriesHint}>Private until you reveal your number</Text>
+              </View>
+              {enquiries.map((e) => (
+                <Pressable
+                  key={e.id}
+                  style={({ pressed }) => [styles.enquiryRow, pressed && styles.chatItemPressed]}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    router.push({ pathname: "/enquiry/[id]", params: { id: e.id } });
+                  }}
+                >
+                  <View style={styles.enquiryIcon}>
+                    <Ionicons name="briefcase-outline" size={18} color={Colors.background} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.chatName} numberOfLines={1}>
+                      {e.provider?.businessName || e.serviceLabel || "Marketplace enquiry"}
+                    </Text>
+                    <Text style={styles.chatLastMessage} numberOfLines={1}>
+                      {e.summary || e.serviceLabel || "Open thread"}
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
+                </Pressable>
+              ))}
+              <View style={styles.enquiriesDivider} />
+            </View>
+          ) : null
+        }
         renderItem={({ item }) => {
           const chatName = getDisplayNameForChat(item);
           const avatarColor = getChatAvatarColor(item, myUserId);
@@ -382,6 +447,48 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     minWidth: 44,
     minHeight: 44,
+  },
+  enquiriesSection: {
+    paddingTop: 4,
+    paddingBottom: 4,
+  },
+  enquiriesHeader: {
+    paddingHorizontal: 4,
+    marginBottom: 8,
+  },
+  enquiriesTitle: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: fontScale(13),
+    color: Colors.textMuted,
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+  },
+  enquiriesHint: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 11,
+    color: Colors.textMuted,
+    marginTop: 2,
+  },
+  enquiryRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+  },
+  enquiryIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: Colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  enquiriesDivider: {
+    height: 1,
+    backgroundColor: Colors.border,
+    marginTop: 8,
+    marginBottom: 4,
   },
   searchContainer: {
     flexDirection: "row",

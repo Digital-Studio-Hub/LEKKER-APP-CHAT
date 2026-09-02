@@ -10,6 +10,7 @@ import {
   Switch,
   Platform,
   Alert,
+  Linking,
 } from "react-native";
 import { useLocalSearchParams, router, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -18,6 +19,7 @@ import Colors from "@/constants/colors";
 import { getApiUrl } from "@/lib/query-client";
 import { getAuthToken } from "@/lib/auth-token";
 import { useAuth } from "@/lib/auth-context";
+import { startChatWithContact } from "@/lib/chat-api";
 
 type Turn = { role: string; content: string; createdAt?: string; businessName?: string };
 
@@ -31,6 +33,7 @@ export default function EnquiryThreadScreen() {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [sharePhone, setSharePhone] = useState(false);
+  const [startingDm, setStartingDm] = useState(false);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -107,6 +110,36 @@ export default function EnquiryThreadScreen() {
   }
 
   const transcript: Turn[] = Array.isArray(lead?.transcript) ? lead.transcript : [];
+  const revealedPhone =
+    sharePhone || !!lead?.privacy?.sharePhone
+      ? lead?.seekerPhone || lead?.privacy?.seekerPhone || null
+      : null;
+  const providerPhone = lead?.provider?.phone || lead?.providerPhone || null;
+
+  async function openLekkerChatDm(phone?: string | null) {
+    if (!phone) {
+      Alert.alert("No number", "No phone number is available to message yet.");
+      return;
+    }
+    setStartingDm(true);
+    try {
+      const { chat, code, message } = await startChatWithContact({ phone });
+      if (chat?.id) {
+        router.push({ pathname: "/chat/[id]", params: { id: chat.id } });
+        return;
+      }
+      if (code === "USER_NOT_REGISTERED") {
+        Alert.alert(
+          "Not on Lekker Chat yet",
+          "Keep chatting in this enquiry thread, or ask them to install Lekker Chat.",
+        );
+      } else {
+        Alert.alert("Couldn't start chat", message || "Please try again.");
+      }
+    } finally {
+      setStartingDm(false);
+    }
+  }
 
   return (
     <View style={[styles.container, { paddingTop: insets.top + (Platform.OS === "web" ? 12 : 0) }]}>
@@ -143,6 +176,66 @@ export default function EnquiryThreadScreen() {
           />
         </View>
       )}
+
+      {role === "provider" && (
+        <View style={styles.privacyBar}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.privacyTitle}>
+              {revealedPhone ? "Number revealed" : "Phone private"}
+            </Text>
+            <Text style={styles.privacyHint}>
+              {revealedPhone
+                ? revealedPhone
+                : "Customer phone stays hidden until they reveal it."}
+            </Text>
+          </View>
+          {revealedPhone ? (
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              <Pressable
+                style={styles.actionChip}
+                onPress={() => Linking.openURL(`tel:${revealedPhone}`)}
+              >
+                <Ionicons name="call" size={14} color={Colors.background} />
+                <Text style={styles.actionChipText}>Call</Text>
+              </Pressable>
+              <Pressable
+                style={styles.actionChip}
+                onPress={() => openLekkerChatDm(revealedPhone)}
+                disabled={startingDm}
+              >
+                {startingDm ? (
+                  <ActivityIndicator size="small" color={Colors.background} />
+                ) : (
+                  <>
+                    <Ionicons name="chatbubble" size={14} color={Colors.background} />
+                    <Text style={styles.actionChipText}>Chat</Text>
+                  </>
+                )}
+              </Pressable>
+            </View>
+          ) : null}
+        </View>
+      )}
+
+      {role === "seeker" && providerPhone ? (
+        <View style={styles.dmBar}>
+          <Text style={styles.privacyHint}>Message this lekkerpreneur on Lekker Chat</Text>
+          <Pressable
+            style={styles.actionChip}
+            onPress={() => openLekkerChatDm(providerPhone)}
+            disabled={startingDm}
+          >
+            {startingDm ? (
+              <ActivityIndicator size="small" color={Colors.background} />
+            ) : (
+              <>
+                <Ionicons name="chatbubble" size={14} color={Colors.background} />
+                <Text style={styles.actionChipText}>Open chat</Text>
+              </>
+            )}
+          </Pressable>
+        </View>
+      ) : null}
 
       {loading && !lead ? (
         <ActivityIndicator style={{ marginTop: 40 }} color={Colors.primary} />
@@ -217,6 +310,31 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.card,
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
+  },
+  dmBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: Colors.cardElevated || Colors.card,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  actionChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: Colors.primary,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 16,
+  },
+  actionChipText: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 12,
+    color: Colors.background,
   },
   privacyTitle: { fontFamily: "Poppins_600SemiBold", fontSize: 13, color: Colors.text },
   privacyHint: { fontFamily: "Poppins_400Regular", fontSize: 11, color: Colors.textMuted, marginTop: 2 },
