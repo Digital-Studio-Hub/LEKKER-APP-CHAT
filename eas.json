@@ -43,7 +43,8 @@
       "ios": {
         "ascApiKeyPath": "/Users/delanoalexander/.config/dsh/app-store-connect/AuthKey_A4T24MSX3A.p8",
         "ascApiKeyIssuerId": "563900f9-9e82-4738-a9e9-8f15abe80547",
-        "ascApiKeyId": "A4T24MSX3A"
+        "ascApiKeyId": "A4T24MSX3A",
+        "ascAppId": "6761997512"
       }
     }
   }

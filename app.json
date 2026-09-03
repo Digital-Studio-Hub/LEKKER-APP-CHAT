@@ -17,8 +17,8 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.lekker.chat",
-      "buildNumber": "6",
+      "bundleIdentifier": "app.replit.lekkerchatios",
+      "buildNumber": "7",
       "entitlements": {
         "com.apple.developer.declared-age-range": true
       },
