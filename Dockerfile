@@ -28,8 +28,9 @@ COPY package.json package-lock.json ./
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=builder /app/server_dist ./server_dist
 COPY --from=builder /app/shared ./shared
-# Optional static landing if present
+# Landing page + brand icons (served at / and /assets/images/*)
 COPY server/templates ./server/templates
+COPY assets/images/icon.png assets/images/lekker-logo.png assets/images/favicon.png ./assets/images/
 
 EXPOSE 8080
 CMD ["node", "server_dist/index.js"]
