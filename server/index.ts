@@ -249,13 +249,15 @@ function setupErrorHandler(app: express.Application) {
   setupErrorHandler(app);
 
   const port = parseInt(process.env.PORT || "5000", 10);
-  const onReplit = !!(process.env.REPLIT_DEV_DOMAIN || process.env.REPL_ID);
+  // Cloud Run sets K_SERVICE; Replit sets REPLIT_*; local macOS needs 127.0.0.1.
+  const onCloud =
+    !!(process.env.K_SERVICE || process.env.REPLIT_DEV_DOMAIN || process.env.REPL_ID) ||
+    process.env.LISTEN_HOST === "0.0.0.0";
   server.listen(
     {
       port,
-      // Replit needs 0.0.0.0 + reusePort; macOS local rejects both.
-      host: onReplit ? "0.0.0.0" : "127.0.0.1",
-      ...(onReplit ? { reusePort: true } : {}),
+      host: onCloud ? "0.0.0.0" : "127.0.0.1",
+      ...(process.env.REPLIT_DEV_DOMAIN || process.env.REPL_ID ? { reusePort: true } : {}),
     },
     () => {
       log(`express server serving on port ${port}`);

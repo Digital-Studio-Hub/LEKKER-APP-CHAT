@@ -30,7 +30,7 @@
         "resourceClass": "m-medium"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://lekkerchat.replit.app"
+        "EXPO_PUBLIC_API_URL": "https://chat.lekker.network"
       }
     }
   },

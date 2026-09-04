@@ -1,0 +1,15 @@
+node_modules
+.expo
+ios
+android
+dist
+store-screenshots
+.git
+.env
+.env.*
+*.md
+attached_assets
+coverage
+server_dist
+npm-debug.log*
+.DS_Store

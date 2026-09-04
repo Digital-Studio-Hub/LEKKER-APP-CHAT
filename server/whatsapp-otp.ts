@@ -4,7 +4,11 @@ import { normaliseMobile } from "../shared/mobile-utils";
 function getConfig() {
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
   const authToken = process.env.TWILIO_AUTH_TOKEN;
-  const from = process.env.TWILIO_WHATSAPP_FROM ?? process.env.TWILIO_BUSINESS_FROM;
+  // Prefer dedicated WhatsApp sender; fall back to TWILIO_PHONE_NUMBER (EAS / legacy).
+  const from =
+    process.env.TWILIO_WHATSAPP_FROM ??
+    process.env.TWILIO_BUSINESS_FROM ??
+    process.env.TWILIO_PHONE_NUMBER;
   const isApiKey = accountSid?.startsWith("SK");
   const mainAccountSid = isApiKey ? process.env.TWILIO_MAIN_ACCOUNT_SID : undefined;
   return { accountSid, authToken, from, isApiKey, mainAccountSid };
