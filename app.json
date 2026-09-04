@@ -18,7 +18,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "app.replit.lekkerchatios",
-      "buildNumber": "12",
+      "buildNumber": "13",
       "infoPlist": {
         "UIRequiresFullScreen": false,
         "NSCameraUsageDescription": "Lekker Chat uses your camera to take photos and share them in conversations.",
@@ -36,7 +36,7 @@
     },
     "android": {
       "package": "com.lekker.chat",
-      "versionCode": 20,
+      "versionCode": 21,
       "compileSdkVersion": 35,
       "targetSdkVersion": 35,
       "minSdkVersion": 23,
