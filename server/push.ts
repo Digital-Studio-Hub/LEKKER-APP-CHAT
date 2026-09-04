@@ -59,23 +59,44 @@ async function sendExpoPush(
 
   for (const chunk of chunks) {
     try {
+      const payload = chunk.map((m) => ({
+        to: m.to,
+        title: m.title,
+        body: m.body,
+        data: m.data,
+        sound: m.sound ?? "default",
+        priority: "high" as const,
+        // Android closed-app / heads-up channel (must match client channel id)
+        channelId: "messages",
+        // Wake iOS for background delivery when possible
+        _contentAvailable: true,
+      }));
       const res = await fetch(EXPO_PUSH_URL, {
         method: "POST",
         headers: {
           Accept: "application/json",
+          "Accept-Encoding": "gzip, deflate",
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(chunk.map((m) => ({
-          to: m.to,
-          title: m.title,
-          body: m.body,
-          data: m.data,
-          sound: m.sound ?? "default",
-          priority: "high",
-        }))),
+        body: JSON.stringify(payload),
       });
+      const bodyText = await res.text();
       if (!res.ok) {
-        console.error("[Push] Expo API error:", res.status, await res.text());
+        console.error("[Push] Expo API error:", res.status, bodyText);
+      } else {
+        try {
+          const parsed = JSON.parse(bodyText);
+          const tickets = parsed?.data;
+          if (Array.isArray(tickets)) {
+            for (const t of tickets) {
+              if (t?.status === "error") {
+                console.error("[Push] Expo ticket error:", t.message, t.details);
+              }
+            }
+          }
+        } catch {
+          /* ignore parse */
+        }
       }
     } catch (e) {
       console.error("[Push] Failed to send:", e);
@@ -148,15 +169,19 @@ export async function notifyChatMessage(
       if (tokens.length === 0) continue;
 
       const sender = await storage.getUser(senderId);
-      const senderName = sender
-        ? `${sender.firstName} ${sender.lastName}`.trim() || sender.username
-        : "Someone";
+      const senderName =
+        (sender
+          ? `${sender.firstName || ""} ${sender.lastName || ""}`.trim() ||
+            sender.username ||
+            sender.businessName ||
+            sender.tradingName
+          : null) || "Someone";
 
       const preview = messagePreview(message);
       await sendExpoPush(
         tokens.map((t) => ({
           to: t.expoPushToken,
-          title: senderName,
+          title: String(senderName),
           body: preview,
           data: {
             chatId,

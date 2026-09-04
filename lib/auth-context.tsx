@@ -4,8 +4,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as SecureStore from "expo-secure-store";
 import { getApiUrl } from "@/lib/query-client";
 import { getAuthToken, setAuthToken } from "@/lib/auth-token";
-import { getExpoPushToken, clearStoredPushToken } from "@/lib/notifications";
-import { registerPushToken, unregisterPushToken } from "@/lib/push-api";
+import { clearStoredPushToken } from "@/lib/notifications";
+import { unregisterPushToken } from "@/lib/push-api";
 
 const TOKEN_KEY = "lekker_auth_token";
 const USER_KEY = "lekker_auth_user";
@@ -229,8 +229,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function maybeRegisterPush(user: AuthUser) {
     if (!user.notificationsEnabled) return;
     try {
-      const token = await getExpoPushToken();
-      if (token) await registerPushToken(token);
+      // Registers Expo token with the API (required for closed-app delivery)
+      const { registerDevicePushToken } = await import("@/lib/notifications");
+      await registerDevicePushToken();
     } catch {}
   }
 

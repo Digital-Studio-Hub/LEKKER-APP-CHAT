@@ -1,12 +1,17 @@
 import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
-import { registerPushTokenOnServer, unregisterPushTokenOnServer } from "@/lib/push-api";
+import {
+  registerPushTokenOnServer,
+  unregisterPushTokenOnServer,
+} from "@/lib/push-api";
 
 const NOTIF_KEY = "lekker_notifications_enabled";
 const PUSH_TOKEN_KEY = "lekker_expo_push_token";
 
 let Notifications: typeof import("expo-notifications") | null = null;
+
+let androidChannelReady = false;
 
 async function getNotifications() {
   if (Notifications) return Notifications;
@@ -22,6 +27,17 @@ async function getNotifications() {
         shouldShowList: true,
       }),
     });
+    // High-importance channel required for heads-up + closed-app delivery on Android
+    if (Platform.OS === "android" && !androidChannelReady) {
+      await Notifications.setNotificationChannelAsync("messages", {
+        name: "Messages",
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 250, 250, 250],
+        lightColor: "#F5B800",
+        sound: "default",
+      });
+      androidChannelReady = true;
+    }
     return Notifications;
   } catch {
     return null;
@@ -116,12 +132,6 @@ export async function registerDevicePushToken(): Promise<boolean> {
 
   const token = await getDevicePushToken();
   if (!token) return false;
-
-  const stored = await AsyncStorage.getItem(PUSH_TOKEN_KEY);
-  if (stored === token) {
-    await registerPushTokenOnServer(token, Platform.OS);
-    return true;
-  }
 
   const ok = await registerPushTokenOnServer(token, Platform.OS);
   if (ok) {

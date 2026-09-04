@@ -2828,11 +2828,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
   app.post("/api/push/register", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { token, deviceId } = req.body || {};
+      const { token, platform, deviceId } = req.body || {};
       if (!token || typeof token !== "string") {
         return res.status(400).json({ message: "token is required" });
       }
-      await storage.savePushToken(req.user!.userId, token, deviceId);
+      // Persist Expo push token (platform optional — android | ios)
+      await registerPushToken(
+        req.user!.userId,
+        token,
+        typeof platform === "string" ? platform : typeof deviceId === "string" ? deviceId : undefined,
+      );
       res.json({ ok: true });
     } catch (e) {
       console.error("Push register error:", e);
@@ -2843,10 +2848,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/push/register", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { token } = req.body || {};
-      if (!token || typeof token !== "string") {
-        return res.status(400).json({ message: "token is required" });
-      }
-      await storage.deletePushToken(token, req.user!.userId);
+      await unregisterPushToken(
+        req.user!.userId,
+        typeof token === "string" ? token : undefined,
+      );
       res.json({ ok: true });
     } catch (e) {
       console.error("Push unregister error:", e);
