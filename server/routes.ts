@@ -35,7 +35,7 @@ import {
 } from "./lekkerNetwork";
 import { sendPasswordResetEmail, sendEmailVerificationEmail } from "./gmail";
 import { sendPasswordResetSMS, sendPhoneVerificationSMS } from "./twilio";
-import { sendWhatsAppOtp } from "./whatsapp-otp";
+import { sendWhatsAppOtp, isWhatsAppOtpConfigured, whatsAppOtpConfigStatus } from "./whatsapp-otp";
 import {
   getAppleReviewConfig,
   isAppleReviewPhone,
@@ -355,6 +355,22 @@ async function handleAppleReviewVerify(
 
 export async function registerRoutes(app: Express): Promise<Server> {
 
+  app.get("/api/health", (_req: Request, res: Response) => {
+    const otp = whatsAppOtpConfigStatus();
+    res.json({
+      ok: true,
+      service: "lekker-chat",
+      whatsappOtpConfigured: otp.configured,
+      whatsappOtp: {
+        hasAccountSid: otp.hasAccountSid,
+        accountSidLooksValid: otp.accountSidLooksValid,
+        hasAuthToken: otp.hasAuthToken,
+        hasFrom: otp.hasFrom,
+        hasContentSid: otp.hasContentSid,
+      },
+    });
+  });
+
   app.post("/api/auth/send-phone-code", phoneVerifyLimiter, async (req: Request, res: Response) => {
     try {
       const rawPhone = req.body.phone;
@@ -536,7 +552,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         expiresAt,
       });
 
-      await sendWhatsAppOtp(phone, code);
+      try {
+        if (!isWhatsAppOtpConfigured()) {
+          console.error("WhatsApp send-code blocked:", whatsAppOtpConfigStatus());
+          await db.delete(phoneVerificationCodes).where(eq(phoneVerificationCodes.phone, phone));
+          return res.status(503).json({
+            message:
+              "WhatsApp login is temporarily unavailable. Please try again later.",
+            code: "WHATSAPP_OTP_NOT_CONFIGURED",
+          });
+        }
+
+        await sendWhatsAppOtp(phone, code);
+      } catch (sendErr) {
+        await db.delete(phoneVerificationCodes).where(eq(phoneVerificationCodes.phone, phone));
+        throw sendErr;
+      }
 
       const existing = await storage.getUserByPhone(phone);
       res.json({
@@ -544,7 +575,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         isExistingUser: !!existing,
       });
     } catch (err) {
-      console.error("WhatsApp send-code error:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("WhatsApp send-code error:", msg);
+      if (msg.includes("TWILIO_ACCOUNT_SID_INVALID") || msg.includes("WHATSAPP_OTP_NOT_CONFIGURED")) {
+        return res.status(503).json({
+          message:
+            "WhatsApp login is temporarily unavailable. Please try again later.",
+          code: "WHATSAPP_OTP_NOT_CONFIGURED",
+        });
+      }
       res.status(500).json({ message: "Failed to send WhatsApp code. Please try again." });
     }
   });
@@ -557,9 +596,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Phone number and code are required" });
       }
 
-      if (isAppleReviewLogin(phone, String(code).trim())) {
-        await handleAppleReviewVerify(req, res, phone, displayName);
-        return;
+      // Apple Review static login — never consume DB OTPs; reusable across review sessions.
+      if (isAppleReviewPhone(phone)) {
+        if (isAppleReviewLogin(phone, String(code).trim())) {
+          await handleAppleReviewVerify(req, res, phone, displayName);
+          return;
+        }
+        return res.status(400).json({
+          message: "Incorrect code. Please try again.",
+        });
       }
 
       const [record] = await db
@@ -573,7 +618,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "No verification code found. Please request a new code." });
       }
       if (record.used) {
-        return res.status(400).json({ message: "This code has already been used." });
+        return res.status(400).json({ message: "This code has already been used. Please request a new code." });
       }
       if (new Date() > record.expiresAt) {
         return res.status(400).json({ message: "This code has expired. Please request a new code." });
