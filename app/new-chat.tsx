@@ -31,6 +31,7 @@ import {
   buildInviteMessage,
   openWhatsAppInvite,
   openWhatsAppInvitesSequential,
+  reportInviteAnalytics,
 } from "@/lib/whatsapp-invite";
 
 interface MatchedContact {
@@ -372,7 +373,9 @@ export default function NewChatScreen() {
         {
           text: "WhatsApp",
           onPress: () => {
-            openWhatsAppInvite(contact.phone, inviteMessage);
+            void openWhatsAppInvite(contact.phone, inviteMessage).then((ok) => {
+              if (ok) reportInviteAnalytics({ count: 1, source: "new-chat" });
+            });
           },
         },
       ],
