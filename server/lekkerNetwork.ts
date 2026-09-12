@@ -545,9 +545,29 @@ export async function createDirectoryEnquiry(body: {
   summary: string;
   serviceCategorySlugs?: string[];
   province?: string | null;
+  /** Privacy-first defaults: contact hidden until seeker reveals in enquiry thread. */
+  privacy?: {
+    sharePhone?: boolean;
+    shareEmail?: boolean;
+    shareLocation?: boolean;
+    shareBrief?: boolean;
+  };
+  sourceUrl?: string;
 }): Promise<{ success: boolean; leadId?: string; lead?: any; message?: string } | null> {
   const url = `${LEKKER_API_BASE}/api/v1/chat/enquiries`;
-  return apiFetch(url, { method: "POST", body: JSON.stringify(body) });
+  return apiFetch(url, {
+    method: "POST",
+    body: JSON.stringify({
+      ...body,
+      privacy: {
+        sharePhone: body.privacy?.sharePhone === true,
+        shareEmail: body.privacy?.shareEmail === true,
+        shareLocation: body.privacy?.shareLocation === true,
+        shareBrief: body.privacy?.shareBrief !== false,
+      },
+      sourceUrl: body.sourceUrl || "lekker-chat://directory",
+    }),
+  });
 }
 
 export async function fetchSeekerEnquiries(email?: string | null, phone?: string | null) {

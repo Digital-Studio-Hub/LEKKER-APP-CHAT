@@ -95,7 +95,7 @@ export default function EnquiryThreadScreen() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${getAuthToken() || ""}`,
         },
-        body: JSON.stringify({ sharePhone: next }),
+        body: JSON.stringify({ sharePhone: next, shareEmail: next }),
       });
       const data = await res.json();
       if (data.lead) {
@@ -162,11 +162,11 @@ export default function EnquiryThreadScreen() {
       {role === "seeker" && (
         <View style={styles.privacyBar}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.privacyTitle}>{sharePhone ? "Number shared" : "Private"}</Text>
+            <Text style={styles.privacyTitle}>{sharePhone ? "Contact shared" : "Anonymous to provider"}</Text>
             <Text style={styles.privacyHint}>
               {sharePhone
-                ? "The lekkerpreneur can see your phone number."
-                : "Your phone is hidden — same privacy as Marketplace Instant Match."}
+                ? "The lekkerpreneur can see your phone and email."
+                : "They only see your first name. Reveal contact when you are ready — same privacy as Marketplace Instant Match."}
             </Text>
           </View>
           <Switch

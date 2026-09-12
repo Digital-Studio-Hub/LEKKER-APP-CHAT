@@ -2132,7 +2132,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json(entry);
   });
 
-  /** Directory → Instant Match lead on lekker.network (privacy-first enquiry). */
+  /**
+   * Directory → Network Marketplace lead (privacy-first).
+   * Default anonymous contact: phone/email hidden from the lekkerpreneur; they reply
+   * in Marketplace / Network portal; seeker continues in Chat enquiry thread.
+   * Body.shareContact=true opts in to share phone + email with the provider.
+   */
   app.post("/api/directory/enquire", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const userId = req.user!.userId;
@@ -2148,10 +2153,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
+      if (!user.phone && !user.email) {
+        return res.status(400).json({
+          success: false,
+          message: "Add a phone or email in Settings so you can receive replies (kept private until you share).",
+        });
+      }
+
+      const shareContact = req.body?.shareContact === true;
+      const privacyBody = req.body?.privacy && typeof req.body.privacy === "object" ? req.body.privacy : null;
+      const sharePhone = privacyBody?.sharePhone === true || shareContact;
+      const shareEmail = privacyBody?.shareEmail === true || shareContact;
+
+      const fullName =
+        `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.username || "Lekker Chat user";
+
       const { createDirectoryEnquiry } = await import("./lekkerNetwork");
       const result = await createDirectoryEnquiry({
         targetWorkspaceId,
-        seekerName: `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.username || "Lekker Chat user",
+        seekerName: fullName,
         seekerEmail: user.email || null,
         seekerPhone: user.phone || null,
         summary,
@@ -2159,6 +2179,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         serviceCategorySlugs: Array.isArray(req.body?.serviceCategorySlugs)
           ? req.body.serviceCategorySlugs
           : undefined,
+        privacy: {
+          sharePhone,
+          shareEmail,
+          shareLocation: privacyBody?.shareLocation === true,
+          shareBrief: true,
+        },
+        sourceUrl: "lekker-chat://directory",
       });
 
       if (!result?.success || !result.leadId) {
@@ -2172,6 +2199,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         success: true,
         leadId: result.leadId,
         lead: result.lead,
+        anonymous: !sharePhone && !shareEmail,
       });
     } catch (error: any) {
       console.error("Directory enquire error:", error);

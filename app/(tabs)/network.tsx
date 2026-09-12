@@ -11,6 +11,7 @@ import {
   Image,
   ScrollView,
   Alert,
+  Switch,
 } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -118,6 +119,8 @@ export function DirectoryView() {
   const [enquireFor, setEnquireFor] = useState<DirectoryEntry | null>(null);
   const [enquiryText, setEnquiryText] = useState("");
   const [sendingEnquiry, setSendingEnquiry] = useState(false);
+  /** Default anonymous: hide phone/email from provider (first name only on their side). */
+  const [shareContact, setShareContact] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -191,6 +194,7 @@ export function DirectoryView() {
     }
     setEnquireFor(entry);
     setEnquiryText("");
+    setShareContact(false);
   }
 
   async function submitEnquiry() {
@@ -209,6 +213,13 @@ export function DirectoryView() {
           targetWorkspaceId: enquireFor.workspaceId,
           summary: enquiryText.trim(),
           province: enquireFor.province || undefined,
+          shareContact,
+          privacy: {
+            sharePhone: shareContact,
+            shareEmail: shareContact,
+            shareLocation: false,
+            shareBrief: true,
+          },
         }),
       });
       const data = await res.json();
@@ -217,18 +228,17 @@ export function DirectoryView() {
         return;
       }
       setEnquireFor(null);
-      Alert.alert(
-        "Enquiry sent",
-        "Your phone stays private until you reveal it. The lekkerpreneur can reply in Marketplace Chat — and you'll see it in Enquiries.",
-        [
-          {
-            text: "Open enquiry",
-            onPress: () =>
-              router.push({ pathname: "/enquiry/[id]", params: { id: data.leadId } }),
-          },
-          { text: "OK" },
-        ],
-      );
+      const privacyMsg = shareContact
+        ? "You shared your contact details with this business. They can reply in their Marketplace portal — you'll see it in this enquiry thread."
+        : "Sent anonymously: they only see your first name until you reveal your number. Replies appear in Lekker Chat and their Marketplace portal.";
+      Alert.alert("Enquiry sent", privacyMsg, [
+        {
+          text: "Open enquiry",
+          onPress: () =>
+            router.push({ pathname: "/enquiry/[id]", params: { id: data.leadId } }),
+        },
+        { text: "OK" },
+      ]);
     } catch (e) {
       console.error("Enquiry error:", e);
       Alert.alert("Enquiry failed", "Please try again.");
@@ -353,7 +363,7 @@ export function DirectoryView() {
                       <Text style={dirStyles.detailLine}>Address: {item.address}</Text>
                     )}
                     <Text style={dirStyles.privacyHint}>
-                      Enquiries keep your number private until you choose to share it — same as Marketplace Instant Match.
+                      Enquire anonymously by default — they reply in their Marketplace portal; you chat here. Reveal your number when you are ready.
                     </Text>
                   </View>
                 )}
@@ -403,7 +413,7 @@ export function DirectoryView() {
           <View style={dirStyles.modalCard}>
             <Text style={dirStyles.modalTitle}>Enquire — {enquireFor.businessName}</Text>
             <Text style={dirStyles.privacyHint}>
-              Signed in as {user?.firstName || "you"}. Your phone stays hidden until you reveal it in the chat.
+              They reply in their Marketplace / Lekker Network portal. You keep the thread in Lekker Chat.
             </Text>
             <TextInput
               style={dirStyles.enquiryInput}
@@ -414,6 +424,24 @@ export function DirectoryView() {
               multiline
               maxLength={800}
             />
+            <View style={dirStyles.anonRow}>
+              <View style={{ flex: 1, paddingRight: 12 }}>
+                <Text style={dirStyles.anonTitle}>
+                  {shareContact ? "Share my contact" : "Enquire anonymously"}
+                </Text>
+                <Text style={dirStyles.privacyHint}>
+                  {shareContact
+                    ? "They will see your phone and email with this enquiry."
+                    : `They only see “${user?.firstName || "your first name"}” — not your phone or email — until you reveal it.`}
+                </Text>
+              </View>
+              <Switch
+                value={shareContact}
+                onValueChange={setShareContact}
+                trackColor={{ false: Colors.border, true: Colors.primary }}
+                accessibilityLabel="Share contact details with this business"
+              />
+            </View>
             <View style={dirStyles.modalActions}>
               <Pressable onPress={() => setEnquireFor(null)} style={dirStyles.modalCancel}>
                 <Text style={dirStyles.chatOutlineText}>Cancel</Text>
@@ -426,7 +454,9 @@ export function DirectoryView() {
                 {sendingEnquiry ? (
                   <ActivityIndicator size="small" color={Colors.background} />
                 ) : (
-                  <Text style={dirStyles.chatButtonText}>Send enquiry</Text>
+                  <Text style={dirStyles.chatButtonText}>
+                    {shareContact ? "Send enquiry" : "Send anonymously"}
+                  </Text>
                 )}
               </Pressable>
             </View>
@@ -590,6 +620,20 @@ const dirStyles = StyleSheet.create({
     color: Colors.textMuted,
     marginTop: 4,
     lineHeight: 16,
+  },
+  anonRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: Colors.inputBackground,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 8,
+  },
+  anonTitle: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 13,
+    color: Colors.text,
   },
   modalOverlay: {
     ...StyleSheet.absoluteFillObject,
