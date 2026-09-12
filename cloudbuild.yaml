@@ -31,7 +31,7 @@ steps:
       - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/${_SERVICE_NAME}/${_SERVICE_NAME}:$SHORT_SHA
       - --region=${_REGION}
       # Keep ecosystem mail + GCS ADC aligned (do not use Replit Gmail/sidecar)
-      - --update-secrets=INBOUND_API_KEY=INBOUND_API_KEY:latest
+      - --update-secrets=INBOUND_API_KEY=INBOUND_API_KEY:latest,XAI_API_KEY=lekker-social-xai-api-key:latest
       - --update-env-vars=OBJECT_STORAGE_BACKEND=gcs,PRIVATE_OBJECT_DIR=/lekkernetworkbucket/lekker-chat/private,PUBLIC_OBJECT_SEARCH_PATHS=/lekkernetworkbucket/lekker-chat/public,SYSTEM_FROM_EMAIL=noreply@lekker.network,SYSTEM_FROM_NAME=Lekker Chat,SYSTEM_EMAIL_PROVIDER=auto,LEKKER_API_BASE_URL=https://lekker.network,CHAT_WHATSAPP_ONLY=true
       - --quiet
 

@@ -159,19 +159,31 @@ async function enrichParticipants(chatId: string) {
   return participantUsers;
 }
 
-// Lazy so local messaging smoke tests can boot without OpenRouter secrets.
-let _openrouter: OpenAI | null = null;
-function getOpenRouter(): OpenAI {
-  if (_openrouter) return _openrouter;
-  const apiKey = process.env.AI_INTEGRATIONS_OPENROUTER_API_KEY;
-  if (!apiKey) {
-    throw new Error("AI_INTEGRATIONS_OPENROUTER_API_KEY is not configured");
+// Lazy LLM client — prefer xAI (ecosystem) then OpenRouter (legacy Replit).
+let _llm: OpenAI | null = null;
+let _llmModel = "grok-4-latest";
+function getGeneralistLlm(): { client: OpenAI; model: string } {
+  if (_llm) return { client: _llm, model: _llmModel };
+  const xaiKey = process.env.XAI_API_KEY;
+  if (xaiKey) {
+    _llm = new OpenAI({ baseURL: "https://api.x.ai/v1", apiKey: xaiKey });
+    _llmModel = "grok-4-latest";
+    return { client: _llm, model: _llmModel };
   }
-  _openrouter = new OpenAI({
-    baseURL: process.env.AI_INTEGRATIONS_OPENROUTER_BASE_URL,
-    apiKey,
-  });
-  return _openrouter;
+  const orKey = process.env.AI_INTEGRATIONS_OPENROUTER_API_KEY;
+  if (orKey) {
+    _llm = new OpenAI({
+      baseURL: process.env.AI_INTEGRATIONS_OPENROUTER_BASE_URL,
+      apiKey: orKey,
+    });
+    _llmModel = "x-ai/grok-4.3";
+    return { client: _llm, model: _llmModel };
+  }
+  throw new Error("No XAI_API_KEY or AI_INTEGRATIONS_OPENROUTER_API_KEY configured");
+}
+/** @deprecated use getGeneralistLlm */
+function getOpenRouter(): OpenAI {
+  return getGeneralistLlm().client;
 }
 
 interface DirectoryEntry {
@@ -2657,8 +2669,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         res.write(`data: ${JSON.stringify({ meta: { mode: "generalist" } })}\n\n`);
       }
 
-      // Generalist path (consumers + fallback)
-      if (!process.env.AI_INTEGRATIONS_OPENROUTER_API_KEY) {
+      // Generalist path (consumers + fallback) — xAI preferred, OpenRouter legacy
+      let llm: { client: OpenAI; model: string };
+      try {
+        llm = getGeneralistLlm();
+      } catch {
         const msg =
           "I'm not fully online for general chat on this server yet. " +
           (userProfile?.isVerifiedLekkerpreneur
@@ -2686,8 +2701,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         `direct verified lekkerpreneurs to open Software on lekker.network or sync their account.` +
         userContext;
 
-      const stream = await getOpenRouter().chat.completions.create({
-        model: "x-ai/grok-4.3",
+      const stream = await llm.client.chat.completions.create({
+        model: llm.model,
         messages: [
           { role: "system", content: systemPrompt },
           ...(Array.isArray(messages) ? messages : [{ role: "user", content: latestText }]),
