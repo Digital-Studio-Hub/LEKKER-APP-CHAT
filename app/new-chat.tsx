@@ -27,6 +27,11 @@ import {
   SearchUser,
 } from "@/lib/chat-api";
 import { getApiUrl } from "@/lib/query-client";
+import {
+  buildInviteMessage,
+  openWhatsAppInvite,
+  openWhatsAppInvitesSequential,
+} from "@/lib/whatsapp-invite";
 
 interface MatchedContact {
   id: string;
@@ -67,8 +72,15 @@ export default function NewChatScreen() {
   const [startingChat, setStartingChat] = useState<string | null>(null);
   const [searchResults, setSearchResults] = useState<SearchUser[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  /** Multi-select mode for WhatsApp invites to contacts not on Lekker Chat. */
+  const [inviteSelectMode, setInviteSelectMode] = useState(false);
+  const [selectedInvitePhones, setSelectedInvitePhones] = useState<Set<string>>(new Set());
+  const [sendingBulkInvite, setSendingBulkInvite] = useState(false);
 
   const webTopInset = Platform.OS === "web" ? 67 : 0;
+
+  const inviterDisplayName =
+    `${user?.firstName || ""} ${user?.lastName || ""}`.trim() || user?.username || "";
 
   useEffect(() => {
     loadContacts();
@@ -264,11 +276,33 @@ export default function NewChatScreen() {
     }
   }
 
+  function toggleInviteSelect(phone: string) {
+    setSelectedInvitePhones((prev) => {
+      const next = new Set(prev);
+      if (next.has(phone)) next.delete(phone);
+      else next.add(phone);
+      return next;
+    });
+  }
+
+  function exitInviteSelectMode() {
+    setInviteSelectMode(false);
+    setSelectedInvitePhones(new Set());
+  }
+
   async function handleStartChat(contact: MatchedContact) {
+    // Not on Lekker Chat → invite flow (or toggle select in multi-select mode)
     if (!contact.isOnLekkerChat) {
-      handleInvite(contact);
+      if (inviteSelectMode) {
+        Haptics.selectionAsync();
+        toggleInviteSelect(contact.phone);
+        return;
+      }
+      handleInviteOne(contact);
       return;
     }
+
+    // On Lekker Chat → open DM immediately (no invite)
     setStartingChat(contact.id);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
@@ -282,7 +316,8 @@ export default function NewChatScreen() {
         return;
       }
       if (result.code === "USER_NOT_REGISTERED") {
-        handleInvite(contact);
+        // Stale match — treat as invite candidate
+        handleInviteOne({ ...contact, isOnLekkerChat: false });
         return;
       }
       Alert.alert("Error", result.message || "Could not start chat. Please try again.");
@@ -294,23 +329,30 @@ export default function NewChatScreen() {
     }
   }
 
-  async function handleInvite(contact: MatchedContact) {
+  function inviteMessageFor(contact: MatchedContact): string {
+    return buildInviteMessage({
+      contactFirstName: contact.name.split(/\s+/)[0],
+      inviterName: inviterDisplayName,
+    });
+  }
+
+  async function handleInviteOne(contact: MatchedContact) {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    const inviteMessage = `Hey ${contact.name.split(" ")[0]}! Join me on Lekker Chat — the messaging app for South African entrepreneurs. Download it here: https://lekker.network/chat`;
+    const inviteMessage = inviteMessageFor(contact);
 
     if (Platform.OS === "web") {
       Alert.alert(
         "Invite to Lekker Chat",
-        `${contact.name} is not on Lekker Chat yet. Would you like to invite them?`,
+        `${contact.name} is not on Lekker Chat yet. Copy an invite message?`,
         [
           { text: "Cancel", style: "cancel" },
           {
-            text: "Copy Invite",
+            text: "Copy invite",
             onPress: () => {
               if (typeof navigator !== "undefined" && navigator.clipboard) {
                 navigator.clipboard.writeText(inviteMessage);
               }
-              Alert.alert("Copied!", "Invite message copied to clipboard. Send it to your contact.");
+              Alert.alert("Copied!", "Send the invite to your contact on WhatsApp.");
             },
           },
         ],
@@ -319,32 +361,104 @@ export default function NewChatScreen() {
     }
 
     Alert.alert(
-      "Invite to Lekker Chat",
-      `${contact.name} is not on Lekker Chat yet. Invite them on WhatsApp?`,
+      "Not on Lekker Chat yet",
+      `${contact.name} doesn't have a Lekker Chat account. Invite them on WhatsApp?`,
       [
         { text: "Cancel", style: "cancel" },
         {
-          text: "Copy link",
-          onPress: () => shareInvite(inviteMessage),
+          text: "Share…",
+          onPress: () => Share.share({ message: inviteMessage }).catch(() => {}),
         },
         {
           text: "WhatsApp",
           onPress: () => {
-            const cleaned = contact.phone.replace(/\D/g, "");
-            const waUrl = `https://wa.me/${cleaned}?text=${encodeURIComponent(inviteMessage)}`;
-            Linking.openURL(waUrl).catch(() => shareInvite(inviteMessage));
+            openWhatsAppInvite(contact.phone, inviteMessage);
           },
         },
       ],
     );
   }
 
-  async function shareInvite(message: string) {
-    try {
-      await Share.share({ message });
-    } catch (e) {
-      console.error("Share error:", e);
+  async function runBulkWhatsAppInvites(contacts: MatchedContact[]) {
+    if (!contacts.length) return;
+    if (Platform.OS === "web") {
+      Alert.alert(
+        "Invite on your phone",
+        "Bulk WhatsApp invites work in the Lekker Chat mobile app. On web, invite one contact at a time.",
+      );
+      return;
     }
+
+    const max = 25;
+    const list = contacts.slice(0, max);
+    const extra = contacts.length - list.length;
+
+    Alert.alert(
+      `Invite ${list.length} contact${list.length === 1 ? "" : "s"}?`,
+      extra > 0
+        ? `WhatsApp will open for each person (max ${max} at a time). ${extra} more were not included — run again after.`
+        : "WhatsApp will open with a prefilled invite for each selected contact. Send each message in WhatsApp.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Open WhatsApp",
+          onPress: async () => {
+            setSendingBulkInvite(true);
+            try {
+              const { opened, skipped } = await openWhatsAppInvitesSequential(
+                list.map((c) => ({ phone: c.phone, name: c.name })),
+                { inviterName: inviterDisplayName, max },
+              );
+              exitInviteSelectMode();
+              if (skipped > 0) {
+                Alert.alert(
+                  "Invites started",
+                  `Opened WhatsApp for ${opened}. ${skipped} left — tap Invite again to continue.`,
+                );
+              }
+            } finally {
+              setSendingBulkInvite(false);
+            }
+          },
+        },
+      ],
+    );
+  }
+
+  function handleInviteAllNotOnApp() {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    const pool = filteredOthers;
+    if (!pool.length) {
+      Alert.alert("All set", "Everyone in this list is already on Lekker Chat.");
+      return;
+    }
+    Alert.alert(
+      "Invite all not on Lekker Chat?",
+      `${pool.length} contact${pool.length === 1 ? "" : "s"} from your phonebook aren't on Lekker Chat yet.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Select who…",
+          onPress: () => {
+            setInviteSelectMode(true);
+            setSelectedInvitePhones(new Set());
+          },
+        },
+        {
+          text: "Invite all",
+          onPress: () => runBulkWhatsAppInvites(pool),
+        },
+      ],
+    );
+  }
+
+  function handleInviteSelected() {
+    const selected = otherContacts.filter((c) => selectedInvitePhones.has(c.phone));
+    if (!selected.length) {
+      Alert.alert("Select contacts", "Tap contacts to select, then invite.");
+      return;
+    }
+    runBulkWhatsAppInvites(selected);
   }
 
   const filteredMatched = searchText
@@ -376,12 +490,53 @@ export default function NewChatScreen() {
   return (
     <View style={[styles.container, { paddingTop: insets.top + webTopInset }]}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons name="chevron-back" size={28} color={Colors.text} />
+        <Pressable
+          onPress={() => {
+            if (inviteSelectMode) exitInviteSelectMode();
+            else router.back();
+          }}
+          style={styles.backButton}
+        >
+          <Ionicons name={inviteSelectMode ? "close" : "chevron-back"} size={28} color={Colors.text} />
         </Pressable>
-        <Text style={styles.headerTitle}>New Chat</Text>
-        <View style={styles.backButton} />
+        <Text style={styles.headerTitle}>
+          {inviteSelectMode ? `Select (${selectedInvitePhones.size})` : "New Chat"}
+        </Text>
+        {inviteSelectMode ? (
+          <Pressable
+            style={styles.headerAction}
+            onPress={handleInviteSelected}
+            disabled={sendingBulkInvite || selectedInvitePhones.size === 0}
+          >
+            {sendingBulkInvite ? (
+              <ActivityIndicator size="small" color={Colors.primary} />
+            ) : (
+              <Text
+                style={[
+                  styles.headerActionText,
+                  selectedInvitePhones.size === 0 && { opacity: 0.4 },
+                ]}
+              >
+                Invite
+              </Text>
+            )}
+          </Pressable>
+        ) : otherContacts.length > 0 ? (
+          <Pressable style={styles.headerAction} onPress={handleInviteAllNotOnApp}>
+            <Ionicons name="logo-whatsapp" size={20} color={Colors.primary} />
+          </Pressable>
+        ) : (
+          <View style={styles.backButton} />
+        )}
       </View>
+
+      {inviteSelectMode && (
+        <View style={styles.selectBanner}>
+          <Text style={styles.selectBannerText}>
+            Tap contacts to select, then Invite — WhatsApp opens with a prefilled message for each.
+          </Text>
+        </View>
+      )}
 
       <View style={styles.searchContainer}>
         <Ionicons name="search" size={18} color={Colors.textMuted} />
@@ -424,8 +579,37 @@ export default function NewChatScreen() {
           keyExtractor={(item) => item._isSearchUser ? (item as any).id : (item as any).id}
           renderSectionHeader={({ section }) => (
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>{section.title}</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.sectionTitle}>{section.title}</Text>
+                {section.title === "On Lekker Chat" && (
+                  <Text style={styles.sectionHint}>Tap to message — already on the app</Text>
+                )}
+                {section.title === "Invite to Lekker Chat" && !inviteSelectMode && (
+                  <Text style={styles.sectionHint}>Not on Lekker Chat yet — invite on WhatsApp</Text>
+                )}
+              </View>
               <Text style={styles.sectionCount}>{section.data.length}</Text>
+              {section.title === "Invite to Lekker Chat" && !inviteSelectMode && section.data.length > 0 && (
+                <Pressable
+                  onPress={() => {
+                    setInviteSelectMode(true);
+                    setSelectedInvitePhones(new Set());
+                  }}
+                  style={styles.sectionAction}
+                  hitSlop={8}
+                >
+                  <Text style={styles.sectionActionText}>Select</Text>
+                </Pressable>
+              )}
+              {section.title === "Invite to Lekker Chat" && !inviteSelectMode && section.data.length > 1 && (
+                <Pressable
+                  onPress={handleInviteAllNotOnApp}
+                  style={styles.sectionAction}
+                  hitSlop={8}
+                >
+                  <Text style={styles.sectionActionText}>Invite all</Text>
+                </Pressable>
+              )}
             </View>
           )}
           renderItem={({ item }) => {
@@ -460,13 +644,24 @@ export default function NewChatScreen() {
             }
 
             const contact = item as unknown as MatchedContact & { _isSearchUser: false };
+            const selected = selectedInvitePhones.has(contact.phone);
             return (
               <Pressable
-                style={({ pressed }) => [styles.contactItem, pressed && { backgroundColor: Colors.cardElevated }]}
+                style={({ pressed }) => [
+                  styles.contactItem,
+                  pressed && { backgroundColor: Colors.cardElevated },
+                  inviteSelectMode && !contact.isOnLekkerChat && selected && styles.contactItemSelected,
+                ]}
                 onPress={() => handleStartChat(contact)}
-                disabled={startingChat === contact.id}
+                disabled={startingChat === contact.id || sendingBulkInvite}
               >
-                <Avatar name={contact.name} color={contact.avatarColor} />
+                {inviteSelectMode && !contact.isOnLekkerChat ? (
+                  <View style={[styles.checkbox, selected && styles.checkboxOn]}>
+                    {selected && <Ionicons name="checkmark" size={14} color={Colors.background} />}
+                  </View>
+                ) : (
+                  <Avatar name={contact.name} color={contact.avatarColor} />
+                )}
                 <View style={styles.contactInfo}>
                   <View style={styles.contactNameRow}>
                     <Text style={styles.contactName} numberOfLines={1}>{contact.name}</Text>
@@ -475,7 +670,7 @@ export default function NewChatScreen() {
                     )}
                   </View>
                   <Text style={styles.contactPhone}>
-                    {contact.isOnLekkerChat ? "Available on Lekker Chat · " : ""}
+                    {contact.isOnLekkerChat ? "On Lekker Chat · " : "Not on Lekker Chat · "}
                     {contact.phone}
                   </Text>
                 </View>
@@ -485,7 +680,7 @@ export default function NewChatScreen() {
                   <View style={styles.chatIcon}>
                     <Ionicons name="chatbubble" size={16} color={Colors.background} />
                   </View>
-                ) : (
+                ) : inviteSelectMode ? null : (
                   <View style={styles.inviteIcon}>
                     <Ionicons name="logo-whatsapp" size={16} color={Colors.primary} />
                   </View>
@@ -548,6 +743,31 @@ const styles = StyleSheet.create({
   },
   backButton: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   headerTitle: { fontFamily: "Poppins_600SemiBold", fontSize: 18, color: Colors.text },
+  headerAction: {
+    minWidth: 44,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 8,
+  },
+  headerActionText: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 15,
+    color: Colors.primary,
+  },
+  selectBanner: {
+    marginHorizontal: 16,
+    marginBottom: 8,
+    padding: 10,
+    borderRadius: 10,
+    backgroundColor: Colors.card,
+  },
+  selectBannerText: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12,
+    color: Colors.textMuted,
+    lineHeight: 17,
+  },
   searchContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -583,7 +803,7 @@ const styles = StyleSheet.create({
   sectionHeader: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
+    gap: 8,
     paddingVertical: 10,
     paddingHorizontal: 4,
   },
@@ -594,10 +814,25 @@ const styles = StyleSheet.create({
     textTransform: "uppercase" as const,
     letterSpacing: 1,
   },
+  sectionHint: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 11,
+    color: Colors.textMuted,
+    marginTop: 2,
+  },
   sectionCount: {
     fontFamily: "Poppins_400Regular",
     fontSize: 12,
     color: Colors.textMuted,
+  },
+  sectionAction: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  sectionActionText: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 12,
+    color: Colors.primary,
   },
   contactItem: {
     flexDirection: "row",
@@ -607,6 +842,22 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 8,
     gap: 12,
+  },
+  contactItemSelected: {
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
+  },
+  checkbox: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: Colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  checkboxOn: {
+    backgroundColor: Colors.primary,
   },
   contactInfo: {
     flex: 1,

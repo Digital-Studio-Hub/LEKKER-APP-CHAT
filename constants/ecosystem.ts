@@ -3,6 +3,9 @@ export const LEKKER_MARKETPLACE_SHOP_URL = "https://lekkermarketplace.com/shop";
 export const LEKKER_MARKETPLACE_EVENTS_URL = "https://lekkermarketplace.com/events";
 export const LEKKER_SOCIAL_URL = "https://lekker.social";
 export const LEKKER_NETWORK_URL = "https://lekker.network";
+export const LEKKER_CHAT_WEB_URL = "https://chat.lekker.network";
+export const LEKKER_CHAT_PLAY_STORE_URL =
+  "https://play.google.com/store/apps/details?id=com.lekker.chat";
 export const GOOGLE_SEARCH_URL = "https://www.google.com/search?q=";
 
 export const ECOSYSTEM_SHORTCUTS = [

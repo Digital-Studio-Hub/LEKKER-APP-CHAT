@@ -142,10 +142,22 @@ export interface MatchedRegisteredUser {
 export async function matchContacts(phones: string[]): Promise<MatchedRegisteredUser[]> {
   try {
     if (!phones.length) return [];
-    const res = await apiRequest("POST", "/api/contacts/match", { phones });
-    if (!res.ok) return [];
-    const data = await res.json();
-    return data.matches || [];
+    // Chunk large address books so we stay under the API max (1000)
+    const chunkSize = 400;
+    const all: MatchedRegisteredUser[] = [];
+    const seen = new Set<string>();
+    for (let i = 0; i < phones.length; i += chunkSize) {
+      const chunk = phones.slice(i, i + chunkSize);
+      const res = await apiRequest("POST", "/api/contacts/match", { phones: chunk });
+      const data = await res.json();
+      for (const m of data.matches || []) {
+        if (m?.userId && !seen.has(m.userId)) {
+          seen.add(m.userId);
+          all.push(m);
+        }
+      }
+    }
+    return all;
   } catch (e) {
     console.error("Failed to match contacts:", e);
     return [];
