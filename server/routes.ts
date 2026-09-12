@@ -32,6 +32,7 @@ import {
   sendMobileEmail,
   isLekkerNetworkConfigured,
   chatWithNetworkCledwyn,
+  streamNetworkCledwyn,
   LekkerNetworkApiError,
   type LekkerNetworkEntry,
   type WorkspaceDetail,
@@ -1383,6 +1384,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  /**
+   * Light invite analytics — no raw phones. Logs to console + auth_audit_logs
+   * (event: whatsapp_invite) so we can measure WA invite → install later.
+   */
+  app.post("/api/analytics/invite", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const userId = req.user!.userId;
+      const countRaw = req.body?.count;
+      const count = typeof countRaw === "number" ? countRaw : parseInt(String(countRaw ?? "0"), 10);
+      if (!Number.isFinite(count) || count < 1 || count > 100) {
+        return res.status(400).json({ message: "count must be 1–100" });
+      }
+      const channel = typeof req.body?.channel === "string" ? req.body.channel : "whatsapp";
+      const source = typeof req.body?.source === "string" ? req.body.source : "new-chat";
+      const payload = { channel, count, source };
+      console.log("[analytics/invite]", userId, JSON.stringify(payload));
+      await storage.logAuthEvent(
+        "whatsapp_invite",
+        userId,
+        req.ip,
+        req.headers["user-agent"]?.toString(),
+        JSON.stringify(payload),
+      );
+      return res.status(204).send();
+    } catch (error) {
+      console.error("Invite analytics error:", error);
+      res.status(500).json({ message: "Failed to log invite" });
+    }
+  });
+
   // ── Safety (App Store Guideline 1.2 — UGC) ───────────────────────────────
 
   app.get("/api/safety/blocks", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
@@ -2634,23 +2665,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (useWorkspaceCledwyn) {
         try {
-          const result = await chatWithNetworkCledwyn({
+          res.write(`data: ${JSON.stringify({ meta: { mode: "workspace" } })}\n\n`);
+          let gotContent = false;
+          for await (const ev of streamNetworkCledwyn({
             userId: userProfile!.lekkerNetworkId!,
             workspaceId: userProfile!.lekkerWorkspaceId!,
             message: latestText,
             sessionId: typeof bodySessionId === "string" ? bodySessionId : null,
-          });
-          const reply = result.reply || "Sorry, I couldn't generate a response. Please try again.";
-          const sid = result.sessionId || result.threadId;
-          if (sid) {
-            res.write(`data: ${JSON.stringify({ meta: { sessionId: sid, mode: "workspace" } })}\n\n`);
-          } else {
-            res.write(`data: ${JSON.stringify({ meta: { mode: "workspace" } })}\n\n`);
+          })) {
+            if (ev.meta?.sessionId) {
+              res.write(
+                `data: ${JSON.stringify({ meta: { sessionId: ev.meta.sessionId, mode: "workspace" } })}\n\n`,
+              );
+            }
+            if (ev.content) {
+              gotContent = true;
+              res.write(`data: ${JSON.stringify({ content: ev.content })}\n\n`);
+            }
+            if (ev.done) break;
           }
-          // Simulate stream in modest chunks for existing client UX
-          const chunkSize = 48;
-          for (let i = 0; i < reply.length; i += chunkSize) {
-            res.write(`data: ${JSON.stringify({ content: reply.slice(i, i + chunkSize) })}\n\n`);
+          if (!gotContent) {
+            // Fallback to non-stream JSON if Network returned empty stream
+            const result = await chatWithNetworkCledwyn({
+              userId: userProfile!.lekkerNetworkId!,
+              workspaceId: userProfile!.lekkerWorkspaceId!,
+              message: latestText,
+              sessionId: typeof bodySessionId === "string" ? bodySessionId : null,
+            });
+            const reply = result.reply || "Sorry, I couldn't generate a response. Please try again.";
+            if (result.sessionId || result.threadId) {
+              res.write(
+                `data: ${JSON.stringify({ meta: { sessionId: result.sessionId || result.threadId, mode: "workspace" } })}\n\n`,
+              );
+            }
+            res.write(`data: ${JSON.stringify({ content: reply })}\n\n`);
           }
           res.write("data: [DONE]\n\n");
           res.end();
@@ -2742,9 +2790,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(502).json({ message: "Could not create session. Try again later." });
       }
       const base = process.env.LEKKER_API_BASE_URL || "https://lekker.network";
+      const nextRaw = typeof req.query.next === "string" ? req.query.next.trim() : "";
+      const next =
+        nextRaw.startsWith("/app") && !nextRaw.includes("//") && !nextRaw.includes("\\")
+          ? nextRaw
+          : "";
+      const qs = new URLSearchParams({ token });
+      if (next) qs.set("next", next);
       res.json({
         token,
-        url: `${base}/api/v1/mobile/establish-session?token=${encodeURIComponent(token)}`,
+        url: `${base}/api/v1/mobile/establish-session?${qs.toString()}`,
       });
     } catch (e) {
       res.status(500).json({ message: "Session token failed" });

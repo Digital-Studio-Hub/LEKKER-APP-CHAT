@@ -71,7 +71,7 @@ Effort: **S** &lt;1w · **M** 1–3w · **L** multi-sprint
 
 | Item | Current | Synergy opportunity | P | E |
 |------|---------|---------------------|---|---|
-| Dual user tables | Chat `users` + Network `users`; linked by `lekkerNetworkId` via `sync-lekker` | Treat Network user id as canonical; Chat row = device/messaging profile keyed by Network id | P1 | L |
+| Dual user tables | Chat `users` + Network `users`; linked by `lekkerNetworkId` via `sync-lekker` | Treat Network user id as canonical; Chat row = device/messaging profile keyed by Network id — **design:** `docs/IDENTITY-CONSOLIDATION.md` | P1 | L |
 | Sync fragility | Phone/email match; client once stripped verify fields (fixed `applyServerUser`) | Auto-sync on every login + Settings; surface 503 when API key missing (done) | P1 | S |
 | Software SSO | Separate cookie mint for WebView | Longer-lived mobile Network session / shared JWT claim so Mail+Cledwyn+Software share one auth story | P1 | M |
 | Placeholder emails | `p*@phone.lekker.chat` for WA-only users | Keep for Chat uniqueness; never sync placeholders to Network CRM | P2 | S |
@@ -94,7 +94,7 @@ Effort: **S** &lt;1w · **M** 1–3w · **L** multi-sprint
 
 | Item | Current | Synergy opportunity | P | E |
 |------|---------|---------------------|---|---|
-| Workspace mode | Proxies mobile advisor API (non-streaming, tool-light) | Grow Network mobile endpoint toward web tool runner / streaming parity | P1 | L |
+| Workspace mode | Proxies mobile advisor API (SSE stream optional; tool-light) | Grow Network mobile endpoint toward web tool runner parity (stream **lite done** on `/api/v1/cledwyn/chat`) | P1 | L |
 | Generalist mode | xAI on Chat Cloud Run | Optional: single Network “consumer Cledwyn” endpoint so keys/models stay SoT | P2 | M |
 | History | Chat AsyncStorage + Network thread when workspace | Unify history display (“Synced with lekker.network”) | P2 | M |
 | Fallback | Falls back to generalist on 403 | Better copy + Settings deep-link “Sync Lekkerpreneur” | P1 | S |
@@ -126,7 +126,7 @@ Effort: **S** &lt;1w · **M** 1–3w · **L** multi-sprint
 | Item | Current | Synergy opportunity | P | E |
 |------|---------|---------------------|---|---|
 | DMs / groups / push | Neon Lekker_Chat | Keep local for latency; key participants by `lekkerNetworkId` when known | P2 | M |
-| Phonebook invites | WA deep-link multi-select | Track invite → install → auto-match (growth loop) | P2 | M |
+| Phonebook invites | WA deep-link multi-select | Track invite → install → auto-match (growth loop) — **light analytics done** (`whatsapp_invite` audit events) | P2 | M |
 | Feed | Server feed | Optional cross-post from Network social publish — low priority vs messaging | P3 | L |
 
 ### G. Platform hygiene (enables synergy)
@@ -170,14 +170,14 @@ Effort: **S** &lt;1w · **M** 1–3w · **L** multi-sprint
 5. ~~Plan **iOS bundle id** migration~~ — `app.json` set to `com.lekker.chat`; ASC follow-up if store still on Replit id (`docs/IOS-BUNDLE-ID.md`).
 
 ### Following (P1–P2)
-1. Identity consolidation design (Chat DB = messaging only).  
-2. Enrich Network mobile Cledwyn (stream + more tools).  
+1. ~~Identity consolidation design (Chat DB = messaging only).~~ **Done (design)** — `docs/IDENTITY-CONSOLIDATION.md` (phases A–D; implementation still open).  
+2. Enrich Network mobile Cledwyn (stream + more tools). **In progress** — optional SSE `stream=true` on Network `POST /api/v1/cledwyn/chat` (lite; web tool loop still a gap).  
 3. “Continue in DM” after contact reveal.  
 4. Enquiries section in Chats tab.
 
 ### Later (P2–P3)
 1. Progressive native Software modules.  
-2. Invite attribution analytics.  
+2. ~~Invite attribution analytics.~~ **Done (light)** — Chat `POST /api/analytics/invite` → `auth_audit_logs` (`whatsapp_invite`); client fire-and-forget count-only from new-chat / whatsapp-invite.  
 3. Consumer Cledwyn hosted only on Network.
 
 ---

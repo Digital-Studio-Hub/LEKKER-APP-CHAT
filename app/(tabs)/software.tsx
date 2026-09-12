@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useCallback } from "react";
 import {
   View,
   Text,
@@ -6,13 +6,16 @@ import {
   Platform,
   Pressable,
   ActivityIndicator,
+  ScrollView,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { fontScale } from "@/lib/responsive";
-import { fetchLekkerSoftwareUrl } from "@/lib/lekker-session";
+import { fetchLekkerSoftwareUrl, SOFTWARE_SHORTCUTS } from "@/lib/lekker-session";
 import { LEKKER_NETWORK_URL } from "@/constants/ecosystem";
+import { useFocusEffect } from "expo-router";
 
 let WebView: any = null;
 if (Platform.OS !== "web") {
@@ -26,30 +29,67 @@ export default function SoftwareScreen() {
   const [startUrl, setStartUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  const [activeShortcut, setActiveShortcut] = useState("home");
   const bottomPad = Platform.OS === "web" ? 84 : 49 + insets.bottom + 8;
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const url = await fetchLekkerSoftwareUrl();
-        if (!cancelled) setStartUrl(url);
-      } catch {
-        if (!cancelled) {
-          setStartUrl(LEKKER_NETWORK_URL);
-          setLoadError(true);
-        }
-      }
-    })();
-    return () => { cancelled = true; };
+  const loadUrl = useCallback(async (next?: string, shortcutId = "home") => {
+    setIsLoading(true);
+    setLoadError(false);
+    setActiveShortcut(shortcutId);
+    try {
+      const url = await fetchLekkerSoftwareUrl(next);
+      setStartUrl(url);
+    } catch {
+      setStartUrl(next ? `${LEKKER_NETWORK_URL}${next}` : LEKKER_NETWORK_URL);
+      setLoadError(true);
+    }
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadUrl("/app", "home");
+    }, [loadUrl]),
+  );
+
+  async function openShortcut(id: string, next: string) {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    await loadUrl(next, id);
+  }
+
+  const shortcutBar = (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={styles.shortcutRow}
+    >
+      {SOFTWARE_SHORTCUTS.map((s) => {
+        const active = activeShortcut === s.id;
+        return (
+          <Pressable
+            key={s.id}
+            onPress={() => openShortcut(s.id, s.next)}
+            style={[styles.chip, active && styles.chipActive]}
+          >
+            <Ionicons
+              name={s.icon}
+              size={14}
+              color={active ? Colors.background : Colors.primary}
+            />
+            <Text style={[styles.chipText, active && styles.chipTextActive]}>{s.label}</Text>
+          </Pressable>
+        );
+      })}
+    </ScrollView>
+  );
 
   if (Platform.OS === "web") {
     return (
       <View style={[styles.container, { paddingTop: insets.top + webTopInset }]}>
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Software</Text>
+          <Text style={styles.headerSubtitle}>lekker.network — deep-link shortcuts</Text>
         </View>
+        {shortcutBar}
         {!startUrl ? (
           <View style={styles.centered}>
             <ActivityIndicator size="large" color={Colors.primary} />
@@ -71,6 +111,8 @@ export default function SoftwareScreen() {
         <Text style={styles.headerTitle}>Software</Text>
         <Text style={styles.headerSubtitle}>lekker.network dashboard</Text>
       </View>
+
+      {shortcutBar}
 
       <View style={styles.navBar}>
         <Pressable onPress={() => webViewRef.current?.goBack()} style={styles.navButton}>
@@ -123,6 +165,27 @@ const styles = StyleSheet.create({
   header: { paddingHorizontal: 20, paddingVertical: 8 },
   headerTitle: { fontFamily: "Poppins_700Bold", fontSize: fontScale(24), color: Colors.text },
   headerSubtitle: { fontFamily: "Poppins_400Regular", fontSize: 12, color: Colors.textMuted },
+  shortcutRow: {
+    paddingHorizontal: 12,
+    paddingBottom: 8,
+    gap: 8,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  chip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: Colors.primary,
+    backgroundColor: Colors.card,
+  },
+  chipActive: { backgroundColor: Colors.primary },
+  chipText: { fontFamily: "Poppins_600SemiBold", fontSize: 12, color: Colors.primary },
+  chipTextActive: { color: Colors.background },
   navBar: {
     flexDirection: "row",
     justifyContent: "center",

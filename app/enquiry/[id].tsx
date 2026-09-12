@@ -101,6 +101,22 @@ export default function EnquiryThreadScreen() {
       if (data.lead) {
         setLead(data.lead);
         setSharePhone(!!data.lead.privacy?.sharePhone);
+        if (next) {
+          const bizPhone = data.lead?.provider?.phone || data.lead?.providerPhone || null;
+          if (bizPhone) {
+            Alert.alert(
+              "Contact shared",
+              "Continue in a private Lekker Chat DM with this business?",
+              [
+                { text: "Stay here", style: "cancel" },
+                {
+                  text: "Open DM",
+                  onPress: () => openLekkerChatDm(bizPhone),
+                },
+              ],
+            );
+          }
+        }
       } else {
         Alert.alert("Couldn't update", data.message || "Try again");
       }
@@ -115,6 +131,7 @@ export default function EnquiryThreadScreen() {
       ? lead?.seekerPhone || lead?.privacy?.seekerPhone || null
       : null;
   const providerPhone = lead?.provider?.phone || lead?.providerPhone || null;
+  const contactShared = sharePhone || !!lead?.privacy?.sharePhone;
 
   async function openLekkerChatDm(phone?: string | null) {
     if (!phone) {
@@ -219,7 +236,14 @@ export default function EnquiryThreadScreen() {
 
       {role === "seeker" && providerPhone ? (
         <View style={styles.dmBar}>
-          <Text style={styles.privacyHint}>Message this lekkerpreneur on Lekker Chat</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.privacyTitle}>Continue in Lekker Chat DM</Text>
+            <Text style={styles.privacyHint}>
+              {contactShared
+                ? "You've shared contact — start a private chat if they're on Lekker Chat."
+                : "Message this business on Lekker Chat (they won't see your number until you reveal it above)."}
+            </Text>
+          </View>
           <Pressable
             style={styles.actionChip}
             onPress={() => openLekkerChatDm(providerPhone)}
@@ -230,7 +254,7 @@ export default function EnquiryThreadScreen() {
             ) : (
               <>
                 <Ionicons name="chatbubble" size={14} color={Colors.background} />
-                <Text style={styles.actionChipText}>Open chat</Text>
+                <Text style={styles.actionChipText}>Open DM</Text>
               </>
             )}
           </Pressable>

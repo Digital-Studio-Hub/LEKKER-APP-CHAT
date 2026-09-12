@@ -3,10 +3,30 @@
  * Opens the WhatsApp app with a prefilled message (no Twilio send).
  */
 import { Linking, Platform, Share } from "react-native";
+import { apiRequest } from "@/lib/query-client";
 
 export const LEKKER_CHAT_DOWNLOAD_URL = "https://chat.lekker.network";
 export const LEKKER_CHAT_PLAY_STORE_URL =
   "https://play.google.com/store/apps/details?id=com.lekker.chat";
+
+/**
+ * Fire-and-forget invite analytics. Sends count only — never raw phone list.
+ */
+export function reportInviteAnalytics(opts: {
+  count: number;
+  source?: string;
+  channel?: string;
+}): void {
+  const count = Math.max(0, Math.floor(opts.count));
+  if (count < 1) return;
+  void apiRequest("POST", "/api/analytics/invite", {
+    count,
+    channel: opts.channel || "whatsapp",
+    source: opts.source || "new-chat",
+  }).catch(() => {
+    /* non-blocking */
+  });
+}
 
 export function buildInviteMessage(opts: {
   contactFirstName?: string;
@@ -57,7 +77,7 @@ export async function openWhatsAppInvite(phone: string, message: string): Promis
  */
 export async function openWhatsAppInvitesSequential(
   contacts: Array<{ phone: string; name: string }>,
-  opts: { inviterName?: string; max?: number; delayMs?: number } = {},
+  opts: { inviterName?: string; max?: number; delayMs?: number; source?: string } = {},
 ): Promise<{ opened: number; skipped: number }> {
   const max = opts.max ?? 25;
   const delayMs = opts.delayMs ?? 900;
@@ -74,6 +94,9 @@ export async function openWhatsAppInvitesSequential(
     if (slice.indexOf(c) < slice.length - 1) {
       await new Promise((r) => setTimeout(r, delayMs));
     }
+  }
+  if (opened > 0) {
+    reportInviteAnalytics({ count: opened, source: opts.source || "new-chat" });
   }
   return { opened, skipped: Math.max(0, contacts.length - slice.length) };
 }

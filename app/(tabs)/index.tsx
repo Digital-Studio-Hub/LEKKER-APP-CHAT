@@ -109,9 +109,10 @@ type EnquiryPreview = {
   summary?: string;
   serviceLabel?: string;
   status?: string;
-  provider?: { businessName?: string };
+  provider?: { businessName?: string; phone?: string | null };
   lastMessageAt?: string;
   updatedAt?: string;
+  transcript?: Array<{ role?: string; content?: string }>;
 };
 
 export default function ChatsScreen() {
@@ -161,10 +162,35 @@ export default function ChatsScreen() {
       if (!res.ok) return;
       const data = await res.json();
       const list = (data.leads || data.enquiries || []) as EnquiryPreview[];
-      setEnquiries(Array.isArray(list) ? list.slice(0, 20) : []);
+      // Newest activity first
+      const sorted = Array.isArray(list)
+        ? [...list].sort((a, b) => {
+            const ta = new Date(a.lastMessageAt || a.updatedAt || 0).getTime();
+            const tb = new Date(b.lastMessageAt || b.updatedAt || 0).getTime();
+            return tb - ta;
+          })
+        : [];
+      setEnquiries(sorted.slice(0, 20));
     } catch {
       /* optional strip — ignore offline */
     }
+  }
+
+  function enquiryPreviewLine(e: EnquiryPreview): string {
+    const turns = Array.isArray(e.transcript) ? e.transcript : [];
+    const last = turns.length ? turns[turns.length - 1] : null;
+    if (last?.content) {
+      const who = last.role === "provider" ? "Them" : last.role === "system" ? "" : "You";
+      return who ? `${who}: ${last.content}` : last.content;
+    }
+    return e.summary || e.serviceLabel || "Open thread";
+  }
+
+  function enquiryHasUnread(e: EnquiryPreview): boolean {
+    const turns = Array.isArray(e.transcript) ? e.transcript : [];
+    if (!turns.length) return false;
+    const last = turns[turns.length - 1];
+    return last?.role === "provider";
   }
 
   async function loadBlockedUsers() {
@@ -302,38 +328,68 @@ export default function ChatsScreen() {
         removeClippedSubviews={Platform.OS !== "web"}
         initialNumToRender={15}
         ListHeaderComponent={
-          enquiries.length > 0 ? (
-            <View style={styles.enquiriesSection}>
-              <View style={styles.enquiriesHeader}>
-                <Text style={styles.enquiriesTitle}>Enquiries</Text>
-                <Text style={styles.enquiriesHint}>Private until you reveal your number</Text>
-              </View>
-              {enquiries.map((e) => (
-                <Pressable
-                  key={e.id}
-                  style={({ pressed }) => [styles.enquiryRow, pressed && styles.chatItemPressed]}
-                  onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    router.push({ pathname: "/enquiry/[id]", params: { id: e.id } });
-                  }}
-                >
-                  <View style={styles.enquiryIcon}>
-                    <Ionicons name="briefcase-outline" size={18} color={Colors.background} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.chatName} numberOfLines={1}>
-                      {e.provider?.businessName || e.serviceLabel || "Marketplace enquiry"}
-                    </Text>
-                    <Text style={styles.chatLastMessage} numberOfLines={1}>
-                      {e.summary || e.serviceLabel || "Open thread"}
-                    </Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
-                </Pressable>
-              ))}
-              <View style={styles.enquiriesDivider} />
+          <View style={styles.enquiriesSection}>
+            <View style={styles.enquiriesHeader}>
+              <Text style={styles.enquiriesTitle}>Enquiries</Text>
+              <Text style={styles.enquiriesHint}>
+                {enquiries.length
+                  ? "Directory & Marketplace — private until you reveal contact"
+                  : "Enquire from Directory — replies appear here"}
+              </Text>
             </View>
-          ) : null
+            {enquiries.length === 0 ? (
+              <Pressable
+                style={({ pressed }) => [styles.enquiryRow, pressed && styles.chatItemPressed]}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  router.push("/(tabs)/directory");
+                }}
+              >
+                <View style={[styles.enquiryIcon, { backgroundColor: Colors.cardElevated }]}>
+                  <Ionicons name="people-outline" size={18} color={Colors.primary} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.chatName}>Find a lekkerpreneur</Text>
+                  <Text style={styles.chatLastMessage}>Open Directory to send an anonymous enquiry</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
+              </Pressable>
+            ) : (
+              enquiries.map((e) => {
+                const unread = enquiryHasUnread(e);
+                return (
+                  <Pressable
+                    key={e.id}
+                    style={({ pressed }) => [styles.enquiryRow, pressed && styles.chatItemPressed]}
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      router.push({ pathname: "/enquiry/[id]", params: { id: e.id } });
+                    }}
+                  >
+                    <View style={styles.enquiryIcon}>
+                      <Ionicons name="briefcase-outline" size={18} color={Colors.background} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.chatName} numberOfLines={1}>
+                        {e.provider?.businessName || e.serviceLabel || "Marketplace enquiry"}
+                      </Text>
+                      <Text style={styles.chatLastMessage} numberOfLines={1}>
+                        {enquiryPreviewLine(e)}
+                      </Text>
+                    </View>
+                    {unread ? (
+                      <View style={styles.unreadBadge}>
+                        <Text style={styles.unreadText}>1</Text>
+                      </View>
+                    ) : (
+                      <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
+                    )}
+                  </Pressable>
+                );
+              })
+            )}
+            <View style={styles.enquiriesDivider} />
+          </View>
         }
         renderItem={({ item }) => {
           const chatName = getDisplayNameForChat(item);

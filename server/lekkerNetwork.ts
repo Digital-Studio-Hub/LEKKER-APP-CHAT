@@ -471,6 +471,82 @@ export async function chatWithNetworkCledwyn(input: {
   });
 }
 
+/**
+ * Stream workspace Cledwyn from Network (SSE). Yields parsed events:
+ * { meta }, { content }, or { done: true }.
+ */
+export async function* streamNetworkCledwyn(input: {
+  userId: string;
+  workspaceId: string;
+  message: string;
+  sessionId?: string | null;
+}): AsyncGenerator<{ meta?: any; content?: string; done?: boolean }> {
+  if (!LEKKER_API_KEY) {
+    throw new LekkerNetworkApiError("Lekker Network API is not configured", 503);
+  }
+  const res = await fetch(`${LEKKER_MOBILE_BASE}/api/v1/cledwyn/chat?stream=true`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-API-Key": LEKKER_API_KEY,
+      Accept: "text/event-stream",
+    },
+    body: JSON.stringify({
+      userId: input.userId,
+      workspaceId: input.workspaceId,
+      message: input.message,
+      sessionId: input.sessionId || undefined,
+      stream: true,
+    }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    let data: any = {};
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      data = { message: text };
+    }
+    throw new LekkerNetworkApiError(
+      data.message || data.error || `Lekker Network ${res.status}`,
+      res.status,
+      data,
+    );
+  }
+  const reader = res.body?.getReader();
+  if (!reader) {
+    throw new LekkerNetworkApiError("No stream body from Network Cledwyn", 502);
+  }
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
+      const raw = line.slice(6).trim();
+      if (raw === "[DONE]") {
+        yield { done: true };
+        continue;
+      }
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed.meta) yield { meta: parsed.meta };
+        if (parsed.sessionId && !parsed.content) {
+          yield { meta: { sessionId: parsed.sessionId, ...(parsed.meta || {}) } };
+        }
+        if (typeof parsed.content === "string") yield { content: parsed.content };
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  yield { done: true };
+}
+
 export async function fetchMobileSessionToken(lekkerNetworkUserId: string): Promise<string | null> {
   const data = await lekkerMobileFetch<{ token?: string }>("/api/v1/mobile/session-token", {
     method: "POST",
