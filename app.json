@@ -17,7 +17,7 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "app.replit.lekkerchatios",
+      "bundleIdentifier": "com.lekker.chat",
       "buildNumber": "14",
       "infoPlist": {
         "UIRequiresFullScreen": false,

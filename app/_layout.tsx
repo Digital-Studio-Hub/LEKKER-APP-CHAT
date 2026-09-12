@@ -27,6 +27,8 @@ function RootLayoutNav() {
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="chat/[id]" options={{ animation: "slide_from_right" }} />
       <Stack.Screen name="enquiry/[id]" options={{ animation: "slide_from_right" }} />
+      <Stack.Screen name="events/index" options={{ animation: "slide_from_right" }} />
+      <Stack.Screen name="events/[id]" options={{ animation: "slide_from_right" }} />
       <Stack.Screen name="user-profile/[id]" options={{ animation: "slide_from_right" }} />
       <Stack.Screen name="settings" options={{ animation: "slide_from_right" }} />
       <Stack.Screen name="profile" options={{ animation: "slide_from_right" }} />

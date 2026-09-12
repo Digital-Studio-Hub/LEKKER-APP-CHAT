@@ -32,7 +32,8 @@ steps:
       - --region=${_REGION}
       # Keep ecosystem mail + GCS ADC aligned (do not use Replit Gmail/sidecar)
       - --update-secrets=INBOUND_API_KEY=INBOUND_API_KEY:latest,XAI_API_KEY=lekker-social-xai-api-key:latest
-      - --update-env-vars=OBJECT_STORAGE_BACKEND=gcs,PRIVATE_OBJECT_DIR=/lekkernetworkbucket/lekker-chat/private,PUBLIC_OBJECT_SEARCH_PATHS=/lekkernetworkbucket/lekker-chat/public,SYSTEM_FROM_EMAIL=noreply@lekker.network,SYSTEM_FROM_NAME=Lekker Chat,SYSTEM_EMAIL_PROVIDER=auto,LEKKER_API_BASE_URL=https://lekker.network,CHAT_WHATSAPP_ONLY=true
+      - --update-env-vars=OBJECT_STORAGE_BACKEND=gcs,PRIVATE_OBJECT_DIR=/lekkernetworkbucket/lekker-chat/private,PUBLIC_OBJECT_SEARCH_PATHS=/lekkernetworkbucket/lekker-chat/public,SYSTEM_FROM_EMAIL=noreply@lekker.network,SYSTEM_FROM_NAME=Lekker Chat,SYSTEM_EMAIL_PROVIDER=auto,LEKKER_API_BASE_URL=https://lekker.network,CHAT_WHATSAPP_ONLY=true,LEKKER_WORKSPACE_ID=ebb114a2-c994-4d46-9274-bdd97ac23dde
+      # LEKKER_TOKEN must stay on Cloud Run (set via gcloud); do not commit the Connect token
       - --quiet
 
 images:

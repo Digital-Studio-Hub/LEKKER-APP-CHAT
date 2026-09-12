@@ -8,6 +8,9 @@ export const LEKKER_CHAT_PLAY_STORE_URL =
   "https://play.google.com/store/apps/details?id=com.lekker.chat";
 export const GOOGLE_SEARCH_URL = "https://www.google.com/search?q=";
 
+/** Native in-app route (not a URL) — Browse handles specially */
+export const NATIVE_EVENTS_ROUTE = "/events";
+
 export const ECOSYSTEM_SHORTCUTS = [
   {
     id: "marketplace",
@@ -21,7 +24,7 @@ export const ECOSYSTEM_SHORTCUTS = [
     id: "events",
     title: "Events",
     subtitle: "Tickets & experiences",
-    url: LEKKER_MARKETPLACE_EVENTS_URL,
+    url: NATIVE_EVENTS_ROUTE,
     icon: "ticket-outline" as const,
     color: "#7C3AED",
   },

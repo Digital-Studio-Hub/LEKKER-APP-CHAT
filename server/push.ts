@@ -195,3 +195,37 @@ export async function notifyChatMessage(
     console.error("[Push] notifyChatMessage error:", e);
   }
 }
+
+/** Push a user by Chat userId (enquiry replies, system alerts). */
+export async function notifyUserPush(
+  userId: string,
+  title: string,
+  body: string,
+  data?: Record<string, string>,
+): Promise<void> {
+  try {
+    const [u] = await db
+      .select({ notificationsEnabled: users.notificationsEnabled })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+    if (u && u.notificationsEnabled === false) return;
+
+    const tokens = await db
+      .select({ expoPushToken: pushTokens.expoPushToken })
+      .from(pushTokens)
+      .where(eq(pushTokens.userId, userId));
+    if (!tokens.length) return;
+
+    await sendExpoPush(
+      tokens.map((t) => ({
+        to: t.expoPushToken,
+        title,
+        body: body.length > 120 ? `${body.slice(0, 117)}…` : body,
+        data: data || {},
+      })),
+    );
+  } catch (e) {
+    console.error("[Push] notifyUserPush error:", e);
+  }
+}

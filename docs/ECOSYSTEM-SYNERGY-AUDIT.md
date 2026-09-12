@@ -133,11 +133,11 @@ Effort: **S** &lt;1w · **M** 1–3w · **L** multi-sprint
 
 | Item | Current | Synergy opportunity | P | E |
 |------|---------|---------------------|---|---|
-| iOS bundle id | **Mismatch:** `app.json` = `app.replit.lekkerchatios` (build 14); local `ios/.../project.pbxproj` = `com.lekker.chat` | Make Expo SoT `com.lekker.chat`; next `expo prebuild` will overwrite Xcode unless fixed first — ASC migration plan | P1 | M |
+| iOS bundle id | **Done (app.json):** `com.lekker.chat` (matches Android). See `docs/IOS-BUNDLE-ID.md` — ASC migration may still be needed if live store app used `app.replit.lekkerchatios` | Confirm ASC / next prebuild | P1 | M |
 | EAS projectId | Real UUID in `app.json` (`385aa478-…`) | HANDOVER “placeholder projectId” note is **stale** — refresh docs | P2 | S |
-| Duplicate roots | Root `routes.ts` (~1.9k lines, **not mounted**), loose `settings.tsx`, `(tabs)/`, `replit_integrations/` | Delete or quarantine; risk of editing dead code | P1 | S |
+| Duplicate roots | **Partial:** root `routes.ts` → `server/_dead/routes.root.ts`; remaining Expo root dupes listed in `docs/DEAD-CODE.md` (still gitignored, not moved) | Move remaining root dupes after Metro safety check | P1 | S |
 | Docs | HANDOVER / AGENTS / GOOGLE_PLAY still cite Replit API | Cloud Run–only truth (`eas.json` already correct) | P2 | S |
-| Dev default URL | `lekkerNetwork.ts` still has old Replit `.spock.replit.dev` fallback when not production | Default to `https://lekker.network` always | P1 | S |
+| Dev default URL | **Done:** `LEKKER_API_BASE` / `LEKKER_MOBILE_BASE` default `https://lekker.network` (`LEKKER_API_BASE_URL` override still works); Replit `.spock` fallback removed | Rebuild `server_dist` on next deploy | P1 | S |
 | Store builds | Client features ahead of last Play build | EAS from `206246e+` / `0660e40+` | P0 | S |
 
 ---
@@ -163,11 +163,11 @@ Effort: **S** &lt;1w · **M** 1–3w · **L** multi-sprint
 4. Device QA: phonebook invite (on-app DM vs WA), Assistant modes (workspace vs generalist), profile photo/email.
 
 ### Next sprint (P0–P1 synergy)
-1. Fix Chat `LEKKER_API_BASE` hard-coded Replit fallback → always production Network.  
+1. ~~Fix Chat `LEKKER_API_BASE` hard-coded Replit fallback → always production Network.~~ **Done**  
 2. Enquiry **push notifications** when provider replies.  
 3. Wire **one** native Connect surface: Events ticket pay (`retailChannel=chat`).  
-4. Delete / quarantine duplicate root `routes.ts` and stale Expo roots.  
-5. Plan **iOS bundle id** migration.
+4. ~~Delete / quarantine duplicate root `routes.ts`~~ **Done** (`server/_dead/`); remaining Expo root dupes → `docs/DEAD-CODE.md` follow-up.  
+5. ~~Plan **iOS bundle id** migration~~ — `app.json` set to `com.lekker.chat`; ASC follow-up if store still on Replit id (`docs/IOS-BUNDLE-ID.md`).
 
 ### Following (P1–P2)
 1. Identity consolidation design (Chat DB = messaging only).  
@@ -202,7 +202,7 @@ Effort: **S** &lt;1w · **M** 1–3w · **L** multi-sprint
 | Cledwyn synergy | 3.5 | Proxied; tool parity incomplete |
 | Commerce synergy | 2 | Webviews; Connect unused in UI |
 | Infra alignment | 4 | Cloud Run + Lekker Mail + GCS + xAI |
-| Store / packaging | 2.5 | Android OK; iOS Replit bundle id |
+| Store / packaging | 3.5 | Android OK; iOS `app.json` now `com.lekker.chat` (ASC TBD) |
 | **Overall synergy** | **~3.2** | Past “bolt-on”; not yet “one platform” |
 
 ---
@@ -212,7 +212,7 @@ Effort: **S** &lt;1w · **M** 1–3w · **L** multi-sprint
 1. **Identity:** Keep dual DB long-term, or commit to Network-id-first migration this quarter?  
 2. **Commerce:** Native Events in Chat next, or deepen enquire→DM / push-on-reply loop first?  
 3. **Cledwyn:** Invest in Network mobile tool parity, or accept advisor-lite + Software for power users?  
-4. **iOS bundle id:** Fix `app.json` before next prebuild (Xcode already `com.lekker.chat`) — schedule ASC migration now or after Android QA?
+4. **iOS bundle id:** `app.json` fixed to `com.lekker.chat` — schedule ASC migration now or after Android QA if live app used Replit id?
 
 ---
 

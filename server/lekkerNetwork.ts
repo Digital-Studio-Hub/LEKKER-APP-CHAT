@@ -1,4 +1,4 @@
-const LEKKER_API_BASE = process.env.LEKKER_API_BASE_URL || (process.env.NODE_ENV === "production" ? "https://lekker.network" : "https://ba8f68e4-7053-4a89-92cd-ae1a588f2a0c-00-2ocng4z2k42dj.spock.replit.dev");
+const LEKKER_API_BASE = process.env.LEKKER_API_BASE_URL || "https://lekker.network";
 const LEKKER_API_URL = `${LEKKER_API_BASE}/api/v1/lekkerpreneurs`;
 const LEKKER_SYNC_URL = `${LEKKER_API_BASE}/api/auth/sync-lekker`;
 const LEKKER_WORKSPACES_URL = `${LEKKER_API_BASE}/api/v1/workspaces`;

@@ -1,10 +1,11 @@
+// NOT MOUNTED — live routes are server/routes.ts
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "node:http";
 import OpenAI from "openai";
 import rateLimit, { type Options } from "express-rate-limit";
 import { registerSchema, loginSchema, updateProfileSchema, users, chatMessages, passwordResetCodes, phoneVerificationCodes, emailVerificationCodes, userEmails } from "@shared/schema";
 import { storage, db } from "./storage";
-import { sql, or, and, ne, eq, inArray, desc } from "drizzle-orm";
+import { sql, or, and, ne, eq } from "drizzle-orm";
 import {
   hashPassword,
   verifyPassword,
@@ -15,77 +16,9 @@ import {
 } from "./auth";
 import { ObjectStorageService, ObjectNotFoundError } from "./objectStorage";
 import { ObjectPermission } from "./objectAcl";
-import {
-  findLekkerpreneurByPhoneOrEmail,
-  fetchDirectory as fetchLekkerDirectory,
-  fetchLekkerpreneurById,
-  fetchWorkspaceById,
-  fetchWorkspaces,
-  extractLekkerpreneurProfile,
-  buildSyncUserResponse,
-  buildDirectoryEntry,
-  buildWorkspaceDirectoryEntry,
-  fetchMobileSessionToken,
-  fetchWorkspaceEmailStatus,
-  fetchMobileEmailThreads,
-  fetchMobileEmailThread,
-  sendMobileEmail,
-  isLekkerNetworkConfigured,
-  chatWithNetworkCledwyn,
-  LekkerNetworkApiError,
-  type LekkerNetworkEntry,
-  type WorkspaceDetail,
-} from "./lekkerNetwork";
+import { findLekkerpreneurByPhoneOrEmail, fetchDirectory as fetchLekkerDirectory, fetchLekkerpreneurById, fetchWorkspaceById, fetchWorkspaces, extractLekkerpreneurProfile, buildSyncUserResponse, buildDirectoryEntry, buildWorkspaceDirectoryEntry, type LekkerNetworkEntry, type WorkspaceDetail } from "./lekkerNetwork";
 import { sendPasswordResetEmail, sendEmailVerificationEmail } from "./gmail";
 import { sendPasswordResetSMS, sendPhoneVerificationSMS } from "./twilio";
-import { sendWhatsAppOtp, isWhatsAppOtpConfigured, whatsAppOtpConfigStatus } from "./whatsapp-otp";
-import {
-  getAppleReviewConfig,
-  isAppleReviewPhone,
-  isAppleReviewLogin,
-} from "./apple-review-auth";
-import {
-  listFeedPosts,
-  getFeedPostById,
-  createFeedPost,
-  toggleFeedLike,
-  addFeedShare,
-  addFeedComment,
-} from "./feed";
-import { registerPushToken, unregisterPushToken, notifyChatMessage, notifyUserPush } from "./push";
-import { containsBlockedContent, CONTENT_FILTER_MESSAGE } from "./content-filter";
-import { isSocialMediaAllowed, type AgeRangeSource } from "../shared/age-gate";
-import { requireSocialMediaAccess } from "./age-gate";
-import {
-  isConnectConfigured,
-  LekkerConnectError,
-  submitContactToLekker,
-  getFeed as getConnectFeed,
-  searchProducts,
-  submitOrder,
-  createCheckout,
-  getShippingQuote,
-  validateGiftCard,
-  requestPortalOtp,
-  verifyPortalOtp,
-  getPortalMe,
-  getBookingOfferings,
-  createBooking,
-  createBookingCheckout,
-  joinBookingWaitlist,
-  claimBookingHold,
-} from "./lekker-connect";
-import { normaliseMobile, phoneToPlaceholderEmail, phoneToUsername } from "../shared/mobile-utils";
-import type { User } from "@shared/schema";
-function rejectBlockedContent(res: Response, ...texts: Array<string | null | undefined>): boolean {
-  for (const text of texts) {
-    if (text && containsBlockedContent(text)) {
-      res.status(400).json({ message: CONTENT_FILTER_MESSAGE, code: "CONTENT_BLOCKED" });
-      return true;
-    }
-  }
-  return false;
-}
 
 function normalizePhone(raw: string): string {
   const digits = raw.replace(/[\s\-().]/g, "");
@@ -94,47 +27,6 @@ function normalizePhone(raw: string): string {
   if (digits.startsWith("27")) return "+" + digits;
   if (digits.length >= 7) return "+27" + digits;
   return digits;
-}
-
-/** SA-friendly phone variants so contact book formats still resolve registered users. */
-function phoneLookupVariants(raw: string): string[] {
-  const trimmed = (raw || "").trim();
-  if (!trimmed) return [];
-  const digits = trimmed.replace(/\D/g, "");
-  const variants = new Set<string>([
-    trimmed,
-    trimmed.replace(/\s/g, ""),
-    normalizePhone(trimmed),
-  ]);
-  if (digits.startsWith("27") && digits.length >= 11) {
-    variants.add(`+${digits}`);
-    variants.add(digits);
-    variants.add(`0${digits.slice(2)}`);
-  } else if (digits.startsWith("0") && digits.length >= 10) {
-    variants.add(`+27${digits.slice(1)}`);
-    variants.add(`27${digits.slice(1)}`);
-    variants.add(digits);
-  } else if (digits.length >= 9 && digits.length <= 11) {
-    variants.add(`+27${digits}`);
-    variants.add(`0${digits}`);
-    variants.add(`27${digits}`);
-  }
-  return [...variants].filter(Boolean);
-}
-
-async function findUserByPhoneFlexible(phone: string) {
-  const variants = phoneLookupVariants(phone);
-  for (const variant of variants) {
-    const match = await storage.getUserByPhone(variant);
-    if (match) return match;
-  }
-  if (variants.length === 0) return undefined;
-  const [row] = await db
-    .select()
-    .from(users)
-    .where(inArray(users.phone, variants))
-    .limit(1);
-  return row;
 }
 
 async function enrichParticipants(chatId: string) {
@@ -159,32 +51,10 @@ async function enrichParticipants(chatId: string) {
   return participantUsers;
 }
 
-// Lazy LLM client — prefer xAI (ecosystem) then OpenRouter (legacy Replit).
-let _llm: OpenAI | null = null;
-let _llmModel = "grok-4-latest";
-function getGeneralistLlm(): { client: OpenAI; model: string } {
-  if (_llm) return { client: _llm, model: _llmModel };
-  const xaiKey = process.env.XAI_API_KEY;
-  if (xaiKey) {
-    _llm = new OpenAI({ baseURL: "https://api.x.ai/v1", apiKey: xaiKey });
-    _llmModel = "grok-4-latest";
-    return { client: _llm, model: _llmModel };
-  }
-  const orKey = process.env.AI_INTEGRATIONS_OPENROUTER_API_KEY;
-  if (orKey) {
-    _llm = new OpenAI({
-      baseURL: process.env.AI_INTEGRATIONS_OPENROUTER_BASE_URL,
-      apiKey: orKey,
-    });
-    _llmModel = "x-ai/grok-4.3";
-    return { client: _llm, model: _llmModel };
-  }
-  throw new Error("No XAI_API_KEY or AI_INTEGRATIONS_OPENROUTER_API_KEY configured");
-}
-/** @deprecated use getGeneralistLlm */
-function getOpenRouter(): OpenAI {
-  return getGeneralistLlm().client;
-}
+const openrouter = new OpenAI({
+  baseURL: process.env.AI_INTEGRATIONS_OPENROUTER_BASE_URL,
+  apiKey: process.env.AI_INTEGRATIONS_OPENROUTER_API_KEY,
+});
 
 interface DirectoryEntry {
   id: string;
@@ -243,65 +113,6 @@ function sanitizeUser(user: any) {
   return safe;
 }
 
-const AVATAR_COLORS = ["#4ECDC4", "#FF6B6B", "#45B7D1", "#96CEB4", "#FFEAA7", "#DDA0DD", "#85C1E9", "#F7DC6F", "#BB8FCE", "#98D8C8"];
-
-async function applyLekkerSync(user: User, req: Request): Promise<User> {
-  let finalUser = user;
-  try {
-    const lekkerMatch = await findLekkerpreneurByPhoneOrEmail(
-      user.phone,
-      user.email || "",
-    );
-    if (lekkerMatch) {
-      const profileData = extractLekkerpreneurProfile(lekkerMatch);
-      let workspaceEmailActive = false;
-      if (profileData.lekkerWorkspaceId) {
-        const emailStatus = await fetchWorkspaceEmailStatus(profileData.lekkerWorkspaceId);
-        workspaceEmailActive = emailStatus.active;
-      }
-      // Don't overwrite a user-chosen email/username with empty Network values
-      const patch: Record<string, unknown> = {
-        ...profileData,
-        workspaceEmailActive,
-      };
-      if (!profileData.email && user.email) delete patch.email;
-      const updated = await storage.updateUser(user.id, patch as any);
-      if (updated) {
-        finalUser = updated;
-        // Store Network email as a secondary email row when new
-        if (profileData.email && profileData.email !== user.email) {
-          try {
-            await storage.addUserEmail(user.id, profileData.email, !user.email, !!profileData.emailVerified);
-          } catch {
-            /* unique conflict — ignore */
-          }
-        }
-        await storage.logAuthEvent(
-          "lekker_network_match",
-          user.id,
-          req.ip,
-          undefined,
-          `Matched Lekkerpreneur: ${lekkerMatch.businessName} (${lekkerMatch.id})`,
-        );
-      }
-    }
-  } catch (e) {
-    console.error("Lekker Network sync (non-fatal):", e);
-  }
-  return finalUser;
-}
-
-async function resolveUniqueUsername(phone: string): Promise<string> {
-  let base = phoneToUsername(phone);
-  let candidate = base;
-  let n = 0;
-  while (await storage.getUserByUsername(candidate)) {
-    n += 1;
-    candidate = `${base}_${n}`;
-  }
-  return candidate;
-}
-
 const phoneVerifyLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 5,
@@ -309,88 +120,9 @@ const phoneVerifyLimiter = rateLimit({
   legacyHeaders: false,
   message: { message: "Too many verification attempts. Please try again in an hour." },
   validate: { xForwardedForHeader: false },
-  skip: (req) => {
-    const raw = req.body?.phone;
-    return raw ? isAppleReviewPhone(String(raw)) : false;
-  },
 });
 
-async function handleAppleReviewVerify(
-  req: Request,
-  res: Response,
-  phone: string,
-  _displayName?: string,
-): Promise<void> {
-  const config = getAppleReviewConfig();
-  if (!config) {
-    res.status(503).json({ message: "Apple Review login is not configured." });
-    return;
-  }
-
-  let user = await storage.getUserByPhone(phone);
-
-  if (!user) {
-    // Passwordless: phone is the only required unique field
-    const name = (config.displayName || "Apple Reviewer").trim();
-    const randomColor = AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)];
-
-    user = await storage.createUser({
-      phone,
-      email: null,
-      username: null,
-      firstName: name,
-      lastName: "",
-      passwordHash: null,
-      avatarColor: randomColor,
-      role: "user",
-      emailVerified: true,
-      phoneVerified: true,
-      lekkerNetworkAccess: false,
-      autoReplyEnabled: false,
-      notificationsEnabled: true,
-      locationEnabled: false,
-      presence: "online",
-    } as any);
-
-    await storage.logAuthEvent("register_apple_review", user.id, req.ip, req.headers["user-agent"]?.toString());
-  } else {
-    await storage.updateUser(user.id, { phoneVerified: true, emailVerified: true });
-    const emails = await storage.getUserEmails(user.id);
-    for (const row of emails) {
-      if (!row.isVerified) {
-        await storage.verifyUserEmail(row.id, user.id);
-      }
-    }
-    user = (await storage.getUser(user.id))!;
-    await storage.logAuthEvent("login_apple_review", user.id, req.ip, req.headers["user-agent"]?.toString());
-  }
-
-  const synced = await applyLekkerSync(user, req);
-  const token = generateToken({
-    userId: synced.id,
-    email: synced.email || synced.phone || "",
-    role: synced.role,
-  });
-  res.json({ user: sanitizeUser(synced), token });
-}
-
 export async function registerRoutes(app: Express): Promise<Server> {
-
-  app.get("/api/health", (_req: Request, res: Response) => {
-    const otp = whatsAppOtpConfigStatus();
-    res.json({
-      ok: true,
-      service: "lekker-chat",
-      whatsappOtpConfigured: otp.configured,
-      whatsappOtp: {
-        hasAccountSid: otp.hasAccountSid,
-        accountSidLooksValid: otp.accountSidLooksValid,
-        hasAuthToken: otp.hasAuthToken,
-        hasFrom: otp.hasFrom,
-        hasContentSid: otp.hasContentSid,
-      },
-    });
-  });
 
   app.post("/api/auth/send-phone-code", phoneVerifyLimiter, async (req: Request, res: Response) => {
     try {
@@ -540,202 +272,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  /** WhatsApp OTP — passwordless login & registration (Guideline synergy with lekker.network) */
-  app.post("/api/auth/whatsapp/send-code", phoneVerifyLimiter, async (req: Request, res: Response) => {
-    try {
-      const rawPhone = req.body.phone;
-      if (!rawPhone || String(rawPhone).trim().length < 6) {
-        return res.status(400).json({ message: "Valid phone number is required" });
-      }
-      const phone = normaliseMobile(String(rawPhone).trim());
-      if (!phone) {
-        return res.status(400).json({ message: "Could not parse phone number" });
-      }
-
-      if (isAppleReviewPhone(phone)) {
-        const existing = await storage.getUserByPhone(phone);
-        return res.json({
-          message: "Verification code sent via WhatsApp",
-          isExistingUser: !!existing,
-        });
-      }
-
-      await db.delete(phoneVerificationCodes).where(eq(phoneVerificationCodes.phone, phone));
-
-      const code = Math.floor(100000 + Math.random() * 900000).toString();
-      const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
-
-      await db.insert(phoneVerificationCodes).values({
-        phone,
-        code,
-        verified: false,
-        used: false,
-        expiresAt,
-      });
-
-      try {
-        if (!isWhatsAppOtpConfigured()) {
-          console.error("WhatsApp send-code blocked:", whatsAppOtpConfigStatus());
-          await db.delete(phoneVerificationCodes).where(eq(phoneVerificationCodes.phone, phone));
-          return res.status(503).json({
-            message:
-              "WhatsApp login is temporarily unavailable. Please try again later.",
-            code: "WHATSAPP_OTP_NOT_CONFIGURED",
-          });
-        }
-
-        await sendWhatsAppOtp(phone, code);
-      } catch (sendErr) {
-        await db.delete(phoneVerificationCodes).where(eq(phoneVerificationCodes.phone, phone));
-        throw sendErr;
-      }
-
-      const existing = await storage.getUserByPhone(phone);
-      res.json({
-        message: "Verification code sent via WhatsApp",
-        isExistingUser: !!existing,
-      });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error("WhatsApp send-code error:", msg);
-      if (msg.includes("TWILIO_ACCOUNT_SID_INVALID") || msg.includes("WHATSAPP_OTP_NOT_CONFIGURED")) {
-        return res.status(503).json({
-          message:
-            "WhatsApp login is temporarily unavailable. Please try again later.",
-          code: "WHATSAPP_OTP_NOT_CONFIGURED",
-        });
-      }
-      res.status(500).json({ message: "Failed to send WhatsApp code. Please try again." });
-    }
-  });
-
-  app.post("/api/auth/whatsapp/verify", phoneVerifyLimiter, async (req: Request, res: Response) => {
-    try {
-      const { code, displayName } = req.body;
-      const phone = req.body.phone ? normaliseMobile(String(req.body.phone).trim()) : null;
-      if (!phone || !code) {
-        return res.status(400).json({ message: "Phone number and code are required" });
-      }
-
-      // Apple Review static login — never consume DB OTPs; reusable across review sessions.
-      if (isAppleReviewPhone(phone)) {
-        if (isAppleReviewLogin(phone, String(code).trim())) {
-          await handleAppleReviewVerify(req, res, phone, displayName);
-          return;
-        }
-        return res.status(400).json({
-          message: "Incorrect code. Please try again.",
-        });
-      }
-
-      const [record] = await db
-        .select()
-        .from(phoneVerificationCodes)
-        .where(eq(phoneVerificationCodes.phone, phone))
-        .orderBy(phoneVerificationCodes.createdAt)
-        .limit(1);
-
-      if (!record) {
-        return res.status(400).json({ message: "No verification code found. Please request a new code." });
-      }
-      if (record.used) {
-        return res.status(400).json({ message: "This code has already been used. Please request a new code." });
-      }
-      if (new Date() > record.expiresAt) {
-        return res.status(400).json({ message: "This code has expired. Please request a new code." });
-      }
-      if (record.code !== String(code).trim()) {
-        return res.status(400).json({ message: "Incorrect code. Please try again." });
-      }
-
-      await db.update(phoneVerificationCodes).set({ verified: true, used: true }).where(eq(phoneVerificationCodes.id, record.id));
-
-      let user = await storage.getUserByPhone(phone);
-
-      if (!user) {
-        // Identity = mobile number only. Email/username optional (Settings or Lekker Network).
-        const randomColor = AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)];
-
-        let firstName = "";
-        let lastName = "";
-        let email: string | null = null;
-        let prefill: Record<string, unknown> = {};
-        try {
-          const lekkerMatch = await findLekkerpreneurByPhoneOrEmail(phone, "");
-          if (lekkerMatch) {
-            prefill = extractLekkerpreneurProfile(lekkerMatch) as Record<string, unknown>;
-            if (typeof prefill.firstName === "string" && prefill.firstName.trim()) {
-              firstName = String(prefill.firstName).trim();
-              lastName = typeof prefill.lastName === "string" ? String(prefill.lastName) : "";
-            }
-            if (typeof prefill.email === "string" && prefill.email.trim()) {
-              email = String(prefill.email).trim().toLowerCase();
-            }
-          }
-        } catch (e) {
-          console.error("Lekker prefill on WhatsApp register (non-fatal):", e);
-        }
-
-        const optionalName = (displayName || "").trim();
-        if (!firstName && optionalName.length >= 2) {
-          firstName = optionalName;
-        }
-
-        user = await storage.createUser({
-          phone,
-          email,
-          username: null,
-          firstName,
-          lastName,
-          passwordHash: null,
-          avatarColor: randomColor,
-          role: "user",
-          emailVerified: !!(prefill.emailVerified && email),
-          phoneVerified: true,
-          lekkerNetworkAccess: false,
-          autoReplyEnabled: false,
-          notificationsEnabled: true,
-          locationEnabled: false,
-          presence: "online",
-          ...prefill,
-          // Ensure phone-based nulls win over empty prefill
-          email: email ?? (typeof prefill.email === "string" ? prefill.email : null),
-          username: null,
-        } as any);
-
-        if (user.email) {
-          try {
-            await storage.addUserEmail(user.id, user.email, true, !!user.emailVerified);
-          } catch {
-            /* ignore duplicate */
-          }
-        }
-        await storage.logAuthEvent("register_whatsapp", user.id, req.ip, req.headers["user-agent"]?.toString());
-      } else {
-        if (!user.phoneVerified) {
-          await storage.updateUser(user.id, { phoneVerified: true });
-          user = (await storage.getUser(user.id))!;
-        }
-        await storage.logAuthEvent("login_whatsapp", user.id, req.ip, req.headers["user-agent"]?.toString());
-      }
-
-      const synced = await applyLekkerSync(user, req);
-      const token = generateToken({
-        userId: synced.id,
-        email: synced.email || synced.phone || "",
-        role: synced.role,
-      });
-      res.json({ user: sanitizeUser(synced), token });
-    } catch (err) {
-      console.error("WhatsApp verify error:", err);
-      res.status(500).json({ message: "Verification failed. Please try again." });
-    }
-  });
-
   app.post("/api/auth/register", registerLimiter, async (req: Request, res: Response) => {
-    if (process.env.CHAT_WHATSAPP_ONLY !== "false") {
-      return res.status(410).json({ message: "Use WhatsApp OTP to sign in. Password login is disabled." });
-    }
     try {
       const parsed = registerSchema.safeParse(req.body);
       if (!parsed.success) {
@@ -851,9 +388,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.post("/api/auth/login", loginLimiter, async (req: Request, res: Response) => {
-    if (process.env.CHAT_WHATSAPP_ONLY !== "false") {
-      return res.status(410).json({ message: "Use WhatsApp OTP to sign in. Password login is disabled." });
-    }
     try {
       const parsed = loginSchema.safeParse(req.body);
       if (!parsed.success) {
@@ -910,9 +444,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.post("/api/auth/forgot-password", resetRequestLimiter, async (req: Request, res: Response) => {
-    if (process.env.CHAT_WHATSAPP_ONLY !== "false") {
-      return res.status(410).json({ message: "Use WhatsApp OTP to sign in. Password login is disabled." });
-    }
     try {
       const { identifier } = req.body;
       if (!identifier || typeof identifier !== "string") {
@@ -975,9 +506,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   app.post("/api/auth/verify-reset-code", resetRequestLimiter, async (req: Request, res: Response) => {
-    if (process.env.CHAT_WHATSAPP_ONLY !== "false") {
-      return res.status(410).json({ message: "Use WhatsApp OTP to sign in. Password login is disabled." });
-    }
     try {
       const { email, code } = req.body;
       if (!email || !code) {
@@ -1019,9 +547,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.post("/api/auth/reset-password", resetRequestLimiter, async (req: Request, res: Response) => {
-    if (process.env.CHAT_WHATSAPP_ONLY !== "false") {
-      return res.status(410).json({ message: "Use WhatsApp OTP to sign in. Password login is disabled." });
-    }
     try {
       const { email, code, newPassword } = req.body;
       if (!email || !code || !newPassword) {
@@ -1112,17 +637,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       const userId = req.user!.userId;
       const pending = await storage.addUserEmail(userId, normalized, false, false);
-      await db.delete(emailVerificationCodes).where(eq(emailVerificationCodes.email, normalized));
       const code = Math.floor(100000 + Math.random() * 900000).toString();
       const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
       await db.insert(emailVerificationCodes).values({ email: normalized, code, expiresAt });
-      const userForEmail = await storage.getUser(userId);
-      const sent = await sendEmailVerificationEmail(normalized, code, userForEmail?.firstName || "there");
-      if (!sent) {
-        return res.status(502).json({
-          emailId: pending.id,
-          message: "Could not send the verification email. Check the address and try again in a moment.",
-        });
+      try {
+        const userForEmail = await storage.getUser(userId);
+        await sendEmailVerificationEmail(normalized, code, userForEmail?.firstName || "there");
+      } catch (e) {
+        console.error("Failed to send verification email (non-fatal):", e);
       }
       res.status(201).json({ emailId: pending.id, message: "Verification code sent to " + normalized });
     } catch (error) {
@@ -1140,15 +662,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const target = emails.find(e => e.id === emailId);
       if (!target) return res.status(404).json({ message: "Email not found" });
       if (target.isVerified) return res.status(400).json({ message: "Email is already verified" });
-      // Newest unused code wins (resend must not leave the old OTP as the match target)
       const [codeRecord] = await db.select().from(emailVerificationCodes)
-        .where(and(
-          eq(emailVerificationCodes.email, target.email),
-          eq(emailVerificationCodes.used, false),
-        ))
-        .orderBy(desc(emailVerificationCodes.createdAt))
+        .where(eq(emailVerificationCodes.email, target.email))
+        .orderBy(emailVerificationCodes.createdAt)
         .limit(1);
-      if (!codeRecord || codeRecord.code !== String(code).trim()) {
+      if (!codeRecord || codeRecord.code !== code || codeRecord.used) {
         return res.status(400).json({ message: "Invalid or expired verification code" });
       }
       if (new Date() > codeRecord.expiresAt) {
@@ -1195,14 +713,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const target = emails.find(e => e.id === emailId);
       if (!target) return res.status(404).json({ message: "Email not found" });
       if (target.isVerified) return res.status(400).json({ message: "Email is already verified" });
-      await db.delete(emailVerificationCodes).where(eq(emailVerificationCodes.email, target.email));
       const code = Math.floor(100000 + Math.random() * 900000).toString();
       const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
       await db.insert(emailVerificationCodes).values({ email: target.email, code, expiresAt });
-      const userForEmail = await storage.getUser(userId);
-      const sent = await sendEmailVerificationEmail(target.email, code, userForEmail?.firstName || "there");
-      if (!sent) {
-        return res.status(502).json({ message: "Could not send the verification email. Please try again shortly." });
+      try {
+        const userForEmail = await storage.getUser(userId);
+        await sendEmailVerificationEmail(target.email, code, userForEmail?.firstName || "there");
+      } catch (e) {
+        console.error("Failed to resend verification email:", e);
       }
       res.json({ message: "Verification code resent" });
     } catch (error) {
@@ -1311,78 +829,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return { chat: { ...chat, participants }, status: 201 as const };
   }
 
-  /**
-   * WhatsApp-style: given phone numbers from the device address book, return
-   * which ones belong to registered Lekker Chat users. Anyone with an account
-   * is messageable — no mutual friendship required.
-   */
-  app.post("/api/contacts/match", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const userId = req.user!.userId;
-      const rawPhones = Array.isArray(req.body?.phones) ? req.body.phones : [];
-      if (rawPhones.length === 0) {
-        return res.json({ matches: [] });
-      }
-      if (rawPhones.length > 1000) {
-        return res.status(400).json({ message: "Too many phone numbers (max 1000)" });
-      }
-
-      const requestPhones = rawPhones
-        .filter((p: unknown): p is string => typeof p === "string" && p.trim().length > 0)
-        .map((p: string) => p.trim())
-        .slice(0, 1000);
-
-      const variantToRequestPhone = new Map<string, string>();
-      const allVariants: string[] = [];
-      for (const phone of requestPhones) {
-        for (const variant of phoneLookupVariants(phone)) {
-          if (!variantToRequestPhone.has(variant)) {
-            variantToRequestPhone.set(variant, normalizePhone(phone));
-            allVariants.push(variant);
-          }
-        }
-      }
-
-      if (allVariants.length === 0) {
-        return res.json({ matches: [] });
-      }
-
-      const found = await db
-        .select({
-          id: users.id,
-          phone: users.phone,
-          firstName: users.firstName,
-          lastName: users.lastName,
-          username: users.username,
-          avatarColor: users.avatarColor,
-          profilePhoto: users.profilePhoto,
-          isVerifiedLekkerpreneur: users.isVerifiedLekkerpreneur,
-          businessName: users.businessName,
-          presence: users.presence,
-        })
-        .from(users)
-        .where(and(inArray(users.phone, allVariants), ne(users.id, userId)));
-
-      const matches = found.map((u) => ({
-        phone: variantToRequestPhone.get(u.phone) || normalizePhone(u.phone),
-        userId: u.id,
-        firstName: u.firstName,
-        lastName: u.lastName,
-        username: u.username,
-        avatarColor: u.avatarColor,
-        profilePhoto: u.profilePhoto,
-        isVerifiedLekkerpreneur: u.isVerifiedLekkerpreneur,
-        businessName: u.businessName,
-        presence: u.presence,
-      }));
-
-      res.json({ matches });
-    } catch (error) {
-      console.error("Contacts match error:", error);
-      res.status(500).json({ message: "Failed to match contacts" });
-    }
-  });
-
   // ── Safety (App Store Guideline 1.2 — UGC) ───────────────────────────────
 
   app.get("/api/safety/blocks", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
@@ -1472,7 +918,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       if (!participantId && typeof phone === "string" && phone.trim()) {
-        const match = await findUserByPhoneFlexible(phone.trim());
+        const cleanPhone = phone.replace(/\s/g, "");
+        const match = await storage.getUserByPhone(cleanPhone);
         participantId = match?.id;
       }
 
@@ -1624,12 +1071,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const sender = await storage.getUser(userId);
-      // WhatsApp-style: phone is the sole identity needed to message.
-      // Email remains optional for mail/SSO features.
-      if (!sender?.phoneVerified) {
+      if (!sender?.phoneVerified || !sender?.emailVerified) {
         return res.status(403).json({
-          message: "Verify your phone number before sending messages.",
-          code: "UNVERIFIED",
+          message: "You must verify both your phone number and at least one email address before sending messages.",
+          code: "UNVERIFIED"
         });
       }
 
@@ -1638,15 +1083,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (msgType === "text" && (!content || typeof content !== "string" || !content.trim())) {
         return res.status(400).json({ message: "Message content is required" });
-      }
-
-      if (rejectBlockedContent(
-        res,
-        msgType === "text" ? content : null,
-        extras?.pollQuestion,
-        extras?.sharedContactName,
-      )) {
-        return;
       }
 
       const chatParticipantsList = await storage.getChatParticipants(chatId);
@@ -1661,16 +1097,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const message = await storage.sendMessage(chatId, userId, content || null, msgType, extras);
 
-      // Expo push via push.ts (uses expoPushToken schema)
-      void notifyChatMessage(chatId, userId, message);
-
       const participants = await storage.getChatParticipants(chatId);
       for (const p of participants) {
         if (p.userId !== userId) {
           const otherUser = await storage.getUser(p.userId);
           if (otherUser?.autoReplyEnabled && otherUser.autoReplyMessage) {
-            const autoReply = await storage.sendMessage(chatId, p.userId, otherUser.autoReplyMessage, "text");
-            void notifyChatMessage(chatId, p.userId, autoReply);
+            await storage.sendMessage(chatId, p.userId, otherUser.autoReplyMessage, "text");
           }
         }
       }
@@ -1759,10 +1191,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (!content || typeof content !== "string" || content.trim().length === 0) {
         return res.status(400).json({ message: "Content is required" });
-      }
-
-      if (rejectBlockedContent(res, content)) {
-        return;
       }
 
       const isParticipant = await storage.isUserInChat(chatId, userId);
@@ -2076,54 +1504,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const { serviceType, province, search, page, limit: limitParam, sort } = req.query;
 
     try {
-      const { fetchMarketplaceServiceCategories } = await import("./lekkerNetwork");
-      const [apiResult, marketplaceParents] = await Promise.all([
-        fetchLekkerDirectory({
-          page: page ? Number(page) : 1,
-          limit: limitParam ? Math.min(Number(limitParam), 100) : 20,
-          search: typeof search === "string" ? search : undefined,
-          location: typeof province === "string" ? province : undefined,
-          // Pass slug or name — LN resolves Marketplace parents
-          category: typeof serviceType === "string" ? serviceType : undefined,
-          sort: typeof sort === "string" ? sort : undefined,
-        }),
-        fetchMarketplaceServiceCategories().catch(() => null),
-      ]);
+      const apiResult = await fetchLekkerDirectory({
+        page: page ? Number(page) : 1,
+        limit: limitParam ? Math.min(Number(limitParam), 100) : 20,
+        search: typeof search === "string" ? search : undefined,
+        location: typeof province === "string" ? province : undefined,
+        category: typeof serviceType === "string" ? serviceType : undefined,
+        sort: typeof sort === "string" ? sort : undefined,
+      });
 
       if (apiResult?.success && apiResult.data) {
         const entries = apiResult.data.map((d) => buildDirectoryEntry(d));
-        const fromApi =
-          apiResult.filters?.serviceCategories?.map((c) => c.name) ||
-          apiResult.filters?.serviceTypes ||
-          marketplaceParents?.map((c) => c.name) ||
-          SERVICE_TYPES;
 
         return res.json({
           entries,
           total: apiResult.total,
           page: apiResult.page,
           limit: apiResult.limit,
-          filters: {
-            serviceTypes: fromApi,
-            serviceCategories: apiResult.filters?.serviceCategories || marketplaceParents || [],
-            provinces: PROVINCES,
-          },
+          filters: { serviceTypes: SERVICE_TYPES, provinces: PROVINCES },
           source: "lekker_network",
         });
       }
     } catch (e) {
       console.error("Lekker Network directory fetch error (falling back):", e);
-    }
-
-    const isProdOrCloudRun =
-      process.env.NODE_ENV === "production" || Boolean(process.env.K_SERVICE);
-    if (isProdOrCloudRun) {
-      return res.json({
-        entries: [],
-        filters: { serviceTypes: SERVICE_TYPES, provinces: PROVINCES },
-        source: "error",
-        message: "Directory temporarily unavailable",
-      });
     }
 
     let results = [...DIRECTORY_DATA];
@@ -2148,14 +1551,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/directory/:id", async (req: Request, res: Response) => {
     try {
-      const { fetchLekkerpreneurDetail } = await import("./lekkerNetwork");
-      const detail = await fetchLekkerpreneurDetail(req.params.id);
-      if (detail) {
-        return res.json({
-          ...buildDirectoryEntry(detail),
-          source: "lekker_network",
-        });
-      }
       const apiEntry = await fetchLekkerpreneurById(req.params.id);
       if (apiEntry) {
         return res.json({
@@ -2170,161 +1565,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const entry = DIRECTORY_DATA.find((d) => d.id === req.params.id);
     if (!entry) return res.status(404).json({ error: "Not found" });
     res.json(entry);
-  });
-
-  /**
-   * Directory → Network Marketplace lead (privacy-first).
-   * Default anonymous contact: phone/email hidden from the lekkerpreneur; they reply
-   * in Marketplace / Network portal; seeker continues in Chat enquiry thread.
-   * Body.shareContact=true opts in to share phone + email with the provider.
-   */
-  app.post("/api/directory/enquire", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const userId = req.user!.userId;
-      const user = await storage.getUser(userId);
-      if (!user) return res.status(401).json({ success: false, message: "Unauthorized" });
-
-      const targetWorkspaceId = String(req.body?.targetWorkspaceId || "").trim();
-      const summary = String(req.body?.summary || "").trim();
-      if (!targetWorkspaceId || summary.length < 3) {
-        return res.status(400).json({
-          success: false,
-          message: "targetWorkspaceId and a short summary are required",
-        });
-      }
-
-      if (!user.phone && !user.email) {
-        return res.status(400).json({
-          success: false,
-          message: "Add a phone or email in Settings so you can receive replies (kept private until you share).",
-        });
-      }
-
-      const shareContact = req.body?.shareContact === true;
-      const privacyBody = req.body?.privacy && typeof req.body.privacy === "object" ? req.body.privacy : null;
-      const sharePhone = privacyBody?.sharePhone === true || shareContact;
-      const shareEmail = privacyBody?.shareEmail === true || shareContact;
-
-      const fullName =
-        `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.username || "Lekker Chat user";
-
-      const { createDirectoryEnquiry } = await import("./lekkerNetwork");
-      const result = await createDirectoryEnquiry({
-        targetWorkspaceId,
-        seekerName: fullName,
-        seekerEmail: user.email || null,
-        seekerPhone: user.phone || null,
-        summary,
-        province: req.body?.province || user.businessProvince || null,
-        serviceCategorySlugs: Array.isArray(req.body?.serviceCategorySlugs)
-          ? req.body.serviceCategorySlugs
-          : undefined,
-        privacy: {
-          sharePhone,
-          shareEmail,
-          shareLocation: privacyBody?.shareLocation === true,
-          shareBrief: true,
-        },
-        sourceUrl: "lekker-chat://directory",
-      });
-
-      if (!result?.success || !result.leadId) {
-        return res.status(400).json({
-          success: false,
-          message: result?.message || "Could not create enquiry on lekker.network",
-        });
-      }
-
-      return res.status(201).json({
-        success: true,
-        leadId: result.leadId,
-        lead: result.lead,
-        anonymous: !sharePhone && !shareEmail,
-      });
-    } catch (error: any) {
-      console.error("Directory enquire error:", error);
-      res.status(500).json({ success: false, message: "Failed to send enquiry" });
-    }
-  });
-
-  app.get("/api/enquiries", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const user = await storage.getUser(req.user!.userId);
-      if (!user) return res.status(401).json({ success: false, message: "Unauthorized" });
-      const { fetchSeekerEnquiries } = await import("./lekkerNetwork");
-      const result = await fetchSeekerEnquiries(user.email, user.phone);
-      return res.json({ success: true, leads: result?.leads || [] });
-    } catch (error) {
-      console.error("List enquiries error:", error);
-      res.status(500).json({ success: false, message: "Failed to list enquiries" });
-    }
-  });
-
-  app.get("/api/enquiries/:id", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const user = await storage.getUser(req.user!.userId);
-      if (!user) return res.status(401).json({ success: false, message: "Unauthorized" });
-      const url = new URL(
-        `${process.env.LEKKER_API_BASE_URL || "https://lekker.network"}/api/v1/chat/enquiries/${req.params.id}`,
-      );
-      if (user.email) url.searchParams.set("email", user.email);
-      if (user.phone) url.searchParams.set("phone", user.phone);
-      if (user.lekkerWorkspaceId) url.searchParams.set("workspaceId", user.lekkerWorkspaceId);
-      const apiKey = process.env.LEKKER_NETWORK_API_KEY || "";
-      const r = await fetch(url.toString(), { headers: { "X-API-Key": apiKey, Accept: "application/json" } });
-      const data = await r.json();
-      return res.status(r.status).json(data);
-    } catch (error) {
-      console.error("Get enquiry error:", error);
-      res.status(500).json({ success: false, message: "Failed to load enquiry" });
-    }
-  });
-
-  app.post("/api/enquiries/:id/messages", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const user = await storage.getUser(req.user!.userId);
-      if (!user) return res.status(401).json({ success: false, message: "Unauthorized" });
-      const content = String(req.body?.content || "").trim();
-      if (!content) return res.status(400).json({ success: false, message: "content required" });
-
-      const asProvider = !!req.body?.asProvider && !!user.lekkerWorkspaceId;
-      const { sendEnquiryMessage } = await import("./lekkerNetwork");
-      const result = await sendEnquiryMessage(req.params.id, {
-        content,
-        role: asProvider ? "provider" : "seeker",
-        email: user.email,
-        phone: user.phone,
-        workspaceId: asProvider ? user.lekkerWorkspaceId! : undefined,
-      });
-      if (!result?.success) {
-        return res.status(400).json({ success: false, message: (result as any)?.message || "Failed" });
-      }
-      return res.json(result);
-    } catch (error) {
-      console.error("Enquiry message error:", error);
-      res.status(500).json({ success: false, message: "Failed to send" });
-    }
-  });
-
-  app.patch("/api/enquiries/:id/privacy", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const user = await storage.getUser(req.user!.userId);
-      if (!user) return res.status(401).json({ success: false, message: "Unauthorized" });
-      const { updateEnquiryPrivacy } = await import("./lekkerNetwork");
-      const result = await updateEnquiryPrivacy(req.params.id, {
-        email: user.email,
-        phone: user.phone,
-        sharePhone: req.body?.sharePhone === true,
-        shareEmail: req.body?.shareEmail === true,
-      });
-      if (!result?.success) {
-        return res.status(400).json({ success: false, message: (result as any)?.message || "Failed" });
-      }
-      return res.json(result);
-    } catch (error) {
-      console.error("Enquiry privacy error:", error);
-      res.status(500).json({ success: false, message: "Failed to update privacy" });
-    }
   });
 
   app.post("/api/verify-lekkerpreneur", async (req: Request, res: Response) => {
@@ -2482,41 +1722,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/auth/sync-lekker", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      if (!isLekkerNetworkConfigured()) {
-        return res.status(503).json({
-          matched: false,
-          message: "Lekker Network sync is temporarily unavailable. Please try again later.",
-        });
-      }
-
       const user = await storage.getUser(req.user!.userId);
       if (!user) {
         return res.status(404).json({ message: "User not found" });
       }
 
-      if (!user.phone && !user.email) {
-        return res.status(400).json({
-          matched: false,
-          message: "Add a phone number or verified email before syncing with Lekker Network.",
-        });
-      }
-
       const match = await findLekkerpreneurByPhoneOrEmail(user.phone, user.email);
       if (!match) {
-        return res.json({
-          matched: false,
-          message:
-            "No matching Lekkerpreneur found for your phone or email. Use the same number/email as on lekker.network.",
-        });
+        return res.json({ matched: false, message: "No matching Lekkerpreneur found for your phone or email." });
       }
 
       const profileData = extractLekkerpreneurProfile(match);
-      let workspaceEmailActive = false;
-      if (profileData.lekkerWorkspaceId) {
-        const emailStatus = await fetchWorkspaceEmailStatus(profileData.lekkerWorkspaceId);
-        workspaceEmailActive = emailStatus.active;
-      }
-      const updated = await storage.updateUser(user.id, { ...profileData, workspaceEmailActive });
+      const updated = await storage.updateUser(user.id, profileData);
 
       await storage.logAuthEvent("lekker_network_sync", user.id, req.ip, undefined, `Synced with: ${match.businessName} (${match.id})`);
 
@@ -2601,88 +1818,67 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  /**
-   * Cledwyn Assistant
-   * - Verified lekkerpreneur with Network workspace → proxy Network workspace Cledwyn (SoT)
-   * - Everyone else → generalist OpenRouter stream (consumer assistant)
-   * Always responds as SSE for the mobile client.
-   */
   app.post("/api/cledwyn/chat", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { messages, sessionId: bodySessionId } = req.body || {};
+      const { messages, lekkerNetworkAccess } = req.body;
       const userId = req.user!.userId;
+
       const userProfile = await storage.getUser(userId);
 
-      const lastUserMessage = Array.isArray(messages)
-        ? [...messages].reverse().find((m: any) => m?.role === "user" && typeof m.content === "string")
-        : null;
-      const latestText = (lastUserMessage?.content || "").trim();
-      if (!latestText) {
-        return res.status(400).json({ error: "A user message is required" });
-      }
-
-      const useWorkspaceCledwyn =
-        !!userProfile?.isVerifiedLekkerpreneur &&
-        !!userProfile?.lekkerNetworkId &&
-        !!userProfile?.lekkerWorkspaceId &&
-        isLekkerNetworkConfigured();
-
-      res.setHeader("Content-Type", "text/event-stream");
-      res.setHeader("Cache-Control", "no-cache, no-transform");
-      res.setHeader("X-Accel-Buffering", "no");
-      res.flushHeaders();
-
-      if (useWorkspaceCledwyn) {
+      let workspaceContext = "";
+      if (userProfile) {
         try {
-          const result = await chatWithNetworkCledwyn({
-            userId: userProfile!.lekkerNetworkId!,
-            workspaceId: userProfile!.lekkerWorkspaceId!,
-            message: latestText,
-            sessionId: typeof bodySessionId === "string" ? bodySessionId : null,
-          });
-          const reply = result.reply || "Sorry, I couldn't generate a response. Please try again.";
-          const sid = result.sessionId || result.threadId;
-          if (sid) {
-            res.write(`data: ${JSON.stringify({ meta: { sessionId: sid, mode: "workspace" } })}\n\n`);
-          } else {
-            res.write(`data: ${JSON.stringify({ meta: { mode: "workspace" } })}\n\n`);
-          }
-          // Simulate stream in modest chunks for existing client UX
-          const chunkSize = 48;
-          for (let i = 0; i < reply.length; i += chunkSize) {
-            res.write(`data: ${JSON.stringify({ content: reply.slice(i, i + chunkSize) })}\n\n`);
-          }
-          res.write("data: [DONE]\n\n");
-          res.end();
-          return;
-        } catch (netErr: any) {
-          console.warn("[cledwyn] Network workspace proxy failed, falling back to generalist:", netErr?.message || netErr);
-          const fallbackHint =
-            netErr instanceof LekkerNetworkApiError && netErr.status === 403
-              ? "I couldn't open your workspace assistant (access denied). Falling back to general help — sync Lekkerpreneur in Settings if this persists.\n\n"
-              : "Workspace assistant is briefly unavailable — answering generally.\n\n";
-          res.write(`data: ${JSON.stringify({ meta: { mode: "generalist_fallback" } })}\n\n`);
-          res.write(`data: ${JSON.stringify({ content: fallbackHint })}\n\n`);
-          // fall through to generalist below (headers already sent)
-        }
-      } else {
-        res.write(`data: ${JSON.stringify({ meta: { mode: "generalist" } })}\n\n`);
-      }
+          let wsDetail: WorkspaceDetail | null = null;
 
-      // Generalist path (consumers + fallback) — xAI preferred, OpenRouter legacy
-      let llm: { client: OpenAI; model: string };
-      try {
-        llm = getGeneralistLlm();
-      } catch {
-        const msg =
-          "I'm not fully online for general chat on this server yet. " +
-          (userProfile?.isVerifiedLekkerpreneur
-            ? "Open Software to use Cledwyn inside lekker.network, or try again after syncing your Lekkerpreneur account."
-            : "Please try again shortly.");
-        res.write(`data: ${JSON.stringify({ content: msg })}\n\n`);
-        res.write("data: [DONE]\n\n");
-        res.end();
-        return;
+          if (userProfile.lekkerWorkspaceId) {
+            wsDetail = await fetchWorkspaceById(userProfile.lekkerWorkspaceId);
+          }
+
+          if (wsDetail) {
+            const parts: string[] = [];
+            if (wsDetail.businessName) parts.push(`Business Name: ${wsDetail.businessName}`);
+            if (wsDetail.tradingName) parts.push(`Trading Name: ${wsDetail.tradingName}`);
+            if (wsDetail.workspaceName) parts.push(`Workspace Name: ${wsDetail.workspaceName}`);
+            if (wsDetail.category) parts.push(`Company Type: ${wsDetail.category}`);
+            if (wsDetail.address) parts.push(`Business Address: ${wsDetail.address}`);
+            if (wsDetail.province) parts.push(`Province: ${wsDetail.province}`);
+            if (wsDetail.phone) parts.push(`Business Phone: ${wsDetail.phone}`);
+            if (wsDetail.email) parts.push(`Business Email: ${wsDetail.email}`);
+            if (wsDetail.website) parts.push(`Website: ${wsDetail.website}`);
+            parts.push(`Currency: ${wsDetail.currency || "ZAR"}`);
+            if (wsDetail.isVatVendor) parts.push(`VAT Vendor: Yes (registered with SARS)`);
+            if (wsDetail.financialYearEndMonth) parts.push(`Financial Year End: Month ${wsDetail.financialYearEndMonth}`);
+            if (wsDetail.shippingEnabled) parts.push(`Shipping/Delivery: Enabled`);
+            if (wsDetail.paymentUrl) parts.push(`Payment URL: ${wsDetail.paymentUrl}`);
+            if (wsDetail.isVerified) parts.push(`CIPC Verified: Yes`);
+            parts.push(`Plan: ${wsDetail.plan}`);
+            parts.push(`Billing Status: ${wsDetail.billingStatus}`);
+            if (wsDetail.teamSize) parts.push(`Team Size: ${wsDetail.teamSize} members`);
+            if (wsDetail.activeServices?.length > 0) {
+              parts.push(`Active Services: ${wsDetail.activeServices.map(s => `${s.serviceType} (${s.status})`).join(", ")}`);
+            }
+            if (wsDetail.verifiedDomains?.length > 0) {
+              parts.push(`Verified Domains: ${wsDetail.verifiedDomains.join(", ")}`);
+            }
+            workspaceContext = `\n\nThis user's Lekker Network workspace data:\n${parts.join("\n")}`;
+          } else if (userProfile.lekkerNetworkId) {
+            const lekkerEntry = await fetchLekkerpreneurById(userProfile.lekkerNetworkId);
+            if (lekkerEntry) {
+              const parts: string[] = [];
+              if (lekkerEntry.businessName) parts.push(`Business Name: ${lekkerEntry.businessName}`);
+              if (lekkerEntry.ownerName) parts.push(`Owner: ${lekkerEntry.ownerName}`);
+              if (lekkerEntry.category) parts.push(`Category: ${lekkerEntry.category}`);
+              if (lekkerEntry.website) parts.push(`Website: ${lekkerEntry.website}`);
+              if (lekkerEntry.location?.province) parts.push(`Province: ${lekkerEntry.location.province}`);
+              if (lekkerEntry.isVerified) parts.push(`Verified: Yes`);
+              if (parts.length > 0) {
+                workspaceContext = `\n\nThis user's Lekker Network profile:\n${parts.join("\n")}`;
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("Failed to fetch workspace data for CledwynAI context:", e);
+        }
       }
 
       let userContext = "";
@@ -2690,25 +1886,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const uParts: string[] = [];
         uParts.push(`Name: ${userProfile.firstName} ${userProfile.lastName}`);
         if (userProfile.businessName) uParts.push(`Business: ${userProfile.businessName}`);
+        if (userProfile.tradingName) uParts.push(`Trading As: ${userProfile.tradingName}`);
+        if (userProfile.businessCategory) uParts.push(`Category: ${userProfile.businessCategory}`);
+        if (userProfile.businessProvince) uParts.push(`Province: ${userProfile.businessProvince}`);
+        if (userProfile.businessCountry) uParts.push(`Country: ${userProfile.businessCountry}`);
         if (userProfile.isVerifiedLekkerpreneur) uParts.push(`Status: Verified Lekkerpreneur`);
         userContext = `\n\nYou are speaking with: ${uParts.join(", ")}`;
       }
 
-      const systemPrompt =
-        `You are Cledwyn, a helpful, friendly assistant for Lekker Chat users in South Africa. ` +
-        `You can help with general questions, everyday tips, and light business guidance. ` +
-        `Keep answers concise and warm. For deep workspace data (invoices, CRM, payroll), ` +
-        `direct verified lekkerpreneurs to open Software on lekker.network or sync their account.` +
-        userContext;
+      const basePrompt = lekkerNetworkAccess
+        ? `You are CledwynAI, a smart and friendly AI business assistant for Lekker Network - a business platform for South African entrepreneurs (Lekkerpreneurs). You have access to this user's business workspace data and should use it to give personalized, contextual business advice. You help with business advice, product recommendations, service quotes, marketing strategies, invoicing guidance, VAT compliance, and general business operations. You are knowledgeable about the South African business landscape, professional yet approachable, and always aim to help entrepreneurs succeed. Keep responses concise and actionable. When asked about products or services, suggest checking the Lekker Marketplace. Use the workspace data to tailor your advice — reference their specific business name, industry, location, and financial setup when relevant.`
+        : `You are CledwynAI, a helpful, friendly, and knowledgeable AI assistant. You can help with any topic — general knowledge, creative writing, coding, math, science, daily life tips, recommendations, and more. You are conversational, concise, and always aim to be useful. Keep your tone warm and approachable.`;
 
-      const stream = await llm.client.chat.completions.create({
-        model: llm.model,
-        messages: [
-          { role: "system", content: systemPrompt },
-          ...(Array.isArray(messages) ? messages : [{ role: "user", content: latestText }]),
-        ],
+      const systemPrompt = basePrompt + userContext + workspaceContext;
+
+      const systemMessage = {
+        role: "system" as const,
+        content: systemPrompt,
+      };
+
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache, no-transform");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.flushHeaders();
+
+      const stream = await openrouter.chat.completions.create({
+        model: "x-ai/grok-4.3",
+        messages: [systemMessage, ...messages],
         stream: true,
-        max_tokens: 4096,
+        max_tokens: 8192,
       });
 
       for await (const chunk of stream) {
@@ -2723,682 +1929,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("CledwynAI chat error:", error);
       if (res.headersSent) {
-        res.write(`data: ${JSON.stringify({ error: "Something went wrong" })}\n\n`);
+        res.write(
+          `data: ${JSON.stringify({ error: "Something went wrong" })}\n\n`,
+        );
         res.end();
       } else {
         res.status(500).json({ error: "Failed to process chat" });
       }
-    }
-  });
-
-  app.get("/api/lekker/session-token", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const user = await storage.getUser(req.user!.userId);
-      if (!user?.lekkerNetworkId) {
-        return res.status(403).json({ message: "Lekkerpreneur account required" });
-      }
-      const token = await fetchMobileSessionToken(user.lekkerNetworkId);
-      if (!token) {
-        return res.status(502).json({ message: "Could not create session. Try again later." });
-      }
-      const base = process.env.LEKKER_API_BASE_URL || "https://lekker.network";
-      res.json({
-        token,
-        url: `${base}/api/v1/mobile/establish-session?token=${encodeURIComponent(token)}`,
-      });
-    } catch (e) {
-      res.status(500).json({ message: "Session token failed" });
-    }
-  });
-
-  app.get("/api/lekker/email/status", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const user = await storage.getUser(req.user!.userId);
-      if (!user?.isVerifiedLekkerpreneur || !user.lekkerWorkspaceId) {
-        return res.json({ active: false });
-      }
-      const status = await fetchWorkspaceEmailStatus(user.lekkerWorkspaceId);
-      if (status.active !== user.workspaceEmailActive) {
-        await storage.updateUser(user.id, { workspaceEmailActive: status.active });
-      }
-      res.json(status);
-    } catch (e) {
-      res.status(500).json({ message: "Email status failed" });
-    }
-  });
-
-  app.get("/api/lekker/email/threads", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const user = await storage.getUser(req.user!.userId);
-      if (!user?.lekkerWorkspaceId || !user.workspaceEmailActive) {
-        return res.status(403).json({ message: "Workspace email not active" });
-      }
-      const page = Math.max(1, parseInt(String(req.query.page || "1"), 10) || 1);
-      const data = await fetchMobileEmailThreads(user.lekkerWorkspaceId, page);
-      res.json(data || { threads: [] });
-    } catch (e) {
-      res.status(500).json({ message: "Failed to load inbox" });
-    }
-  });
-
-  app.get("/api/lekker/email/threads/:threadId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const user = await storage.getUser(req.user!.userId);
-      if (!user?.lekkerWorkspaceId || !user.workspaceEmailActive) {
-        return res.status(403).json({ message: "Workspace email not active" });
-      }
-      const data = await fetchMobileEmailThread(user.lekkerWorkspaceId, req.params.threadId);
-      if (!data) return res.status(404).json({ message: "Thread not found" });
-      res.json(data);
-    } catch (e) {
-      res.status(500).json({ message: "Failed to load thread" });
-    }
-  });
-
-  app.post("/api/lekker/email/send", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const user = await storage.getUser(req.user!.userId);
-      if (!user?.lekkerWorkspaceId || !user.workspaceEmailActive || !user.lekkerNetworkId) {
-        return res.status(403).json({ message: "Workspace email not active" });
-      }
-      const { to, subject, bodyText, inReplyTo, references } = req.body || {};
-      if (!to || !subject || !bodyText) {
-        return res.status(400).json({ message: "to, subject, and bodyText are required" });
-      }
-      const result = await sendMobileEmail(user.lekkerWorkspaceId, user.lekkerNetworkId, {
-        to,
-        subject,
-        bodyText,
-        inReplyTo,
-        references,
-      });
-      if (!result) return res.status(502).json({ message: "Could not send email" });
-      res.json({ success: true, ...result });
-    } catch (e: any) {
-      res.status(500).json({ message: e?.message || "Failed to send email" });
-    }
-  });
-
-  app.post("/api/user/age-range", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const {
-        lowerBound,
-        upperBound,
-        dateOfBirth,
-        source,
-      } = req.body || {};
-
-      const parsedLower = lowerBound === null || lowerBound === undefined
-        ? null
-        : Number(lowerBound);
-      const parsedUpper = upperBound === null || upperBound === undefined
-        ? null
-        : Number(upperBound);
-
-      if (parsedLower != null && Number.isNaN(parsedLower)) {
-        return res.status(400).json({ message: "Invalid lowerBound" });
-      }
-      if (parsedUpper != null && Number.isNaN(parsedUpper)) {
-        return res.status(400).json({ message: "Invalid upperBound" });
-      }
-
-      const allowedSources: AgeRangeSource[] = ["apple", "google", "dob", "unknown"];
-      const ageSource: AgeRangeSource = allowedSources.includes(source)
-        ? source
-        : dateOfBirth
-          ? "dob"
-          : "unknown";
-
-      const socialMediaAllowed = isSocialMediaAllowed({
-        lowerBound: parsedLower,
-        upperBound: parsedUpper,
-        dateOfBirth: typeof dateOfBirth === "string" ? dateOfBirth : null,
-      });
-
-      const updated = await storage.updateUser(req.user!.userId, {
-        ageRangeLowerBound: parsedLower,
-        ageRangeUpperBound: parsedUpper,
-        dateOfBirth: typeof dateOfBirth === "string" ? dateOfBirth : undefined,
-        ageRangeSource: ageSource,
-        ageRangeDeclaredAt: new Date(),
-        socialMediaAllowed,
-      });
-
-      if (!updated) return res.status(404).json({ message: "User not found" });
-      res.json({
-        socialMediaAllowed,
-        user: sanitizeUser(updated),
-      });
-    } catch (e: any) {
-      res.status(500).json({ message: e?.message || "Failed to save age range" });
-    }
-  });
-
-  app.get("/api/user/social-access", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const user = await storage.getUser(req.user!.userId);
-      if (!user) return res.status(404).json({ message: "User not found" });
-      const socialMediaAllowed = isSocialMediaAllowed({
-        lowerBound: user.ageRangeLowerBound,
-        upperBound: user.ageRangeUpperBound,
-        dateOfBirth: user.dateOfBirth,
-        socialMediaAllowed: user.socialMediaAllowed,
-      });
-      res.json({
-        socialMediaAllowed,
-        ageRangeDeclared: !!user.ageRangeDeclaredAt,
-        needsAgeDeclaration: !user.ageRangeDeclaredAt && user.socialMediaAllowed == null,
-      });
-    } catch {
-      res.status(500).json({ message: "Failed to check social access" });
-    }
-  });
-
-  app.get("/api/feed", authMiddleware, requireSocialMediaAccess, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const page = Math.max(1, parseInt(String(req.query.page || "1"), 10) || 1);
-      const authorId = typeof req.query.authorId === "string" ? req.query.authorId : undefined;
-      const posts = await listFeedPosts({
-        viewerId: req.user!.userId,
-        authorId,
-        page,
-      });
-      res.json({ posts });
-    } catch (e) {
-      res.status(500).json({ message: "Failed to load feed" });
-    }
-  });
-
-  app.get("/api/feed/:id", authMiddleware, requireSocialMediaAccess, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const post = await getFeedPostById(req.params.id);
-      if (!post) return res.status(404).json({ message: "Post not found" });
-      res.json({ post });
-    } catch (e) {
-      res.status(500).json({ message: "Failed to load post" });
-    }
-  });
-
-  app.post("/api/feed", authMiddleware, requireSocialMediaAccess, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const { content, mediaUrl } = req.body || {};
-      if (!String(content || "").trim() && !mediaUrl) {
-        return res.status(400).json({ message: "Post content or media is required" });
-      }
-      if (rejectBlockedContent(res, String(content || ""))) {
-        return;
-      }
-      const result = await createFeedPost({
-        authorId: req.user!.userId,
-        content: String(content || "").trim() || "📸",
-        mediaUrl: mediaUrl || null,
-      });
-      if (result === "duplicate") {
-        return res.status(409).json({
-          duplicate: true,
-          message: "You've already posted similar content in the last 24 hours.",
-        });
-      }
-      res.status(201).json({ post: result });
-    } catch (e) {
-      res.status(500).json({ message: "Failed to create post" });
-    }
-  });
-
-  app.post("/api/feed/:id/like", authMiddleware, requireSocialMediaAccess, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      await toggleFeedLike(req.params.id, req.user!.userId);
-      res.json({ ok: true });
-    } catch (e) {
-      res.status(500).json({ message: "Failed to update like" });
-    }
-  });
-
-  app.post("/api/feed/:id/share", authMiddleware, requireSocialMediaAccess, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      await addFeedShare(req.params.id, req.user!.userId);
-      res.json({ ok: true });
-    } catch (e) {
-      res.status(500).json({ message: "Failed to share post" });
-    }
-  });
-
-  app.post("/api/feed/:id/comments", authMiddleware, requireSocialMediaAccess, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const content = String(req.body?.content || "").trim();
-      if (!content) return res.status(400).json({ message: "Comment is required" });
-      if (rejectBlockedContent(res, content)) {
-        return;
-      }
-      await addFeedComment({
-        postId: req.params.id,
-        authorId: req.user!.userId,
-        content,
-      });
-      res.json({ ok: true });
-    } catch (e) {
-      res.status(500).json({ message: "Failed to add comment" });
-    }
-  });
-  app.post("/api/push/register", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const { token, platform, deviceId } = req.body || {};
-      if (!token || typeof token !== "string") {
-        return res.status(400).json({ message: "token is required" });
-      }
-      // Persist Expo push token (platform optional — android | ios)
-      await registerPushToken(
-        req.user!.userId,
-        token,
-        typeof platform === "string" ? platform : typeof deviceId === "string" ? deviceId : undefined,
-      );
-      res.json({ ok: true });
-    } catch (e) {
-      console.error("Push register error:", e);
-      res.status(500).json({ message: "Failed to register push token" });
-    }
-  });
-
-  app.delete("/api/push/register", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const { token } = req.body || {};
-      await unregisterPushToken(
-        req.user!.userId,
-        typeof token === "string" ? token : undefined,
-      );
-      res.json({ ok: true });
-    } catch (e) {
-      console.error("Push unregister error:", e);
-      res.status(500).json({ message: "Failed to unregister push token" });
-    }
-  });
-
-  /** Connect API proxy — authenticated pass-through to lekker.network/api/connect */
-  const connectAvailable = !!(process.env.LEKKER_WORKSPACE_ID && process.env.LEKKER_TOKEN);
-
-  function connectGuard(_req: Request, res: Response, next: () => void) {
-    if (!connectAvailable) {
-      return res.status(503).json({ message: "Connect API not configured (LEKKER_WORKSPACE_ID / LEKKER_TOKEN missing)" });
-    }
-    next();
-  }
-
-  app.get("/api/connect/feed", authMiddleware, connectGuard, async (req: Request, res: Response) => {
-    try {
-      const params = req.query as Record<string, string>;
-      const data = await getConnectFeed(params);
-      res.json(data);
-    } catch (e: any) {
-      res.status(502).json({ message: e.message || "Connect feed error" });
-    }
-  });
-
-  app.post("/api/connect/contacts", authMiddleware, connectGuard, async (req: Request, res: Response) => {
-    try {
-      const data = await submitContactToLekker(req.body);
-      res.json(data);
-    } catch (e: any) {
-      res.status(502).json({ message: e.message || "Connect contacts error" });
-    }
-  });
-
-  app.get("/api/connect/products/search", authMiddleware, connectGuard, async (req: Request, res: Response) => {
-    try {
-      const params = req.query as Record<string, string>;
-      const data = await searchProducts(params);
-      res.json(data);
-    } catch (e: any) {
-      res.status(502).json({ message: e.message || "Connect products error" });
-    }
-  });
-
-  app.post("/api/connect/orders", authMiddleware, connectGuard, async (req: Request, res: Response) => {
-    try {
-      const data = await submitOrder(req.body);
-      res.json(data);
-    } catch (e: any) {
-      res.status(502).json({ message: e.message || "Connect orders error" });
-    }
-  });
-
-  app.post("/api/connect/checkout", authMiddleware, connectGuard, async (req: Request, res: Response) => {
-    try {
-      const data = await createCheckout(req.body);
-      res.json(data);
-    } catch (e: any) {
-      res.status(502).json({ message: e.message || "Connect checkout error" });
-    }
-  });
-
-  app.post("/api/connect/shipping/quote", authMiddleware, connectGuard, async (req: Request, res: Response) => {
-    try {
-      const data = await getShippingQuote(req.body);
-      res.json(data);
-    } catch (e: any) {
-      res.status(502).json({ message: e.message || "Connect shipping error" });
-    }
-  });
-
-  app.get("/api/connect/gift-cards/validate", authMiddleware, connectGuard, async (req: Request, res: Response) => {
-    try {
-      const code = String(req.query.code || "");
-      if (!code) return res.status(400).json({ message: "code is required" });
-      const data = await validateGiftCard(code);
-      res.json(data);
-    } catch (e: any) {
-      res.status(502).json({ message: e.message || "Connect gift card error" });
-    }
-  });
-
-  app.post("/api/connect/portal/request-otp", authMiddleware, connectGuard, async (req: Request, res: Response) => {
-    try {
-      const data = await requestPortalOtp(req.body);
-      res.json(data);
-    } catch (e: any) {
-      res.status(502).json({ message: e.message || "Connect portal error" });
-    }
-  });
-
-  app.post("/api/connect/portal/verify-otp", authMiddleware, connectGuard, async (req: Request, res: Response) => {
-    try {
-      const data = await verifyPortalOtp(req.body);
-      res.json(data);
-    } catch (e: any) {
-      res.status(502).json({ message: e.message || "Connect portal verify error" });
-    }
-  });
-
-  app.get("/api/connect/portal/me", authMiddleware, connectGuard, async (req: Request, res: Response) => {
-    try {
-      const sessionToken = String(req.query.sessionToken || "");
-      if (!sessionToken) return res.status(400).json({ message: "sessionToken is required" });
-      const data = await getPortalMe(sessionToken);
-      res.json(data);
-    } catch (e: any) {
-      res.status(502).json({ message: e.message || "Connect portal me error" });
-    }
-  });
-
-  // ── Bookings (events — Connect /bookings/*, retailChannel: chat) ─────────────
-
-  function honestBookingMessage(paymentStatus: unknown, totalCents: unknown): string {
-    if (paymentStatus === "paid") return "You're in — view tickets";
-    if (paymentStatus === "free" || (typeof totalCents === "number" && totalCents <= 0)) {
-      return "You're in";
-    }
-    return "Complete payment to confirm your tickets";
-  }
-
-  function handleConnectBookingError(e: unknown, res: Response, fallback: string) {
-    if (e instanceof LekkerConnectError) {
-      return res.status(e.status >= 400 && e.status < 600 ? e.status : 502).json({
-        message: e.message || fallback,
-        ...(e.body && typeof e.body === "object" ? (e.body as object) : {}),
-      });
-    }
-    const err = e as { message?: string };
-    return res.status(502).json({ message: err.message || fallback });
-  }
-
-  function inviteCodeFromBooking(req: Request, body: Record<string, unknown>): string | undefined {
-    const fromQuery = typeof req.query.invite === "string" ? req.query.invite.trim() : "";
-    const fromQueryCode = typeof req.query.inviteCode === "string" ? req.query.inviteCode.trim() : "";
-    const fromBody =
-      typeof body.inviteCode === "string"
-        ? body.inviteCode.trim()
-        : typeof body.invite === "string"
-          ? body.invite.trim()
-          : "";
-    return fromBody || fromQueryCode || fromQuery || undefined;
-  }
-
-  app.get("/api/connect/bookings/offerings", authMiddleware, connectGuard, async (req: Request, res: Response) => {
-    try {
-      if (!isConnectConfigured()) {
-        return res.status(503).json({ message: "Connect API not configured", offerings: [] });
-      }
-      const locationId = typeof req.query.locationId === "string" ? req.query.locationId : undefined;
-      const mode = typeof req.query.mode === "string" ? req.query.mode : undefined;
-      const data = await getBookingOfferings({ locationId, mode });
-      res.json({ offerings: data.offerings || [] });
-    } catch (e) {
-      handleConnectBookingError(e, res, "Connect bookings offerings error");
-    }
-  });
-
-  app.post("/api/connect/bookings", authMiddleware, connectGuard, async (req: Request, res: Response) => {
-    try {
-      if (!isConnectConfigured()) {
-        return res.status(503).json({ message: "Connect API not configured" });
-      }
-      const body = (req.body || {}) as Record<string, unknown>;
-      // Never trust client paymentStatus — Connect forces unpaid on public creates
-      delete body.paymentStatus;
-
-      const customerName = String(body.customerName || body.name || "").trim();
-      if (!customerName) {
-        return res.status(400).json({ message: "Name is required" });
-      }
-      const email = body.customerEmail || body.email;
-      const phone = body.customerPhone || body.phone;
-      if (!email && !phone) {
-        return res.status(400).json({ message: "Email or phone is required" });
-      }
-
-      const selectionId =
-        (typeof body.selectionId === "string" && body.selectionId) ||
-        (typeof body.networkSelectionId === "string" && body.networkSelectionId) ||
-        undefined;
-      const inviteCode = inviteCodeFromBooking(req, body);
-      const promoCode =
-        typeof body.promoCode === "string" && body.promoCode.trim()
-          ? body.promoCode.trim()
-          : undefined;
-
-      const result = await createBooking({
-        kind: body.kind as any,
-        offeringId: typeof body.offeringId === "string" ? body.offeringId : undefined,
-        selectionId,
-        ticketTypeId: typeof body.ticketTypeId === "string" ? body.ticketTypeId : undefined,
-        quantity: body.quantity != null ? Number(body.quantity) : undefined,
-        startsAt: typeof body.startsAt === "string" ? body.startsAt : undefined,
-        checkInDate: typeof body.checkInDate === "string" ? body.checkInDate : undefined,
-        checkOutDate: typeof body.checkOutDate === "string" ? body.checkOutDate : undefined,
-        guestCheckInTime: typeof body.guestCheckInTime === "string" ? body.guestCheckInTime : undefined,
-        guestCheckOutTime: typeof body.guestCheckOutTime === "string" ? body.guestCheckOutTime : undefined,
-        locationId: typeof body.locationId === "string" ? body.locationId : undefined,
-        customerName,
-        customerEmail: email ? String(email).trim() : undefined,
-        customerPhone: phone ? String(phone).trim() : undefined,
-        notes: body.notes ? String(body.notes).trim() : undefined,
-        promoCode,
-        inviteCode,
-        slotId: typeof body.slotId === "string" ? body.slotId : undefined,
-        source: selectionId ? undefined : "chat",
-        retailChannel: "chat",
-        channelMeta: { retailChannel: "chat", claimChannel: "chat" },
-      });
-
-      const paymentStatus = result.paymentStatus;
-      const totalCents = result.totalCents;
-      res.status(201).json({
-        bookingId: result.bookingId,
-        status: result.status,
-        totalCents,
-        paymentStatus,
-        startsAt: result.startsAt,
-        endsAt: result.endsAt,
-        checkInDate: result.checkInDate,
-        checkOutDate: result.checkOutDate,
-        tickets: result.tickets,
-        networkOrderId: result.networkOrderId,
-        hostWorkspaceId: result.hostWorkspaceId,
-        kind: result.kind || body.kind,
-        message: honestBookingMessage(paymentStatus, totalCents),
-      });
-    } catch (e) {
-      handleConnectBookingError(e, res, "Connect bookings create error");
-    }
-  });
-
-  app.post("/api/connect/bookings/checkout", authMiddleware, connectGuard, async (req: Request, res: Response) => {
-    try {
-      if (!isConnectConfigured()) {
-        return res.status(503).json({ message: "Connect API not configured" });
-      }
-      const body = (req.body || {}) as Record<string, unknown>;
-      delete body.paymentStatus;
-
-      const selectionId =
-        (typeof body.selectionId === "string" && body.selectionId) ||
-        (typeof body.networkSelectionId === "string" && body.networkSelectionId) ||
-        undefined;
-      const inviteCode = inviteCodeFromBooking(req, body);
-      const promoCode =
-        typeof body.promoCode === "string" && body.promoCode.trim()
-          ? body.promoCode.trim()
-          : undefined;
-
-      if (!body.bookingId) {
-        const customerName = String(body.customerName || body.name || "").trim();
-        if (!customerName) {
-          return res.status(400).json({ message: "Name is required" });
-        }
-        const email = body.customerEmail || body.email;
-        const phone = body.customerPhone || body.phone;
-        if (!email && !phone) {
-          return res.status(400).json({ message: "Email or phone is required" });
-        }
-      }
-
-      const result = await createBookingCheckout({
-        offeringId: typeof body.offeringId === "string" ? body.offeringId : undefined,
-        ticketTypeId: typeof body.ticketTypeId === "string" ? body.ticketTypeId : undefined,
-        quantity: body.quantity != null ? Number(body.quantity) : undefined,
-        bookingId: typeof body.bookingId === "string" ? body.bookingId : undefined,
-        selectionId,
-        slotId: typeof body.slotId === "string" ? body.slotId : undefined,
-        promoCode,
-        inviteCode,
-        customerName: body.customerName || body.name
-          ? String(body.customerName || body.name).trim()
-          : undefined,
-        customerEmail: body.customerEmail || body.email
-          ? String(body.customerEmail || body.email).trim()
-          : undefined,
-        customerPhone: body.customerPhone || body.phone
-          ? String(body.customerPhone || body.phone).trim()
-          : undefined,
-        notes: body.notes ? String(body.notes).trim() : undefined,
-        locationId: typeof body.locationId === "string" ? body.locationId : undefined,
-        source: selectionId ? undefined : "chat",
-        retailChannel: "chat",
-        channelMeta: { retailChannel: "chat", claimChannel: "chat" },
-        returnUrl: typeof body.returnUrl === "string" ? body.returnUrl : undefined,
-        cancelUrl: typeof body.cancelUrl === "string" ? body.cancelUrl : undefined,
-      });
-
-      res.json({
-        ...result,
-        paymentUrl: result.paymentUrl || result.checkoutUrl,
-        message: honestBookingMessage(result.paymentStatus, result.totalCents),
-      });
-    } catch (e) {
-      handleConnectBookingError(e, res, "Connect bookings checkout error");
-    }
-  });
-
-  app.post("/api/connect/bookings/offerings/:id/waitlist", authMiddleware, connectGuard, async (req: Request, res: Response) => {
-    try {
-      if (!isConnectConfigured()) {
-        return res.status(503).json({ message: "Connect API not configured" });
-      }
-      const body = (req.body || {}) as Record<string, unknown>;
-      const name = String(body.name || body.customerName || "").trim();
-      if (!name) {
-        return res.status(400).json({ message: "Name is required" });
-      }
-      const email = body.email || body.customerEmail;
-      const phone = body.phone || body.customerPhone;
-      if (!email && !phone) {
-        return res.status(400).json({ message: "Email or phone is required" });
-      }
-      const result = await joinBookingWaitlist(req.params.id, {
-        name,
-        email: email ? String(email).trim() : undefined,
-        phone: phone ? String(phone).trim() : undefined,
-        ticketTypeId: typeof body.ticketTypeId === "string" ? body.ticketTypeId : undefined,
-        quantity: body.quantity != null ? Number(body.quantity) : undefined,
-      });
-      res.status(201).json(result);
-    } catch (e) {
-      handleConnectBookingError(e, res, "Connect bookings waitlist error");
-    }
-  });
-
-  app.post("/api/connect/bookings/claim/:token", authMiddleware, connectGuard, async (req: Request, res: Response) => {
-    try {
-      if (!isConnectConfigured()) {
-        return res.status(503).json({ message: "Connect API not configured" });
-      }
-      const body = (req.body || {}) as Record<string, unknown>;
-      const hostWorkspaceId =
-        (typeof req.query.hostWorkspaceId === "string" && req.query.hostWorkspaceId.trim()) ||
-        (typeof req.query.workspaceId === "string" && req.query.workspaceId.trim()) ||
-        (typeof body.hostWorkspaceId === "string" && body.hostWorkspaceId.trim()) ||
-        (typeof body.workspaceId === "string" && body.workspaceId.trim()) ||
-        "";
-      if (!hostWorkspaceId || !/^[a-f0-9-]{36}$/i.test(hostWorkspaceId)) {
-        return res.status(400).json({
-          message: "hostWorkspaceId is required (query or body) — claim runs on the host workspace",
-        });
-      }
-      const result = await claimBookingHold(hostWorkspaceId, req.params.token, {
-        claimChannel: "chat",
-      });
-      res.json(result);
-    } catch (e) {
-      handleConnectBookingError(e, res, "Connect bookings claim error");
-    }
-  });
-
-  /**
-   * Called by lekker.network when a provider replies on a Marketplace/Chat enquiry.
-   * Auth: same shared key as Network MOBILE_API_KEY (Chat LEKKER_NETWORK_API_KEY).
-   */
-  app.post("/api/internal/enquiry-reply-notify", async (req: Request, res: Response) => {
-    try {
-      const key = req.headers["x-api-key"];
-      const expected = process.env.LEKKER_NETWORK_API_KEY;
-      if (!expected || !key || key !== expected) {
-        return res.status(401).json({ success: false, message: "Unauthorized" });
-      }
-      const leadId = String(req.body?.leadId || "").trim();
-      const businessName = String(req.body?.businessName || "Lekkerpreneur").trim();
-      const preview = String(req.body?.preview || "New reply on your enquiry").trim();
-      const phone = typeof req.body?.seekerPhone === "string" ? req.body.seekerPhone.trim() : "";
-      const email = typeof req.body?.seekerEmail === "string" ? req.body.seekerEmail.trim().toLowerCase() : "";
-
-      if (!leadId || (!phone && !email)) {
-        return res.status(400).json({ success: false, message: "leadId and seeker phone or email required" });
-      }
-
-      let user = phone ? await findUserByPhoneFlexible(phone) : undefined;
-      if (!user && email) {
-        user = await storage.getUserByEmail(email);
-      }
-      if (!user) {
-        return res.json({ success: true, notified: false, reason: "no_chat_user" });
-      }
-
-      await notifyUserPush(user.id, businessName, preview, {
-        type: "enquiry_reply",
-        leadId,
-      });
-      return res.json({ success: true, notified: true, userId: user.id });
-    } catch (e) {
-      console.error("[enquiry-reply-notify]", e);
-      return res.status(500).json({ success: false, message: "Failed" });
     }
   });
 

@@ -57,7 +57,7 @@ Chat was built as a **standalone Replit messaging app**, then bolted onto Networ
 | 6 | Connect native UX | Marketplace Connect consumer | Server proxies; Browse = WebView | High | Open |
 | 7 | Directory stub fallback | Network-only listing | Prod/Cloud Run returns empty + error (no fake businesses); `DIRECTORY_DATA` local/dev only | Med | **Done** (prod guard) |
 | 8 | Password auth carcass | WhatsApp-only | `CHAT_WHATSAPP_ONLY` default ON (≠ `"false"`) → password register/login/reset return `410`; Apple Review WA bypass untouched | Med | **Done** (default ON) |
-| 9 | Bundle / package IDs | `com.lekker.chat` | iOS still `app.replit.*` | Med | Open |
+| 9 | Bundle / package IDs | `com.lekker.chat` | `app.json` now `com.lekker.chat`; ASC migration TBD if live app used Replit id | Med | **In progress** |
 | 10 | Docs / deploy pins | Single Cloud Run truth | HANDOVER still cites Replit in places | Low | Partial |
 
 ---
@@ -124,9 +124,10 @@ Contact is always stored server-side so the seeker can keep chatting; it is **no
 
 ### Phase E — Hygiene
 
-1. iOS bundle id away from `app.replit.lekkerchatios`  
-2. Delete stale root `routes.ts` / duplicate Expo trees  
+1. ✅ iOS bundle id in `app.json` → `com.lekker.chat` (see `docs/IOS-BUNDLE-ID.md`; ASC may still need migration)  
+2. ✅ Root `routes.ts` quarantined → `server/_dead/routes.root.ts`; remaining Expo root dupes documented in `docs/DEAD-CODE.md`  
 3. Refresh HANDOVER + infra docs to Cloud Run–only  
+4. ✅ `lekkerNetwork.ts` API base always defaults to `https://lekker.network` (no Replit `.spock` fallback)  
 
 ---
 
