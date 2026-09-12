@@ -15,7 +15,7 @@ import Colors from "@/constants/colors";
 import { fontScale } from "@/lib/responsive";
 import { fetchLekkerSoftwareUrl, SOFTWARE_SHORTCUTS } from "@/lib/lekker-session";
 import { LEKKER_NETWORK_URL } from "@/constants/ecosystem";
-import { useFocusEffect } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 
 let WebView: any = null;
 if (Platform.OS !== "web") {
@@ -51,8 +51,12 @@ export default function SoftwareScreen() {
     }, [loadUrl]),
   );
 
-  async function openShortcut(id: string, next: string) {
+  async function openShortcut(id: string, next: string, native?: string) {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (native) {
+      router.push(native as any);
+      return;
+    }
     await loadUrl(next, id);
   }
 
@@ -64,10 +68,11 @@ export default function SoftwareScreen() {
     >
       {SOFTWARE_SHORTCUTS.map((s) => {
         const active = activeShortcut === s.id;
+        const native = "native" in s ? s.native : undefined;
         return (
           <Pressable
             key={s.id}
-            onPress={() => openShortcut(s.id, s.next)}
+            onPress={() => openShortcut(s.id, s.next, native)}
             style={[styles.chip, active && styles.chipActive]}
           >
             <Ionicons

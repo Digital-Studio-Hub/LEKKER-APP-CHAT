@@ -50,7 +50,7 @@ Chat was built as a **standalone Replit messaging app**, then bolted onto Networ
 |---|------|--------------------|------------|----------|--------|
 | 1 | Transactional email | Lekker Mail / Zeptomail | Replit Gmail connector | Critical | **Done** (`15fc50c`) |
 | 2 | Object storage | GCS ADC on Cloud Run | Replit `127.0.0.1:1106` sidecar | Critical | **Done** (`15fc50c`) |
-| 3 | Cledwyn | Network workspace agent (`XAI`, tools) | Verified → Network `/api/v1/cledwyn/chat`; others → xAI generalist | Critical | **Done** (needs Network publish) |
+| 3 | Cledwyn | Network workspace + consumer generalist (`XAI`) | Verified → Network workspace advisor; others → Network `mode=generalist` (Chat proxies only) | Critical | **Done** (needs Network publish for generalist) |
 | 4 | Identity SoT | Network users / workspaces | Own `users` + sync-lekker | High | Open |
 | 5 | Directory → enquiry UX | Privacy-first Instant Match | Anonymous enquire default | High | **Done** |
 | 5b | Phonebook → chat / invite | Match registered phones; WA deep-link invite | On-app DM + multi-select / invite-all WA | High | **Done** |

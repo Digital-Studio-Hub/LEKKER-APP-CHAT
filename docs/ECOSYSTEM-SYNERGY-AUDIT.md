@@ -95,7 +95,7 @@ Effort: **S** &lt;1w · **M** 1–3w · **L** multi-sprint
 | Item | Current | Synergy opportunity | P | E |
 |------|---------|---------------------|---|---|
 | Workspace mode | Proxies mobile advisor API (SSE stream optional; tool-light) | Grow Network mobile endpoint toward web tool runner parity (stream **lite done** on `/api/v1/cledwyn/chat`) | P1 | L |
-| Generalist mode | xAI on Chat Cloud Run | Optional: single Network “consumer Cledwyn” endpoint so keys/models stay SoT | P2 | M |
+| Generalist mode | **Done (P2–P3):** Network `POST /api/v1/cledwyn/chat` `mode=generalist`; Chat proxies only (no local LLM) | Unify history display (“Synced with lekker.network”) | P2 | M |
 | History | Chat AsyncStorage + Network thread when workspace | Unify history display (“Synced with lekker.network”) | P2 | M |
 | Fallback | Falls back to generalist on 403 | Better copy + Settings deep-link “Sync Lekkerpreneur” | P1 | S |
 
@@ -118,7 +118,7 @@ Effort: **S** &lt;1w · **M** 1–3w · **L** multi-sprint
 | Item | Current | Synergy opportunity | P | E |
 |------|---------|---------------------|---|---|
 | Mail | Native list/compose via Network | Push for new Lekker Mail; attachment parity | P2 | M |
-| Software | Full OS in WebView | Progressive native: Leads inbox, today’s bookings, door mode shortcut | P2 | L |
+| Software | WebView + **native Leads** (`/leads`) | Progressive native: today’s bookings, door mode shortcut | P2 | L |
 | Activation gating | Mail only if `workspaceEmailActive` | Clear empty-state CTA → Network Lekker Mail setup | P2 | S |
 
 ### F. Peer messaging (Chat island — keep, but connect)
@@ -176,7 +176,8 @@ Effort: **S** &lt;1w · **M** 1–3w · **L** multi-sprint
 4. Enquiries section in Chats tab.
 
 ### Later (P2–P3)
-1. Progressive native Software modules.  
+1. Progressive native Software modules — **Leads inbox done** (`app/leads/*` + Network `/api/v1/marketplace-leads*`).  
+2. Consumer Cledwyn on Network — **done** (Chat no longer hosts generalist LLM). 
 2. ~~Invite attribution analytics.~~ **Done (light)** — Chat `POST /api/analytics/invite` → `auth_audit_logs` (`whatsapp_invite`); client fire-and-forget count-only from new-chat / whatsapp-invite.  
 3. Consumer Cledwyn hosted only on Network.
 

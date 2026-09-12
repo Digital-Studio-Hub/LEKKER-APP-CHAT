@@ -1,6 +1,5 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "node:http";
-import OpenAI from "openai";
 import rateLimit, { type Options } from "express-rate-limit";
 import { registerSchema, loginSchema, updateProfileSchema, users, chatMessages, passwordResetCodes, phoneVerificationCodes, emailVerificationCodes, userEmails } from "@shared/schema";
 import { storage, db } from "./storage";
@@ -33,6 +32,13 @@ import {
   isLekkerNetworkConfigured,
   chatWithNetworkCledwyn,
   streamNetworkCledwyn,
+  streamNetworkGeneralistCledwyn,
+  chatWithNetworkGeneralistCledwyn,
+  fetchMarketplaceLeads,
+  fetchMarketplaceLeadsUnreadCount,
+  fetchMarketplaceLeadDetail,
+  sendMarketplaceLeadMessage,
+  updateMarketplaceLeadStatus,
   LekkerNetworkApiError,
   type LekkerNetworkEntry,
   type WorkspaceDetail,
@@ -158,33 +164,6 @@ async function enrichParticipants(chatId: string) {
     }
   }
   return participantUsers;
-}
-
-// Lazy LLM client — prefer xAI (ecosystem) then OpenRouter (legacy Replit).
-let _llm: OpenAI | null = null;
-let _llmModel = "grok-4-latest";
-function getGeneralistLlm(): { client: OpenAI; model: string } {
-  if (_llm) return { client: _llm, model: _llmModel };
-  const xaiKey = process.env.XAI_API_KEY;
-  if (xaiKey) {
-    _llm = new OpenAI({ baseURL: "https://api.x.ai/v1", apiKey: xaiKey });
-    _llmModel = "grok-4-latest";
-    return { client: _llm, model: _llmModel };
-  }
-  const orKey = process.env.AI_INTEGRATIONS_OPENROUTER_API_KEY;
-  if (orKey) {
-    _llm = new OpenAI({
-      baseURL: process.env.AI_INTEGRATIONS_OPENROUTER_BASE_URL,
-      apiKey: orKey,
-    });
-    _llmModel = "x-ai/grok-4.3";
-    return { client: _llm, model: _llmModel };
-  }
-  throw new Error("No XAI_API_KEY or AI_INTEGRATIONS_OPENROUTER_API_KEY configured");
-}
-/** @deprecated use getGeneralistLlm */
-function getOpenRouter(): OpenAI {
-  return getGeneralistLlm().client;
 }
 
 interface DirectoryEntry {
@@ -2358,6 +2337,130 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  /** Provider Marketplace Leads — native Software module (Network SoT). */
+  function requireProviderWorkspace(user: Awaited<ReturnType<typeof storage.getUser>>) {
+    if (!user?.isVerifiedLekkerpreneur || !user.lekkerNetworkId || !user.lekkerWorkspaceId) {
+      return null;
+    }
+    return { userId: user.lekkerNetworkId, workspaceId: user.lekkerWorkspaceId };
+  }
+
+  app.get("/api/marketplace-leads", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const user = await storage.getUser(req.user!.userId);
+      const ids = requireProviderWorkspace(user);
+      if (!ids) {
+        return res.status(403).json({
+          success: false,
+          message: "Verified Lekkerpreneur workspace required. Sync in Settings.",
+        });
+      }
+      if (!isLekkerNetworkConfigured()) {
+        return res.status(503).json({ success: false, message: "lekker.network unavailable" });
+      }
+      const data = await fetchMarketplaceLeads({
+        ...ids,
+        page: req.query.page != null ? Number(req.query.page) : 1,
+        limit: req.query.limit != null ? Number(req.query.limit) : 20,
+        status: typeof req.query.status === "string" ? req.query.status : "open",
+        q: typeof req.query.q === "string" ? req.query.q : undefined,
+      });
+      return res.json(data);
+    } catch (error: any) {
+      console.error("Marketplace leads list error:", error);
+      const status = error instanceof LekkerNetworkApiError ? error.status : 500;
+      res.status(status).json({
+        success: false,
+        message: error?.message || "Failed to load leads",
+      });
+    }
+  });
+
+  app.get("/api/marketplace-leads/unread-count", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const user = await storage.getUser(req.user!.userId);
+      const ids = requireProviderWorkspace(user);
+      if (!ids) return res.json({ success: true, count: 0 });
+      if (!isLekkerNetworkConfigured()) return res.json({ success: true, count: 0 });
+      const data = await fetchMarketplaceLeadsUnreadCount(ids.userId, ids.workspaceId);
+      return res.json({ success: true, count: data?.count ?? 0 });
+    } catch (error) {
+      console.error("Marketplace leads unread error:", error);
+      res.json({ success: true, count: 0 });
+    }
+  });
+
+  app.get("/api/marketplace-leads/:id", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const user = await storage.getUser(req.user!.userId);
+      const ids = requireProviderWorkspace(user);
+      if (!ids) {
+        return res.status(403).json({ success: false, message: "Verified Lekkerpreneur workspace required" });
+      }
+      const data = await fetchMarketplaceLeadDetail({ leadId: req.params.id, ...ids });
+      return res.json(data);
+    } catch (error: any) {
+      console.error("Marketplace lead detail error:", error);
+      const status = error instanceof LekkerNetworkApiError ? error.status : 500;
+      res.status(status).json({
+        success: false,
+        message: error?.message || "Failed to load lead",
+      });
+    }
+  });
+
+  app.post("/api/marketplace-leads/:id/messages", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const user = await storage.getUser(req.user!.userId);
+      const ids = requireProviderWorkspace(user);
+      if (!ids) {
+        return res.status(403).json({ success: false, message: "Verified Lekkerpreneur workspace required" });
+      }
+      const content = String(req.body?.content || "").trim();
+      if (!content) return res.status(400).json({ success: false, message: "content required" });
+      const data = await sendMarketplaceLeadMessage({
+        leadId: req.params.id,
+        ...ids,
+        content,
+      });
+      return res.status(201).json(data);
+    } catch (error: any) {
+      console.error("Marketplace lead message error:", error);
+      const status = error instanceof LekkerNetworkApiError ? error.status : 500;
+      res.status(status).json({
+        success: false,
+        message: error?.message || "Failed to send",
+      });
+    }
+  });
+
+  app.patch("/api/marketplace-leads/:id/status", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const user = await storage.getUser(req.user!.userId);
+      const ids = requireProviderWorkspace(user);
+      if (!ids) {
+        return res.status(403).json({ success: false, message: "Verified Lekkerpreneur workspace required" });
+      }
+      const status = req.body?.status;
+      if (status !== "contacted" && status !== "closed") {
+        return res.status(400).json({ success: false, message: "status must be contacted or closed" });
+      }
+      const data = await updateMarketplaceLeadStatus({
+        leadId: req.params.id,
+        ...ids,
+        status,
+      });
+      return res.json(data);
+    } catch (error: any) {
+      console.error("Marketplace lead status error:", error);
+      const httpStatus = error instanceof LekkerNetworkApiError ? error.status : 500;
+      res.status(httpStatus).json({
+        success: false,
+        message: error?.message || "Failed to update status",
+      });
+    }
+  });
+
   app.post("/api/verify-lekkerpreneur", async (req: Request, res: Response) => {
     const { phoneNumber } = req.body;
     if (!phoneNumber) {
@@ -2633,9 +2736,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   /**
-   * Cledwyn Assistant
-   * - Verified lekkerpreneur with Network workspace → proxy Network workspace Cledwyn (SoT)
-   * - Everyone else → generalist OpenRouter stream (consumer assistant)
+   * Cledwyn Assistant — always Network SoT (no local LLM on Chat Cloud Run).
+   * - Verified lekkerpreneur with workspace → Network workspace advisor
+   * - Everyone else (or workspace failure) → Network generalist / consumer Cledwyn
    * Always responds as SSE for the mobile client.
    */
   app.post("/api/cledwyn/chat", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
@@ -2652,16 +2755,82 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "A user message is required" });
       }
 
+      if (!isLekkerNetworkConfigured()) {
+        return res.status(503).json({
+          error: "Cledwyn requires lekker.network connectivity. Try again shortly.",
+        });
+      }
+
       const useWorkspaceCledwyn =
         !!userProfile?.isVerifiedLekkerpreneur &&
         !!userProfile?.lekkerNetworkId &&
-        !!userProfile?.lekkerWorkspaceId &&
-        isLekkerNetworkConfigured();
+        !!userProfile?.lekkerWorkspaceId;
+
+      const displayName = userProfile
+        ? [userProfile.firstName, userProfile.lastName].filter(Boolean).join(" ").trim() ||
+          userProfile.businessName ||
+          null
+        : null;
+      const history = Array.isArray(messages)
+        ? messages
+            .filter((m: any) => m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
+            .map((m: any) => ({ role: m.role as string, content: String(m.content) }))
+            .slice(-12)
+        : [];
 
       res.setHeader("Content-Type", "text/event-stream");
       res.setHeader("Cache-Control", "no-cache, no-transform");
       res.setHeader("X-Accel-Buffering", "no");
       res.flushHeaders();
+
+      const runGeneralist = async (metaMode: string, preface?: string) => {
+        if (preface) {
+          res.write(`data: ${JSON.stringify({ content: preface })}\n\n`);
+        }
+        res.write(`data: ${JSON.stringify({ meta: { mode: metaMode } })}\n\n`);
+        let gotContent = false;
+        try {
+          for await (const ev of streamNetworkGeneralistCledwyn({
+            message: latestText,
+            userId: userProfile?.lekkerNetworkId || null,
+            displayName,
+            history,
+            sessionId: typeof bodySessionId === "string" ? bodySessionId : null,
+          })) {
+            if (ev.meta?.sessionId) {
+              res.write(
+                `data: ${JSON.stringify({ meta: { sessionId: ev.meta.sessionId, mode: metaMode } })}\n\n`,
+              );
+            }
+            if (ev.content) {
+              gotContent = true;
+              res.write(`data: ${JSON.stringify({ content: ev.content })}\n\n`);
+            }
+            if (ev.done) break;
+          }
+          if (!gotContent) {
+            const result = await chatWithNetworkGeneralistCledwyn({
+              message: latestText,
+              userId: userProfile?.lekkerNetworkId || null,
+              displayName,
+              history,
+              sessionId: typeof bodySessionId === "string" ? bodySessionId : null,
+            });
+            const reply = result.reply || "Sorry, I couldn't generate a response. Please try again.";
+            res.write(`data: ${JSON.stringify({ content: reply })}\n\n`);
+          }
+        } catch (genErr: any) {
+          console.warn("[cledwyn] Network generalist failed:", genErr?.message || genErr);
+          const msg =
+            "Cledwyn is briefly unavailable. Please try again in a moment" +
+            (userProfile?.isVerifiedLekkerpreneur
+              ? ", or open Software → Cledwyn on lekker.network."
+              : ".");
+          res.write(`data: ${JSON.stringify({ content: msg })}\n\n`);
+        }
+        res.write("data: [DONE]\n\n");
+        res.end();
+      };
 
       if (useWorkspaceCledwyn) {
         try {
@@ -2685,7 +2854,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
             if (ev.done) break;
           }
           if (!gotContent) {
-            // Fallback to non-stream JSON if Network returned empty stream
             const result = await chatWithNetworkCledwyn({
               userId: userProfile!.lekkerNetworkId!,
               workspaceId: userProfile!.lekkerWorkspaceId!,
@@ -2709,65 +2877,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
             netErr instanceof LekkerNetworkApiError && netErr.status === 403
               ? "I couldn't open your workspace assistant (access denied). Falling back to general help — sync Lekkerpreneur in Settings if this persists.\n\n"
               : "Workspace assistant is briefly unavailable — answering generally.\n\n";
-          res.write(`data: ${JSON.stringify({ meta: { mode: "generalist_fallback" } })}\n\n`);
-          res.write(`data: ${JSON.stringify({ content: fallbackHint })}\n\n`);
-          // fall through to generalist below (headers already sent)
-        }
-      } else {
-        res.write(`data: ${JSON.stringify({ meta: { mode: "generalist" } })}\n\n`);
-      }
-
-      // Generalist path (consumers + fallback) — xAI preferred, OpenRouter legacy
-      let llm: { client: OpenAI; model: string };
-      try {
-        llm = getGeneralistLlm();
-      } catch {
-        const msg =
-          "I'm not fully online for general chat on this server yet. " +
-          (userProfile?.isVerifiedLekkerpreneur
-            ? "Open Software to use Cledwyn inside lekker.network, or try again after syncing your Lekkerpreneur account."
-            : "Please try again shortly.");
-        res.write(`data: ${JSON.stringify({ content: msg })}\n\n`);
-        res.write("data: [DONE]\n\n");
-        res.end();
-        return;
-      }
-
-      let userContext = "";
-      if (userProfile) {
-        const uParts: string[] = [];
-        uParts.push(`Name: ${userProfile.firstName} ${userProfile.lastName}`);
-        if (userProfile.businessName) uParts.push(`Business: ${userProfile.businessName}`);
-        if (userProfile.isVerifiedLekkerpreneur) uParts.push(`Status: Verified Lekkerpreneur`);
-        userContext = `\n\nYou are speaking with: ${uParts.join(", ")}`;
-      }
-
-      const systemPrompt =
-        `You are Cledwyn, a helpful, friendly assistant for Lekker Chat users in South Africa. ` +
-        `You can help with general questions, everyday tips, and light business guidance. ` +
-        `Keep answers concise and warm. For deep workspace data (invoices, CRM, payroll), ` +
-        `direct verified lekkerpreneurs to open Software on lekker.network or sync their account.` +
-        userContext;
-
-      const stream = await llm.client.chat.completions.create({
-        model: llm.model,
-        messages: [
-          { role: "system", content: systemPrompt },
-          ...(Array.isArray(messages) ? messages : [{ role: "user", content: latestText }]),
-        ],
-        stream: true,
-        max_tokens: 4096,
-      });
-
-      for await (const chunk of stream) {
-        const content = chunk.choices[0]?.delta?.content || "";
-        if (content) {
-          res.write(`data: ${JSON.stringify({ content })}\n\n`);
+          await runGeneralist("generalist_fallback", fallbackHint);
+          return;
         }
       }
 
-      res.write("data: [DONE]\n\n");
-      res.end();
+      await runGeneralist("generalist");
     } catch (error) {
       console.error("CledwynAI chat error:", error);
       if (res.headersSent) {

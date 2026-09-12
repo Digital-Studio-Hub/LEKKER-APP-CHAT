@@ -459,7 +459,7 @@ export async function chatWithNetworkCledwyn(input: {
   workspaceId: string;
   message: string;
   sessionId?: string | null;
-}): Promise<{ reply: string; sessionId?: string; threadId?: string }> {
+}): Promise<{ reply: string; sessionId?: string; threadId?: string; mode?: string }> {
   return lekkerMobileFetchStrict("/api/v1/cledwyn/chat", {
     method: "POST",
     body: JSON.stringify({
@@ -471,34 +471,30 @@ export async function chatWithNetworkCledwyn(input: {
   });
 }
 
-/**
- * Stream workspace Cledwyn from Network (SSE). Yields parsed events:
- * { meta }, { content }, or { done: true }.
- */
-export async function* streamNetworkCledwyn(input: {
-  userId: string;
-  workspaceId: string;
+/** Consumer / generalist Cledwyn on Network (no local LLM on Chat). */
+export async function chatWithNetworkGeneralistCledwyn(input: {
   message: string;
+  userId?: string | null;
+  displayName?: string | null;
+  history?: Array<{ role: string; content: string }>;
   sessionId?: string | null;
-}): AsyncGenerator<{ meta?: any; content?: string; done?: boolean }> {
-  if (!LEKKER_API_KEY) {
-    throw new LekkerNetworkApiError("Lekker Network API is not configured", 503);
-  }
-  const res = await fetch(`${LEKKER_MOBILE_BASE}/api/v1/cledwyn/chat?stream=true`, {
+}): Promise<{ reply: string; sessionId?: string | null; mode?: string }> {
+  return lekkerMobileFetchStrict("/api/v1/cledwyn/chat", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-API-Key": LEKKER_API_KEY,
-      Accept: "text/event-stream",
-    },
     body: JSON.stringify({
-      userId: input.userId,
-      workspaceId: input.workspaceId,
+      mode: "generalist",
       message: input.message,
+      userId: input.userId || undefined,
+      displayName: input.displayName || undefined,
+      history: input.history,
       sessionId: input.sessionId || undefined,
-      stream: true,
     }),
   });
+}
+
+async function* parseNetworkCledwynSse(
+  res: Response,
+): AsyncGenerator<{ meta?: any; content?: string; done?: boolean }> {
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     let data: any = {};
@@ -545,6 +541,147 @@ export async function* streamNetworkCledwyn(input: {
     }
   }
   yield { done: true };
+}
+
+/**
+ * Stream workspace Cledwyn from Network (SSE). Yields parsed events:
+ * { meta }, { content }, or { done: true }.
+ */
+export async function* streamNetworkCledwyn(input: {
+  userId: string;
+  workspaceId: string;
+  message: string;
+  sessionId?: string | null;
+}): AsyncGenerator<{ meta?: any; content?: string; done?: boolean }> {
+  if (!LEKKER_API_KEY) {
+    throw new LekkerNetworkApiError("Lekker Network API is not configured", 503);
+  }
+  const res = await fetch(`${LEKKER_MOBILE_BASE}/api/v1/cledwyn/chat?stream=true`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-API-Key": LEKKER_API_KEY,
+      Accept: "text/event-stream",
+    },
+    body: JSON.stringify({
+      userId: input.userId,
+      workspaceId: input.workspaceId,
+      message: input.message,
+      sessionId: input.sessionId || undefined,
+      stream: true,
+    }),
+  });
+  yield* parseNetworkCledwynSse(res);
+}
+
+/** Stream generalist / consumer Cledwyn from Network (SSE). */
+export async function* streamNetworkGeneralistCledwyn(input: {
+  message: string;
+  userId?: string | null;
+  displayName?: string | null;
+  history?: Array<{ role: string; content: string }>;
+  sessionId?: string | null;
+}): AsyncGenerator<{ meta?: any; content?: string; done?: boolean }> {
+  if (!LEKKER_API_KEY) {
+    throw new LekkerNetworkApiError("Lekker Network API is not configured", 503);
+  }
+  const res = await fetch(`${LEKKER_MOBILE_BASE}/api/v1/cledwyn/chat?stream=true`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-API-Key": LEKKER_API_KEY,
+      Accept: "text/event-stream",
+    },
+    body: JSON.stringify({
+      mode: "generalist",
+      message: input.message,
+      userId: input.userId || undefined,
+      displayName: input.displayName || undefined,
+      history: input.history,
+      sessionId: input.sessionId || undefined,
+      stream: true,
+    }),
+  });
+  yield* parseNetworkCledwynSse(res);
+}
+
+/** Provider Marketplace Leads inbox (Network SoT). */
+export async function fetchMarketplaceLeads(input: {
+  userId: string;
+  workspaceId: string;
+  page?: number;
+  limit?: number;
+  status?: string;
+  q?: string;
+}) {
+  const qs = new URLSearchParams({
+    userId: input.userId,
+    workspaceId: input.workspaceId,
+    page: String(input.page || 1),
+    limit: String(input.limit || 20),
+    status: input.status || "open",
+  });
+  if (input.q) qs.set("q", input.q);
+  return lekkerMobileFetchStrict<any>(`/api/v1/marketplace-leads?${qs}`);
+}
+
+export async function fetchMarketplaceLeadsUnreadCount(userId: string, workspaceId: string) {
+  const qs = new URLSearchParams({ userId, workspaceId });
+  return lekkerMobileFetchStrict<{ success?: boolean; count?: number }>(
+    `/api/v1/marketplace-leads/unread-count?${qs}`,
+  );
+}
+
+export async function fetchMarketplaceLeadDetail(input: {
+  leadId: string;
+  userId: string;
+  workspaceId: string;
+}) {
+  const qs = new URLSearchParams({
+    userId: input.userId,
+    workspaceId: input.workspaceId,
+  });
+  return lekkerMobileFetchStrict<any>(
+    `/api/v1/marketplace-leads/${encodeURIComponent(input.leadId)}?${qs}`,
+  );
+}
+
+export async function sendMarketplaceLeadMessage(input: {
+  leadId: string;
+  userId: string;
+  workspaceId: string;
+  content: string;
+}) {
+  return lekkerMobileFetchStrict<any>(
+    `/api/v1/marketplace-leads/${encodeURIComponent(input.leadId)}/messages`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        userId: input.userId,
+        workspaceId: input.workspaceId,
+        content: input.content,
+      }),
+    },
+  );
+}
+
+export async function updateMarketplaceLeadStatus(input: {
+  leadId: string;
+  userId: string;
+  workspaceId: string;
+  status: "contacted" | "closed";
+}) {
+  return lekkerMobileFetchStrict<any>(
+    `/api/v1/marketplace-leads/${encodeURIComponent(input.leadId)}/status`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        userId: input.userId,
+        workspaceId: input.workspaceId,
+        status: input.status,
+      }),
+    },
+  );
 }
 
 export async function fetchMobileSessionToken(lekkerNetworkUserId: string): Promise<string | null> {
