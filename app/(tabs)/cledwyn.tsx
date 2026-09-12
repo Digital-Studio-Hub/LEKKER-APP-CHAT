@@ -12,6 +12,7 @@ import {
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { fetch } from "expo/fetch";
 import { getAuthToken } from "@/lib/auth-token";
 import * as Haptics from "expo-haptics";
@@ -20,6 +21,8 @@ import { isSmallScreen, fontScale, responsiveMaxBubbleWidth } from "@/lib/respon
 import { getApiUrl } from "@/lib/query-client";
 import { storage, CledwynMessage } from "@/lib/storage";
 import { useAuth } from "@/lib/auth-context";
+
+const NETWORK_SESSION_KEY = "lekker_cledwyn_network_session";
 
 let messageCounter = 0;
 function generateUniqueId(): string {
@@ -139,6 +142,7 @@ export default function CledwynScreen() {
         { role: "user", content: text },
       ];
 
+      const sessionId = (await AsyncStorage.getItem(NETWORK_SESSION_KEY)) || undefined;
       const token = getAuthToken();
       const response = await fetch(`${baseUrl}api/cledwyn/chat`, {
         method: "POST",
@@ -147,10 +151,30 @@ export default function CledwynScreen() {
           Accept: "text/event-stream",
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ messages: chatHistory, lekkerNetworkAccess: !!user?.lekkerNetworkAccess }),
+        body: JSON.stringify({
+          messages: chatHistory,
+          lekkerNetworkAccess: !!user?.lekkerNetworkAccess,
+          ...(sessionId ? { sessionId } : {}),
+        }),
       });
 
-      if (!response.ok) throw new Error("Failed to get response");
+      if (!response.ok) {
+        setShowTyping(false);
+        setMessages((prev) => {
+          const next = [
+            ...prev,
+            {
+              id: generateUniqueId(),
+              role: "assistant" as const,
+              content: "Sorry, I couldn't reach the assistant right now. Please try again in a moment.",
+              timestamp: new Date().toISOString(),
+            },
+          ];
+          storage.saveCledwynMessages(next);
+          return next;
+        });
+        return;
+      }
 
       const reader = response.body?.getReader();
       if (!reader) throw new Error("No response body");
@@ -175,6 +199,10 @@ export default function CledwynScreen() {
 
           try {
             const parsed = JSON.parse(data);
+            const metaSessionId = parsed.meta?.sessionId;
+            if (typeof metaSessionId === "string" && metaSessionId.length > 0) {
+              await AsyncStorage.setItem(NETWORK_SESSION_KEY, metaSessionId);
+            }
             if (parsed.content) {
               fullContent += parsed.content;
 
@@ -254,7 +282,11 @@ export default function CledwynScreen() {
           </View>
           <View>
             <Text style={styles.headerTitle}>Your Assistant</Text>
-            <Text style={styles.headerSubtitle}>Your business assistant</Text>
+            <Text style={styles.headerSubtitle}>
+              {user?.isVerifiedLekkerpreneur && user?.lekkerWorkspaceId
+                ? "Your business assistant"
+                : "General assistant"}
+            </Text>
           </View>
         </View>
         <Pressable onPress={handleClearChat} style={styles.clearButton}>

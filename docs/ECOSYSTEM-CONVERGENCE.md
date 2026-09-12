@@ -48,13 +48,13 @@ Chat was built as a **standalone Replit messaging app**, then bolted onto Networ
 |---|------|--------------------|------------|----------|--------|
 | 1 | Transactional email | Lekker Mail / Zeptomail | Replit Gmail connector | Critical | **Done** (`15fc50c`) |
 | 2 | Object storage | GCS ADC on Cloud Run | Replit `127.0.0.1:1106` sidecar | Critical | **Done** (`15fc50c`) |
-| 3 | Cledwyn | Network workspace agent (`XAI`, tools) | OpenRouter mirror + prompt dump | Critical | Open |
+| 3 | Cledwyn | Network workspace agent (`XAI`, tools) | Verified users → Network `/api/v1/cledwyn/chat`; others → generalist OpenRouter | Critical | **Done** (needs Network publish + OpenRouter key for consumers) |
 | 4 | Identity SoT | Network users / workspaces | Own `users` + sync-lekker | High | Open |
 | 5 | Directory → enquiry UX | Privacy-first Instant Match | Anonymous enquire default | High | **Done** |
-| 5b | Phonebook → chat / invite | Match registered phones; WA deep-link invite | On-app DM + multi-select / invite-all WA | High | **Done** (client) |
+| 5b | Phonebook → chat / invite | Match registered phones; WA deep-link invite | On-app DM + multi-select / invite-all WA | High | **Done** |
 | 6 | Connect native UX | Marketplace Connect consumer | Server proxies; Browse = WebView | High | Open |
-| 7 | Directory stub fallback | Network-only listing | Hardcoded `DIRECTORY_DATA` | Med | Open |
-| 8 | Password auth carcass | WhatsApp-only | Server register/login/reset remain | Med | Open |
+| 7 | Directory stub fallback | Network-only listing | Prod/Cloud Run returns empty + error (no fake businesses); `DIRECTORY_DATA` local/dev only | Med | **Done** (prod guard) |
+| 8 | Password auth carcass | WhatsApp-only | `CHAT_WHATSAPP_ONLY` default ON (≠ `"false"`) → password register/login/reset return `410`; Apple Review WA bypass untouched | Med | **Done** (default ON) |
 | 9 | Bundle / package IDs | `com.lekker.chat` | iOS still `app.replit.*` | Med | Open |
 | 10 | Docs / deploy pins | Single Cloud Run truth | HANDOVER still cites Replit in places | Low | Partial |
 

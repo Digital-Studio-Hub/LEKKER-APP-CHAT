@@ -31,6 +31,8 @@ import {
   fetchMobileEmailThread,
   sendMobileEmail,
   isLekkerNetworkConfigured,
+  chatWithNetworkCledwyn,
+  LekkerNetworkApiError,
   type LekkerNetworkEntry,
   type WorkspaceDetail,
 } from "./lekkerNetwork";
@@ -719,6 +721,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.post("/api/auth/register", registerLimiter, async (req: Request, res: Response) => {
+    if (process.env.CHAT_WHATSAPP_ONLY !== "false") {
+      return res.status(410).json({ message: "Use WhatsApp OTP to sign in. Password login is disabled." });
+    }
     try {
       const parsed = registerSchema.safeParse(req.body);
       if (!parsed.success) {
@@ -834,6 +839,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.post("/api/auth/login", loginLimiter, async (req: Request, res: Response) => {
+    if (process.env.CHAT_WHATSAPP_ONLY !== "false") {
+      return res.status(410).json({ message: "Use WhatsApp OTP to sign in. Password login is disabled." });
+    }
     try {
       const parsed = loginSchema.safeParse(req.body);
       if (!parsed.success) {
@@ -890,6 +898,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.post("/api/auth/forgot-password", resetRequestLimiter, async (req: Request, res: Response) => {
+    if (process.env.CHAT_WHATSAPP_ONLY !== "false") {
+      return res.status(410).json({ message: "Use WhatsApp OTP to sign in. Password login is disabled." });
+    }
     try {
       const { identifier } = req.body;
       if (!identifier || typeof identifier !== "string") {
@@ -952,6 +963,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   app.post("/api/auth/verify-reset-code", resetRequestLimiter, async (req: Request, res: Response) => {
+    if (process.env.CHAT_WHATSAPP_ONLY !== "false") {
+      return res.status(410).json({ message: "Use WhatsApp OTP to sign in. Password login is disabled." });
+    }
     try {
       const { email, code } = req.body;
       if (!email || !code) {
@@ -993,6 +1007,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.post("/api/auth/reset-password", resetRequestLimiter, async (req: Request, res: Response) => {
+    if (process.env.CHAT_WHATSAPP_ONLY !== "false") {
+      return res.status(410).json({ message: "Use WhatsApp OTP to sign in. Password login is disabled." });
+    }
     try {
       const { email, code, newPassword } = req.body;
       if (!email || !code || !newPassword) {
@@ -2086,6 +2103,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error("Lekker Network directory fetch error (falling back):", e);
     }
 
+    const isProdOrCloudRun =
+      process.env.NODE_ENV === "production" || Boolean(process.env.K_SERVICE);
+    if (isProdOrCloudRun) {
+      return res.json({
+        entries: [],
+        filters: { serviceTypes: SERVICE_TYPES, provinces: PROVINCES },
+        source: "error",
+        message: "Directory temporarily unavailable",
+      });
+    }
+
     let results = [...DIRECTORY_DATA];
     if (serviceType && typeof serviceType === "string") {
       results = results.filter((d) => d.serviceType === serviceType);
@@ -2561,67 +2589,85 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  /**
+   * Cledwyn Assistant
+   * - Verified lekkerpreneur with Network workspace → proxy Network workspace Cledwyn (SoT)
+   * - Everyone else → generalist OpenRouter stream (consumer assistant)
+   * Always responds as SSE for the mobile client.
+   */
   app.post("/api/cledwyn/chat", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { messages, lekkerNetworkAccess } = req.body;
+      const { messages, sessionId: bodySessionId } = req.body || {};
       const userId = req.user!.userId;
-
       const userProfile = await storage.getUser(userId);
 
-      let workspaceContext = "";
-      if (userProfile) {
+      const lastUserMessage = Array.isArray(messages)
+        ? [...messages].reverse().find((m: any) => m?.role === "user" && typeof m.content === "string")
+        : null;
+      const latestText = (lastUserMessage?.content || "").trim();
+      if (!latestText) {
+        return res.status(400).json({ error: "A user message is required" });
+      }
+
+      const useWorkspaceCledwyn =
+        !!userProfile?.isVerifiedLekkerpreneur &&
+        !!userProfile?.lekkerNetworkId &&
+        !!userProfile?.lekkerWorkspaceId &&
+        isLekkerNetworkConfigured();
+
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache, no-transform");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.flushHeaders();
+
+      if (useWorkspaceCledwyn) {
         try {
-          let wsDetail: WorkspaceDetail | null = null;
-
-          if (userProfile.lekkerWorkspaceId) {
-            wsDetail = await fetchWorkspaceById(userProfile.lekkerWorkspaceId);
+          const result = await chatWithNetworkCledwyn({
+            userId: userProfile!.lekkerNetworkId!,
+            workspaceId: userProfile!.lekkerWorkspaceId!,
+            message: latestText,
+            sessionId: typeof bodySessionId === "string" ? bodySessionId : null,
+          });
+          const reply = result.reply || "Sorry, I couldn't generate a response. Please try again.";
+          const sid = result.sessionId || result.threadId;
+          if (sid) {
+            res.write(`data: ${JSON.stringify({ meta: { sessionId: sid, mode: "workspace" } })}\n\n`);
+          } else {
+            res.write(`data: ${JSON.stringify({ meta: { mode: "workspace" } })}\n\n`);
           }
-
-          if (wsDetail) {
-            const parts: string[] = [];
-            if (wsDetail.businessName) parts.push(`Business Name: ${wsDetail.businessName}`);
-            if (wsDetail.tradingName) parts.push(`Trading Name: ${wsDetail.tradingName}`);
-            if (wsDetail.workspaceName) parts.push(`Workspace Name: ${wsDetail.workspaceName}`);
-            if (wsDetail.category) parts.push(`Company Type: ${wsDetail.category}`);
-            if (wsDetail.address) parts.push(`Business Address: ${wsDetail.address}`);
-            if (wsDetail.province) parts.push(`Province: ${wsDetail.province}`);
-            if (wsDetail.phone) parts.push(`Business Phone: ${wsDetail.phone}`);
-            if (wsDetail.email) parts.push(`Business Email: ${wsDetail.email}`);
-            if (wsDetail.website) parts.push(`Website: ${wsDetail.website}`);
-            parts.push(`Currency: ${wsDetail.currency || "ZAR"}`);
-            if (wsDetail.isVatVendor) parts.push(`VAT Vendor: Yes (registered with SARS)`);
-            if (wsDetail.financialYearEndMonth) parts.push(`Financial Year End: Month ${wsDetail.financialYearEndMonth}`);
-            if (wsDetail.shippingEnabled) parts.push(`Shipping/Delivery: Enabled`);
-            if (wsDetail.paymentUrl) parts.push(`Payment URL: ${wsDetail.paymentUrl}`);
-            if (wsDetail.isVerified) parts.push(`CIPC Verified: Yes`);
-            parts.push(`Plan: ${wsDetail.plan}`);
-            parts.push(`Billing Status: ${wsDetail.billingStatus}`);
-            if (wsDetail.teamSize) parts.push(`Team Size: ${wsDetail.teamSize} members`);
-            if (wsDetail.activeServices?.length > 0) {
-              parts.push(`Active Services: ${wsDetail.activeServices.map(s => `${s.serviceType} (${s.status})`).join(", ")}`);
-            }
-            if (wsDetail.verifiedDomains?.length > 0) {
-              parts.push(`Verified Domains: ${wsDetail.verifiedDomains.join(", ")}`);
-            }
-            workspaceContext = `\n\nThis user's Lekker Network workspace data:\n${parts.join("\n")}`;
-          } else if (userProfile.lekkerNetworkId) {
-            const lekkerEntry = await fetchLekkerpreneurById(userProfile.lekkerNetworkId);
-            if (lekkerEntry) {
-              const parts: string[] = [];
-              if (lekkerEntry.businessName) parts.push(`Business Name: ${lekkerEntry.businessName}`);
-              if (lekkerEntry.ownerName) parts.push(`Owner: ${lekkerEntry.ownerName}`);
-              if (lekkerEntry.category) parts.push(`Category: ${lekkerEntry.category}`);
-              if (lekkerEntry.website) parts.push(`Website: ${lekkerEntry.website}`);
-              if (lekkerEntry.location?.province) parts.push(`Province: ${lekkerEntry.location.province}`);
-              if (lekkerEntry.isVerified) parts.push(`Verified: Yes`);
-              if (parts.length > 0) {
-                workspaceContext = `\n\nThis user's Lekker Network profile:\n${parts.join("\n")}`;
-              }
-            }
+          // Simulate stream in modest chunks for existing client UX
+          const chunkSize = 48;
+          for (let i = 0; i < reply.length; i += chunkSize) {
+            res.write(`data: ${JSON.stringify({ content: reply.slice(i, i + chunkSize) })}\n\n`);
           }
-        } catch (e) {
-          console.warn("Failed to fetch workspace data for CledwynAI context:", e);
+          res.write("data: [DONE]\n\n");
+          res.end();
+          return;
+        } catch (netErr: any) {
+          console.warn("[cledwyn] Network workspace proxy failed, falling back to generalist:", netErr?.message || netErr);
+          const fallbackHint =
+            netErr instanceof LekkerNetworkApiError && netErr.status === 403
+              ? "I couldn't open your workspace assistant (access denied). Falling back to general help — sync Lekkerpreneur in Settings if this persists.\n\n"
+              : "Workspace assistant is briefly unavailable — answering generally.\n\n";
+          res.write(`data: ${JSON.stringify({ meta: { mode: "generalist_fallback" } })}\n\n`);
+          res.write(`data: ${JSON.stringify({ content: fallbackHint })}\n\n`);
+          // fall through to generalist below (headers already sent)
         }
+      } else {
+        res.write(`data: ${JSON.stringify({ meta: { mode: "generalist" } })}\n\n`);
+      }
+
+      // Generalist path (consumers + fallback)
+      if (!process.env.AI_INTEGRATIONS_OPENROUTER_API_KEY) {
+        const msg =
+          "I'm not fully online for general chat on this server yet. " +
+          (userProfile?.isVerifiedLekkerpreneur
+            ? "Open Software to use Cledwyn inside lekker.network, or try again after syncing your Lekkerpreneur account."
+            : "Please try again shortly.");
+        res.write(`data: ${JSON.stringify({ content: msg })}\n\n`);
+        res.write("data: [DONE]\n\n");
+        res.end();
+        return;
       }
 
       let userContext = "";
@@ -2629,35 +2675,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const uParts: string[] = [];
         uParts.push(`Name: ${userProfile.firstName} ${userProfile.lastName}`);
         if (userProfile.businessName) uParts.push(`Business: ${userProfile.businessName}`);
-        if (userProfile.tradingName) uParts.push(`Trading As: ${userProfile.tradingName}`);
-        if (userProfile.businessCategory) uParts.push(`Category: ${userProfile.businessCategory}`);
-        if (userProfile.businessProvince) uParts.push(`Province: ${userProfile.businessProvince}`);
-        if (userProfile.businessCountry) uParts.push(`Country: ${userProfile.businessCountry}`);
         if (userProfile.isVerifiedLekkerpreneur) uParts.push(`Status: Verified Lekkerpreneur`);
         userContext = `\n\nYou are speaking with: ${uParts.join(", ")}`;
       }
 
-      const basePrompt = lekkerNetworkAccess
-        ? `You are CledwynAI, a smart and friendly AI business assistant for Lekker Network - a business platform for South African entrepreneurs (Lekkerpreneurs). You have access to this user's business workspace data and should use it to give personalized, contextual business advice. You help with business advice, product recommendations, service quotes, marketing strategies, invoicing guidance, VAT compliance, and general business operations. You are knowledgeable about the South African business landscape, professional yet approachable, and always aim to help entrepreneurs succeed. Keep responses concise and actionable. When asked about products or services, suggest checking the Lekker Marketplace. Use the workspace data to tailor your advice — reference their specific business name, industry, location, and financial setup when relevant.`
-        : `You are CledwynAI, a helpful, friendly, and knowledgeable AI assistant. You can help with any topic — general knowledge, creative writing, coding, math, science, daily life tips, recommendations, and more. You are conversational, concise, and always aim to be useful. Keep your tone warm and approachable.`;
-
-      const systemPrompt = basePrompt + userContext + workspaceContext;
-
-      const systemMessage = {
-        role: "system" as const,
-        content: systemPrompt,
-      };
-
-      res.setHeader("Content-Type", "text/event-stream");
-      res.setHeader("Cache-Control", "no-cache, no-transform");
-      res.setHeader("X-Accel-Buffering", "no");
-      res.flushHeaders();
+      const systemPrompt =
+        `You are Cledwyn, a helpful, friendly assistant for Lekker Chat users in South Africa. ` +
+        `You can help with general questions, everyday tips, and light business guidance. ` +
+        `Keep answers concise and warm. For deep workspace data (invoices, CRM, payroll), ` +
+        `direct verified lekkerpreneurs to open Software on lekker.network or sync their account.` +
+        userContext;
 
       const stream = await getOpenRouter().chat.completions.create({
         model: "x-ai/grok-4.3",
-        messages: [systemMessage, ...messages],
+        messages: [
+          { role: "system", content: systemPrompt },
+          ...(Array.isArray(messages) ? messages : [{ role: "user", content: latestText }]),
+        ],
         stream: true,
-        max_tokens: 8192,
+        max_tokens: 4096,
       });
 
       for await (const chunk of stream) {
@@ -2672,9 +2708,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("CledwynAI chat error:", error);
       if (res.headersSent) {
-        res.write(
-          `data: ${JSON.stringify({ error: "Something went wrong" })}\n\n`,
-        );
+        res.write(`data: ${JSON.stringify({ error: "Something went wrong" })}\n\n`);
         res.end();
       } else {
         res.status(500).json({ error: "Failed to process chat" });

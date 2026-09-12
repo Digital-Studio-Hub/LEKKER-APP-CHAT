@@ -394,6 +394,17 @@ export function extractLekkerpreneurProfile(entry: LekkerNetworkEntry) {
 
 const LEKKER_MOBILE_BASE = process.env.LEKKER_API_BASE_URL || "https://lekker.network";
 
+export class LekkerNetworkApiError extends Error {
+  status: number;
+  body: unknown;
+  constructor(message: string, status: number, body?: unknown) {
+    super(message);
+    this.name = "LekkerNetworkApiError";
+    this.status = status;
+    this.body = body;
+  }
+}
+
 async function lekkerMobileFetch<T>(path: string, init?: RequestInit): Promise<T | null> {
   if (!LEKKER_API_KEY) return null;
   try {
@@ -410,6 +421,54 @@ async function lekkerMobileFetch<T>(path: string, init?: RequestInit): Promise<T
   } catch {
     return null;
   }
+}
+
+/** Like lekkerMobileFetch but throws with status for callers that need error detail. */
+async function lekkerMobileFetchStrict<T>(path: string, init?: RequestInit): Promise<T> {
+  if (!LEKKER_API_KEY) {
+    throw new LekkerNetworkApiError("Lekker Network API is not configured", 503);
+  }
+  const res = await fetch(`${LEKKER_MOBILE_BASE}${path}`, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      "X-API-Key": LEKKER_API_KEY,
+      ...(init?.headers || {}),
+    },
+  });
+  const text = await res.text();
+  let data: any = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = { message: text };
+  }
+  if (!res.ok) {
+    throw new LekkerNetworkApiError(
+      data.message || data.error || `Lekker Network ${res.status}`,
+      res.status,
+      data,
+    );
+  }
+  return data as T;
+}
+
+/** Workspace-scoped Cledwyn (Network SoT). userId must be Network user id (lekkerNetworkId). */
+export async function chatWithNetworkCledwyn(input: {
+  userId: string;
+  workspaceId: string;
+  message: string;
+  sessionId?: string | null;
+}): Promise<{ reply: string; sessionId?: string; threadId?: string }> {
+  return lekkerMobileFetchStrict("/api/v1/cledwyn/chat", {
+    method: "POST",
+    body: JSON.stringify({
+      userId: input.userId,
+      workspaceId: input.workspaceId,
+      message: input.message,
+      sessionId: input.sessionId || undefined,
+    }),
+  });
 }
 
 export async function fetchMobileSessionToken(lekkerNetworkUserId: string): Promise<string | null> {
