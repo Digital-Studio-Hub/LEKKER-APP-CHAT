@@ -27,8 +27,7 @@ import { requestLocationPermissions, isLocationEnabled, getLastLocation, disable
 import { fetchBlockedUsers, unblockUserServer, type BlockedUserRow } from "@/lib/safety-api";
 import { ABUSE_CONTACT_EMAIL, COMMUNITY_GUIDELINES_URL, PRIVACY_POLICY_URL } from "@/constants/safety";
 import { getApiUrl, apiRequest } from "@/lib/query-client";
-import { uploadFileToStorage } from "@/client/utils/objectStorageExpo";
-import { File } from "expo-file-system";
+import * as FileSystem from "expo-file-system";
 
 type PresenceStatus = "online" | "away" | "dnd" | "offline";
 
@@ -58,7 +57,7 @@ function getProfileImageUrl(profilePhoto: string | null | undefined): string | n
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
-  const { user, updateProfile, logout } = useAuth();
+  const { user, updateProfile, applyServerUser, refreshUser, logout } = useAuth();
   const [selectedPresence, setSelectedPresence] = useState<PresenceStatus>(
     (user?.presence as PresenceStatus) || "online",
   );
@@ -128,6 +127,21 @@ export default function SettingsScreen() {
     }
   }
 
+  function parseApiErrorMessage(err: unknown, fallback: string): string {
+    if (!(err instanceof Error)) return fallback;
+    const raw = err.message || "";
+    // apiRequest throws `${status}: ${text}` — prefer JSON.message when present
+    const colon = raw.indexOf(": ");
+    const body = colon >= 0 ? raw.slice(colon + 2) : raw;
+    try {
+      const parsed = JSON.parse(body);
+      if (parsed?.message && typeof parsed.message === "string") return parsed.message;
+    } catch {
+      /* plain text */
+    }
+    return body && body.length < 200 ? body : fallback;
+  }
+
   async function handleAddEmail() {
     if (!newEmail.trim() || !newEmail.includes("@")) {
       setAddEmailError("Enter a valid email address");
@@ -138,12 +152,11 @@ export default function SettingsScreen() {
     try {
       const res = await apiRequest("POST", "/api/auth/add-email", { email: newEmail.trim() });
       const data = await res.json();
-      if (!res.ok) { setAddEmailError(data.message || "Failed to add email"); return; }
       setPendingEmailId(data.emailId);
       setNewEmail("");
       await loadLinkedEmails();
     } catch (e) {
-      setAddEmailError("Something went wrong. Try again.");
+      setAddEmailError(parseApiErrorMessage(e, "Something went wrong. Try again."));
     } finally {
       setIsAddingEmail(false);
     }
@@ -157,15 +170,14 @@ export default function SettingsScreen() {
     setIsVerifyingEmail(true);
     setVerifyError("");
     try {
-      const res = await apiRequest("POST", "/api/auth/verify-linked-email", { emailId, code: verifyCode.trim() });
-      const data = await res.json();
-      if (!res.ok) { setVerifyError(data.message || "Invalid code"); return; }
+      await apiRequest("POST", "/api/auth/verify-linked-email", { emailId, code: verifyCode.trim() });
       setPendingEmailId(null);
       setVerifyCode("");
       Alert.alert("Verified!", "Email address verified successfully.");
       await loadLinkedEmails();
+      await refreshUser();
     } catch (e) {
-      setVerifyError("Something went wrong. Try again.");
+      setVerifyError(parseApiErrorMessage(e, "Invalid code. Try again."));
     } finally {
       setIsVerifyingEmail(false);
     }
@@ -173,11 +185,10 @@ export default function SettingsScreen() {
 
   async function handleResendCode(emailId: string) {
     try {
-      const res = await apiRequest("POST", "/api/auth/resend-linked-email-code", { emailId });
-      const data = await res.json();
-      Alert.alert(res.ok ? "Code Sent" : "Error", data.message || (res.ok ? "Verification code resent." : "Failed to resend code."));
+      await apiRequest("POST", "/api/auth/resend-linked-email-code", { emailId });
+      Alert.alert("Code Sent", "Verification code resent.");
     } catch (e) {
-      Alert.alert("Error", "Failed to resend code.");
+      Alert.alert("Error", parseApiErrorMessage(e, "Failed to resend code."));
     }
   }
 
@@ -340,13 +351,21 @@ export default function SettingsScreen() {
     }
 
     if (!permResult.granted) {
-      Alert.alert("Permission Required", `Please allow ${source === "camera" ? "camera" : "photo library"} access in your settings.`);
+      Alert.alert(
+        "Permission Required",
+        `Please allow ${source === "camera" ? "camera" : "photo library"} access in your settings.`,
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Open Settings", onPress: () => Linking.openSettings() },
+        ],
+      );
       return;
     }
 
     const launchFn = source === "camera" ? ImagePicker.launchCameraAsync : ImagePicker.launchImageLibraryAsync;
+    // Android cropper + content:// URIs break Expo File PUT uploads — match chat attachments
     const result = await launchFn({
-      allowsEditing: true,
+      allowsEditing: Platform.OS === "ios",
       aspect: [1, 1],
       quality: 0.7,
     });
@@ -357,16 +376,39 @@ export default function SettingsScreen() {
     setIsUploadingImage(true);
 
     try {
-      const file = new File(asset.uri);
-      const uploadURL = await uploadFileToStorage(file, "/api/objects/upload");
+      const contentType = asset.mimeType || "image/jpeg";
+      const uploadRes = await apiRequest("POST", "/api/objects/upload");
+      const { uploadURL } = await uploadRes.json();
+      if (!uploadURL) throw new Error("No upload URL");
+
+      if (Platform.OS === "web") {
+        const response = await globalThis.fetch(asset.uri);
+        const blob = await response.blob();
+        const putRes = await globalThis.fetch(uploadURL, {
+          method: "PUT",
+          headers: { "Content-Type": contentType || blob.type || "application/octet-stream" },
+          body: blob,
+        });
+        if (!putRes.ok) throw new Error(`Upload failed (${putRes.status})`);
+      } else {
+        const uploadResult = await FileSystem.uploadAsync(uploadURL, asset.uri, {
+          httpMethod: "PUT",
+          headers: { "Content-Type": contentType },
+          uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+        });
+        if (uploadResult.status < 200 || uploadResult.status >= 300) {
+          throw new Error(`Upload failed (${uploadResult.status})`);
+        }
+      }
+
       const res = await apiRequest("POST", "/api/user/profile-image", { imageURL: uploadURL });
       const data = await res.json();
       if (data.user) {
-        await updateProfile({ profilePhoto: data.user.profilePhoto });
+        await applyServerUser(data.user);
       }
     } catch (e: any) {
       console.error("Image upload error:", e);
-      Alert.alert("Upload Failed", "Could not upload your profile photo. Please try again.");
+      Alert.alert("Upload Failed", parseApiErrorMessage(e, "Could not upload your profile photo. Please try again."));
     } finally {
       setIsUploadingImage(false);
     }
@@ -378,10 +420,10 @@ export default function SettingsScreen() {
       const res = await apiRequest("DELETE", "/api/user/profile-image");
       const data = await res.json();
       if (data.user) {
-        await updateProfile({ profilePhoto: null });
+        await applyServerUser(data.user);
       }
     } catch (e) {
-      Alert.alert("Error", "Could not remove profile photo.");
+      Alert.alert("Error", parseApiErrorMessage(e, "Could not remove profile photo."));
     } finally {
       setIsUploadingImage(false);
     }
@@ -394,13 +436,22 @@ export default function SettingsScreen() {
       const res = await apiRequest("POST", "/api/auth/sync-lekker");
       const data = await res.json();
       if (data.matched && data.user) {
-        await updateProfile(data.user);
-        Alert.alert("Verified!", `Your account has been linked to ${data.user.businessName || "your Lekkerpreneur profile"} on the Lekker Network.`);
+        // updateProfile strips isVerifiedLekkerpreneur / lekkerNetworkId — apply full payload
+        await applyServerUser(data.user);
+        await refreshUser();
+        Alert.alert(
+          "Verified!",
+          `Your account has been linked to ${data.user.businessName || "your Lekkerpreneur profile"} on the Lekker Network.`,
+        );
       } else {
-        Alert.alert("No Match Found", data.message || "We couldn't find a matching Lekkerpreneur profile for your phone number or email. Make sure you're registered on lekker.network.");
+        Alert.alert(
+          "No Match Found",
+          data.message ||
+            "We couldn't find a matching Lekkerpreneur profile for your phone number or email. Make sure you're registered on lekker.network.",
+        );
       }
     } catch (e: any) {
-      Alert.alert("Sync Failed", "Could not connect to the Lekker Network. Please try again later.");
+      Alert.alert("Sync Failed", parseApiErrorMessage(e, "Could not connect to the Lekker Network. Please try again later."));
     } finally {
       setIsSyncingLekker(false);
     }

@@ -4,7 +4,7 @@ import OpenAI from "openai";
 import rateLimit, { type Options } from "express-rate-limit";
 import { registerSchema, loginSchema, updateProfileSchema, users, chatMessages, passwordResetCodes, phoneVerificationCodes, emailVerificationCodes, userEmails } from "@shared/schema";
 import { storage, db } from "./storage";
-import { sql, or, and, ne, eq, inArray } from "drizzle-orm";
+import { sql, or, and, ne, eq, inArray, desc } from "drizzle-orm";
 import {
   hashPassword,
   verifyPassword,
@@ -30,6 +30,7 @@ import {
   fetchMobileEmailThreads,
   fetchMobileEmailThread,
   sendMobileEmail,
+  isLekkerNetworkConfigured,
   type LekkerNetworkEntry,
   type WorkspaceDetail,
 } from "./lekkerNetwork";
@@ -1082,14 +1083,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       const userId = req.user!.userId;
       const pending = await storage.addUserEmail(userId, normalized, false, false);
+      await db.delete(emailVerificationCodes).where(eq(emailVerificationCodes.email, normalized));
       const code = Math.floor(100000 + Math.random() * 900000).toString();
       const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
       await db.insert(emailVerificationCodes).values({ email: normalized, code, expiresAt });
-      try {
-        const userForEmail = await storage.getUser(userId);
-        await sendEmailVerificationEmail(normalized, code, userForEmail?.firstName || "there");
-      } catch (e) {
-        console.error("Failed to send verification email (non-fatal):", e);
+      const userForEmail = await storage.getUser(userId);
+      const sent = await sendEmailVerificationEmail(normalized, code, userForEmail?.firstName || "there");
+      if (!sent) {
+        return res.status(502).json({
+          emailId: pending.id,
+          message: "Could not send the verification email. Check the address and try again in a moment.",
+        });
       }
       res.status(201).json({ emailId: pending.id, message: "Verification code sent to " + normalized });
     } catch (error) {
@@ -1107,11 +1111,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const target = emails.find(e => e.id === emailId);
       if (!target) return res.status(404).json({ message: "Email not found" });
       if (target.isVerified) return res.status(400).json({ message: "Email is already verified" });
+      // Newest unused code wins (resend must not leave the old OTP as the match target)
       const [codeRecord] = await db.select().from(emailVerificationCodes)
-        .where(eq(emailVerificationCodes.email, target.email))
-        .orderBy(emailVerificationCodes.createdAt)
+        .where(and(
+          eq(emailVerificationCodes.email, target.email),
+          eq(emailVerificationCodes.used, false),
+        ))
+        .orderBy(desc(emailVerificationCodes.createdAt))
         .limit(1);
-      if (!codeRecord || codeRecord.code !== code || codeRecord.used) {
+      if (!codeRecord || codeRecord.code !== String(code).trim()) {
         return res.status(400).json({ message: "Invalid or expired verification code" });
       }
       if (new Date() > codeRecord.expiresAt) {
@@ -1158,14 +1166,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const target = emails.find(e => e.id === emailId);
       if (!target) return res.status(404).json({ message: "Email not found" });
       if (target.isVerified) return res.status(400).json({ message: "Email is already verified" });
+      await db.delete(emailVerificationCodes).where(eq(emailVerificationCodes.email, target.email));
       const code = Math.floor(100000 + Math.random() * 900000).toString();
       const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
       await db.insert(emailVerificationCodes).values({ email: target.email, code, expiresAt });
-      try {
-        const userForEmail = await storage.getUser(userId);
-        await sendEmailVerificationEmail(target.email, code, userForEmail?.firstName || "there");
-      } catch (e) {
-        console.error("Failed to resend verification email:", e);
+      const userForEmail = await storage.getUser(userId);
+      const sent = await sendEmailVerificationEmail(target.email, code, userForEmail?.firstName || "there");
+      if (!sent) {
+        return res.status(502).json({ message: "Could not send the verification email. Please try again shortly." });
       }
       res.json({ message: "Verification code resent" });
     } catch (error) {
@@ -2406,14 +2414,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/auth/sync-lekker", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
+      if (!isLekkerNetworkConfigured()) {
+        return res.status(503).json({
+          matched: false,
+          message: "Lekker Network sync is temporarily unavailable. Please try again later.",
+        });
+      }
+
       const user = await storage.getUser(req.user!.userId);
       if (!user) {
         return res.status(404).json({ message: "User not found" });
       }
 
+      if (!user.phone && !user.email) {
+        return res.status(400).json({
+          matched: false,
+          message: "Add a phone number or verified email before syncing with Lekker Network.",
+        });
+      }
+
       const match = await findLekkerpreneurByPhoneOrEmail(user.phone, user.email);
       if (!match) {
-        return res.json({ matched: false, message: "No matching Lekkerpreneur found for your phone or email." });
+        return res.json({
+          matched: false,
+          message:
+            "No matching Lekkerpreneur found for your phone or email. Use the same number/email as on lekker.network.",
+        });
       }
 
       const profileData = extractLekkerpreneurProfile(match);

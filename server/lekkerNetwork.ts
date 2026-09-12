@@ -4,6 +4,10 @@ const LEKKER_SYNC_URL = `${LEKKER_API_BASE}/api/auth/sync-lekker`;
 const LEKKER_WORKSPACES_URL = `${LEKKER_API_BASE}/api/v1/workspaces`;
 const LEKKER_API_KEY = process.env.LEKKER_NETWORK_API_KEY || "";
 
+export function isLekkerNetworkConfigured(): boolean {
+  return Boolean(LEKKER_API_KEY);
+}
+
 export interface LekkerWorkspace {
   id?: string;
   name?: string;
@@ -237,9 +241,12 @@ export async function findLekkerpreneurByPhoneOrEmail(
     }
 
     if (normalizedPhone) {
-      const phoneMatch = result.data.find(
-        (entry) => entry.phone && normalizePhone(entry.phone) === normalizedPhone
-      );
+      const phoneMatch = result.data.find((entry) => {
+        const candidates = [entry.phone, entry.businessPhone, entry.workspace?.businessPhone]
+          .filter(Boolean)
+          .map((p) => normalizePhone(String(p)));
+        return candidates.includes(normalizedPhone);
+      });
       if (phoneMatch) return phoneMatch;
     }
 

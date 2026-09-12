@@ -69,7 +69,7 @@ export async function sendEmailVerificationEmail(toEmail: string, code: string, 
             <td style="padding:32px 24px;">
               <p style="margin:0 0 16px;color:#FFFFFF;font-size:16px;">Hi ${firstName},</p>
               <p style="margin:0 0 24px;color:#B0B0B0;font-size:14px;line-height:22px;">
-                Welcome to Lekker Chat! Use the code below to verify your email address. This code expires in 10 minutes.
+                Welcome to Lekker Chat! Use the code below to verify your email address. This code expires in 15 minutes.
               </p>
               <table width="100%" cellpadding="0" cellspacing="0">
                 <tr>

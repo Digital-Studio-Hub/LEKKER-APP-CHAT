@@ -103,6 +103,9 @@ interface AuthContextValue {
   login: (data: LoginData) => Promise<{ success: boolean; message?: string }>;
   verifyWhatsApp: (data: WhatsAppVerifyData) => Promise<{ success: boolean; needsDisplayName?: boolean; message?: string }>;
   updateProfile: (updates: Partial<AuthUser>) => Promise<void>;
+  /** Apply a full server user payload (e.g. sync-lekker) without stripping verification fields. */
+  applyServerUser: (serverUser: Partial<AuthUser> & { id?: string }) => Promise<void>;
+  refreshUser: () => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -336,6 +339,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  async function applyServerUser(serverUser: Partial<AuthUser> & { id?: string }) {
+    if (!user && !serverUser.id) return;
+    const merged = enrichUser({ ...(user || {}), ...serverUser } as AuthUser);
+    setUser(merged);
+    await storeUser(merged);
+  }
+
+  async function refreshUser() {
+    try {
+      const baseUrl = getApiUrl();
+      const token = getAuthToken();
+      if (!token) return;
+      const res = await fetch(`${baseUrl}api/auth/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data?.user) {
+        const enriched = enrichUser(data.user);
+        setUser(enriched);
+        await storeUser(enriched);
+      }
+    } catch (e) {
+      console.warn("refreshUser failed:", e);
+    }
+  }
+
   async function logout() {
     try {
       const pushToken = await clearStoredPushToken();
@@ -364,6 +394,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       login,
       verifyWhatsApp,
       updateProfile,
+      applyServerUser,
+      refreshUser,
       logout,
     }),
     [user, isLoading],
