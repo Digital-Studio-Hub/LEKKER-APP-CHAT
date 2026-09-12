@@ -55,6 +55,7 @@ import { isSocialMediaAllowed, type AgeRangeSource } from "../shared/age-gate";
 import { requireSocialMediaAccess } from "./age-gate";
 import {
   isConnectConfigured,
+  LekkerConnectError,
   submitContactToLekker,
   getFeed as getConnectFeed,
   searchProducts,
@@ -65,6 +66,11 @@ import {
   requestPortalOtp,
   verifyPortalOtp,
   getPortalMe,
+  getBookingOfferings,
+  createBooking,
+  createBookingCheckout,
+  joinBookingWaitlist,
+  claimBookingHold,
 } from "./lekker-connect";
 import { normaliseMobile, phoneToPlaceholderEmail, phoneToUsername } from "../shared/mobile-utils";
 import type { User } from "@shared/schema";
@@ -3007,6 +3013,249 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(data);
     } catch (e: any) {
       res.status(502).json({ message: e.message || "Connect portal me error" });
+    }
+  });
+
+  // ── Bookings (events — Connect /bookings/*, retailChannel: chat) ─────────────
+
+  function honestBookingMessage(paymentStatus: unknown, totalCents: unknown): string {
+    if (paymentStatus === "paid") return "You're in — view tickets";
+    if (paymentStatus === "free" || (typeof totalCents === "number" && totalCents <= 0)) {
+      return "You're in";
+    }
+    return "Complete payment to confirm your tickets";
+  }
+
+  function handleConnectBookingError(e: unknown, res: Response, fallback: string) {
+    if (e instanceof LekkerConnectError) {
+      return res.status(e.status >= 400 && e.status < 600 ? e.status : 502).json({
+        message: e.message || fallback,
+        ...(e.body && typeof e.body === "object" ? (e.body as object) : {}),
+      });
+    }
+    const err = e as { message?: string };
+    return res.status(502).json({ message: err.message || fallback });
+  }
+
+  function inviteCodeFromBooking(req: Request, body: Record<string, unknown>): string | undefined {
+    const fromQuery = typeof req.query.invite === "string" ? req.query.invite.trim() : "";
+    const fromQueryCode = typeof req.query.inviteCode === "string" ? req.query.inviteCode.trim() : "";
+    const fromBody =
+      typeof body.inviteCode === "string"
+        ? body.inviteCode.trim()
+        : typeof body.invite === "string"
+          ? body.invite.trim()
+          : "";
+    return fromBody || fromQueryCode || fromQuery || undefined;
+  }
+
+  app.get("/api/connect/bookings/offerings", authMiddleware, connectGuard, async (req: Request, res: Response) => {
+    try {
+      if (!isConnectConfigured()) {
+        return res.status(503).json({ message: "Connect API not configured", offerings: [] });
+      }
+      const locationId = typeof req.query.locationId === "string" ? req.query.locationId : undefined;
+      const mode = typeof req.query.mode === "string" ? req.query.mode : undefined;
+      const data = await getBookingOfferings({ locationId, mode });
+      res.json({ offerings: data.offerings || [] });
+    } catch (e) {
+      handleConnectBookingError(e, res, "Connect bookings offerings error");
+    }
+  });
+
+  app.post("/api/connect/bookings", authMiddleware, connectGuard, async (req: Request, res: Response) => {
+    try {
+      if (!isConnectConfigured()) {
+        return res.status(503).json({ message: "Connect API not configured" });
+      }
+      const body = (req.body || {}) as Record<string, unknown>;
+      // Never trust client paymentStatus — Connect forces unpaid on public creates
+      delete body.paymentStatus;
+
+      const customerName = String(body.customerName || body.name || "").trim();
+      if (!customerName) {
+        return res.status(400).json({ message: "Name is required" });
+      }
+      const email = body.customerEmail || body.email;
+      const phone = body.customerPhone || body.phone;
+      if (!email && !phone) {
+        return res.status(400).json({ message: "Email or phone is required" });
+      }
+
+      const selectionId =
+        (typeof body.selectionId === "string" && body.selectionId) ||
+        (typeof body.networkSelectionId === "string" && body.networkSelectionId) ||
+        undefined;
+      const inviteCode = inviteCodeFromBooking(req, body);
+      const promoCode =
+        typeof body.promoCode === "string" && body.promoCode.trim()
+          ? body.promoCode.trim()
+          : undefined;
+
+      const result = await createBooking({
+        kind: body.kind as any,
+        offeringId: typeof body.offeringId === "string" ? body.offeringId : undefined,
+        selectionId,
+        ticketTypeId: typeof body.ticketTypeId === "string" ? body.ticketTypeId : undefined,
+        quantity: body.quantity != null ? Number(body.quantity) : undefined,
+        startsAt: typeof body.startsAt === "string" ? body.startsAt : undefined,
+        checkInDate: typeof body.checkInDate === "string" ? body.checkInDate : undefined,
+        checkOutDate: typeof body.checkOutDate === "string" ? body.checkOutDate : undefined,
+        guestCheckInTime: typeof body.guestCheckInTime === "string" ? body.guestCheckInTime : undefined,
+        guestCheckOutTime: typeof body.guestCheckOutTime === "string" ? body.guestCheckOutTime : undefined,
+        locationId: typeof body.locationId === "string" ? body.locationId : undefined,
+        customerName,
+        customerEmail: email ? String(email).trim() : undefined,
+        customerPhone: phone ? String(phone).trim() : undefined,
+        notes: body.notes ? String(body.notes).trim() : undefined,
+        promoCode,
+        inviteCode,
+        slotId: typeof body.slotId === "string" ? body.slotId : undefined,
+        source: selectionId ? undefined : "chat",
+        retailChannel: "chat",
+        channelMeta: { retailChannel: "chat", claimChannel: "chat" },
+      });
+
+      const paymentStatus = result.paymentStatus;
+      const totalCents = result.totalCents;
+      res.status(201).json({
+        bookingId: result.bookingId,
+        status: result.status,
+        totalCents,
+        paymentStatus,
+        startsAt: result.startsAt,
+        endsAt: result.endsAt,
+        checkInDate: result.checkInDate,
+        checkOutDate: result.checkOutDate,
+        tickets: result.tickets,
+        networkOrderId: result.networkOrderId,
+        hostWorkspaceId: result.hostWorkspaceId,
+        kind: result.kind || body.kind,
+        message: honestBookingMessage(paymentStatus, totalCents),
+      });
+    } catch (e) {
+      handleConnectBookingError(e, res, "Connect bookings create error");
+    }
+  });
+
+  app.post("/api/connect/bookings/checkout", authMiddleware, connectGuard, async (req: Request, res: Response) => {
+    try {
+      if (!isConnectConfigured()) {
+        return res.status(503).json({ message: "Connect API not configured" });
+      }
+      const body = (req.body || {}) as Record<string, unknown>;
+      delete body.paymentStatus;
+
+      const selectionId =
+        (typeof body.selectionId === "string" && body.selectionId) ||
+        (typeof body.networkSelectionId === "string" && body.networkSelectionId) ||
+        undefined;
+      const inviteCode = inviteCodeFromBooking(req, body);
+      const promoCode =
+        typeof body.promoCode === "string" && body.promoCode.trim()
+          ? body.promoCode.trim()
+          : undefined;
+
+      if (!body.bookingId) {
+        const customerName = String(body.customerName || body.name || "").trim();
+        if (!customerName) {
+          return res.status(400).json({ message: "Name is required" });
+        }
+        const email = body.customerEmail || body.email;
+        const phone = body.customerPhone || body.phone;
+        if (!email && !phone) {
+          return res.status(400).json({ message: "Email or phone is required" });
+        }
+      }
+
+      const result = await createBookingCheckout({
+        offeringId: typeof body.offeringId === "string" ? body.offeringId : undefined,
+        ticketTypeId: typeof body.ticketTypeId === "string" ? body.ticketTypeId : undefined,
+        quantity: body.quantity != null ? Number(body.quantity) : undefined,
+        bookingId: typeof body.bookingId === "string" ? body.bookingId : undefined,
+        selectionId,
+        slotId: typeof body.slotId === "string" ? body.slotId : undefined,
+        promoCode,
+        inviteCode,
+        customerName: body.customerName || body.name
+          ? String(body.customerName || body.name).trim()
+          : undefined,
+        customerEmail: body.customerEmail || body.email
+          ? String(body.customerEmail || body.email).trim()
+          : undefined,
+        customerPhone: body.customerPhone || body.phone
+          ? String(body.customerPhone || body.phone).trim()
+          : undefined,
+        notes: body.notes ? String(body.notes).trim() : undefined,
+        locationId: typeof body.locationId === "string" ? body.locationId : undefined,
+        source: selectionId ? undefined : "chat",
+        retailChannel: "chat",
+        channelMeta: { retailChannel: "chat", claimChannel: "chat" },
+        returnUrl: typeof body.returnUrl === "string" ? body.returnUrl : undefined,
+        cancelUrl: typeof body.cancelUrl === "string" ? body.cancelUrl : undefined,
+      });
+
+      res.json({
+        ...result,
+        paymentUrl: result.paymentUrl || result.checkoutUrl,
+        message: honestBookingMessage(result.paymentStatus, result.totalCents),
+      });
+    } catch (e) {
+      handleConnectBookingError(e, res, "Connect bookings checkout error");
+    }
+  });
+
+  app.post("/api/connect/bookings/offerings/:id/waitlist", authMiddleware, connectGuard, async (req: Request, res: Response) => {
+    try {
+      if (!isConnectConfigured()) {
+        return res.status(503).json({ message: "Connect API not configured" });
+      }
+      const body = (req.body || {}) as Record<string, unknown>;
+      const name = String(body.name || body.customerName || "").trim();
+      if (!name) {
+        return res.status(400).json({ message: "Name is required" });
+      }
+      const email = body.email || body.customerEmail;
+      const phone = body.phone || body.customerPhone;
+      if (!email && !phone) {
+        return res.status(400).json({ message: "Email or phone is required" });
+      }
+      const result = await joinBookingWaitlist(req.params.id, {
+        name,
+        email: email ? String(email).trim() : undefined,
+        phone: phone ? String(phone).trim() : undefined,
+        ticketTypeId: typeof body.ticketTypeId === "string" ? body.ticketTypeId : undefined,
+        quantity: body.quantity != null ? Number(body.quantity) : undefined,
+      });
+      res.status(201).json(result);
+    } catch (e) {
+      handleConnectBookingError(e, res, "Connect bookings waitlist error");
+    }
+  });
+
+  app.post("/api/connect/bookings/claim/:token", authMiddleware, connectGuard, async (req: Request, res: Response) => {
+    try {
+      if (!isConnectConfigured()) {
+        return res.status(503).json({ message: "Connect API not configured" });
+      }
+      const body = (req.body || {}) as Record<string, unknown>;
+      const hostWorkspaceId =
+        (typeof req.query.hostWorkspaceId === "string" && req.query.hostWorkspaceId.trim()) ||
+        (typeof req.query.workspaceId === "string" && req.query.workspaceId.trim()) ||
+        (typeof body.hostWorkspaceId === "string" && body.hostWorkspaceId.trim()) ||
+        (typeof body.workspaceId === "string" && body.workspaceId.trim()) ||
+        "";
+      if (!hostWorkspaceId || !/^[a-f0-9-]{36}$/i.test(hostWorkspaceId)) {
+        return res.status(400).json({
+          message: "hostWorkspaceId is required (query or body) — claim runs on the host workspace",
+        });
+      }
+      const result = await claimBookingHold(hostWorkspaceId, req.params.token, {
+        claimChannel: "chat",
+      });
+      res.json(result);
+    } catch (e) {
+      handleConnectBookingError(e, res, "Connect bookings claim error");
     }
   });
 
