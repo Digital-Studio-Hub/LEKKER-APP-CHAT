@@ -1,3 +1,13 @@
+/**
+ * Object storage for Lekker Chat attachments + profile photos.
+ *
+ * Cloud Run / local ADC (default):
+ *   Uses @google-cloud/storage with Application Default Credentials.
+ *   Set PRIVATE_OBJECT_DIR=/bucket/prefix and PUBLIC_OBJECT_SEARCH_PATHS.
+ *
+ * Optional Replit sidecar (legacy):
+ *   OBJECT_STORAGE_BACKEND=replit — only when developing on Replit.
+ */
 import { Storage, File } from "@google-cloud/storage";
 import { Response } from "express";
 import { randomUUID } from "crypto";
@@ -11,22 +21,51 @@ import {
 
 const REPLIT_SIDECAR_ENDPOINT = "http://127.0.0.1:1106";
 
-export const objectStorageClient = new Storage({
-  credentials: {
-    audience: "replit",
-    subject_token_type: "access_token",
-    token_url: `${REPLIT_SIDECAR_ENDPOINT}/token`,
-    type: "external_account",
-    credential_source: {
-      url: `${REPLIT_SIDECAR_ENDPOINT}/credential`,
-      format: {
-        type: "json",
-        subject_token_field_name: "access_token",
-      },
-    },
-    universe_domain: "googleapis.com",
+function useReplitSidecar(): boolean {
+  const forced = (process.env.OBJECT_STORAGE_BACKEND || "").toLowerCase();
+  if (forced === "gcs" || forced === "adc") return false;
+  if (forced === "replit") return true;
+  // Cloud Run always uses ADC
+  if (process.env.K_SERVICE) return false;
+  // Explicit Replit markers
+  if (process.env.REPL_ID || process.env.REPLIT_DEPLOYMENT) return true;
+  return false;
+}
+
+let _storage: Storage | null = null;
+
+export function getObjectStorageClient(): Storage {
+  if (_storage) return _storage;
+  if (useReplitSidecar()) {
+    _storage = new Storage({
+      credentials: {
+        audience: "replit",
+        subject_token_type: "access_token",
+        token_url: `${REPLIT_SIDECAR_ENDPOINT}/token`,
+        type: "external_account",
+        credential_source: {
+          url: `${REPLIT_SIDECAR_ENDPOINT}/credential`,
+          format: {
+            type: "json",
+            subject_token_field_name: "access_token",
+          },
+        },
+        universe_domain: "googleapis.com",
+      } as any,
+      projectId: "",
+    });
+  } else {
+    // Application Default Credentials (Cloud Run SA / gcloud auth application-default)
+    _storage = new Storage();
+  }
+  return _storage;
+}
+
+/** @deprecated use getObjectStorageClient() — kept for any external imports */
+export const objectStorageClient = new Proxy({} as Storage, {
+  get(_target, prop, receiver) {
+    return Reflect.get(getObjectStorageClient() as any, prop, receiver);
   },
-  projectId: "",
 });
 
 export class ObjectNotFoundError extends Error {
@@ -47,13 +86,12 @@ export class ObjectStorageService {
         pathsStr
           .split(",")
           .map((path) => path.trim())
-          .filter((path) => path.length > 0)
-      )
+          .filter((path) => path.length > 0),
+      ),
     );
     if (paths.length === 0) {
       throw new Error(
-        "PUBLIC_OBJECT_SEARCH_PATHS not set. Create a bucket in 'Object Storage' " +
-          "tool and set PUBLIC_OBJECT_SEARCH_PATHS env var (comma-separated paths)."
+        "PUBLIC_OBJECT_SEARCH_PATHS not set. Example: /lekkernetworkbucket/lekker-chat/public",
       );
     }
     return paths;
@@ -63,18 +101,18 @@ export class ObjectStorageService {
     const dir = process.env.PRIVATE_OBJECT_DIR || "";
     if (!dir) {
       throw new Error(
-        "PRIVATE_OBJECT_DIR not set. Create a bucket in 'Object Storage' " +
-          "tool and set PRIVATE_OBJECT_DIR env var."
+        "PRIVATE_OBJECT_DIR not set. Example: /lekkernetworkbucket/lekker-chat/private",
       );
     }
     return dir;
   }
 
   async searchPublicObject(filePath: string): Promise<File | null> {
+    const storage = getObjectStorageClient();
     for (const searchPath of this.getPublicObjectSearchPaths()) {
       const fullPath = `${searchPath}/${filePath}`;
       const { bucketName, objectName } = parseObjectPath(fullPath);
-      const bucket = objectStorageClient.bucket(bucketName);
+      const bucket = storage.bucket(bucketName);
       const file = bucket.file(objectName);
       const [exists] = await file.exists();
       if (exists) {
@@ -138,7 +176,7 @@ export class ObjectStorageService {
     }
     const objectEntityPath = `${entityDir}${entityId}`;
     const { bucketName, objectName } = parseObjectPath(objectEntityPath);
-    const bucket = objectStorageClient.bucket(bucketName);
+    const bucket = getObjectStorageClient().bucket(bucketName);
     const objectFile = bucket.file(objectName);
     const [exists] = await objectFile.exists();
     if (!exists) {
@@ -166,7 +204,7 @@ export class ObjectStorageService {
 
   async trySetObjectEntityAclPolicy(
     rawPath: string,
-    aclPolicy: ObjectAclPolicy
+    aclPolicy: ObjectAclPolicy,
   ): Promise<string> {
     const normalizedPath = this.normalizeObjectEntityPath(rawPath);
     if (!normalizedPath.startsWith("/")) {
@@ -221,25 +259,37 @@ async function signObjectURL({
   method: "GET" | "PUT" | "DELETE" | "HEAD";
   ttlSec: number;
 }): Promise<string> {
-  const request = {
-    bucket_name: bucketName,
-    object_name: objectName,
-    method,
-    expires_at: new Date(Date.now() + ttlSec * 1000).toISOString(),
-  };
-  const response = await fetch(
-    `${REPLIT_SIDECAR_ENDPOINT}/object-storage/signed-object-url`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(request),
-    }
-  );
-  if (!response.ok) {
-    throw new Error(
-      `Failed to sign object URL, errorcode: ${response.status}, make sure you're running on Replit`
+  if (useReplitSidecar()) {
+    const request = {
+      bucket_name: bucketName,
+      object_name: objectName,
+      method,
+      expires_at: new Date(Date.now() + ttlSec * 1000).toISOString(),
+    };
+    const response = await fetch(
+      `${REPLIT_SIDECAR_ENDPOINT}/object-storage/signed-object-url`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+      },
     );
+    if (!response.ok) {
+      throw new Error(
+        `Failed to sign object URL via Replit sidecar: ${response.status}`,
+      );
+    }
+    const { signed_url: signedURL } = await response.json();
+    return signedURL;
   }
-  const { signed_url: signedURL } = await response.json();
+
+  const action =
+    method === "PUT" ? "write" : method === "DELETE" ? "delete" : "read";
+  const file = getObjectStorageClient().bucket(bucketName).file(objectName);
+  const [signedURL] = await file.getSignedUrl({
+    version: "v4",
+    action,
+    expires: Date.now() + ttlSec * 1000,
+  });
   return signedURL;
 }
