@@ -34,11 +34,13 @@ chat.lekker.network  (Cloud Run Express + Neon Lekker_Chat)
     ├── Directory + enquiries          → Network /api/v1/*          ✅
     ├── Mail tab                       → Network mobile email       ✅
     ├── Software tab                   → Network SSO WebView        ⚠️ interim
-    ├── Assistant (Cledwyn brand)      → OpenRouter Grok mirror     ❌ diverge
+    ├── Assistant (Cledwyn)            → Network workspace proxy + xAI generalist ✅
     └── Connect proxies                → unused by app UI           ⚠️
 ```
 
 Chat was built as a **standalone Replit messaging app**, then bolted onto Network. Marketplace is a **Connect skin**; Chat is still a **parallel stack** with Network adapters.
+
+**Full audit (synergy with Network + Marketplace):** [ECOSYSTEM-SYNERGY-AUDIT.md](./ECOSYSTEM-SYNERGY-AUDIT.md)
 
 ---
 
@@ -48,7 +50,7 @@ Chat was built as a **standalone Replit messaging app**, then bolted onto Networ
 |---|------|--------------------|------------|----------|--------|
 | 1 | Transactional email | Lekker Mail / Zeptomail | Replit Gmail connector | Critical | **Done** (`15fc50c`) |
 | 2 | Object storage | GCS ADC on Cloud Run | Replit `127.0.0.1:1106` sidecar | Critical | **Done** (`15fc50c`) |
-| 3 | Cledwyn | Network workspace agent (`XAI`, tools) | Verified users → Network `/api/v1/cledwyn/chat`; others → generalist OpenRouter | Critical | **Done** (needs Network publish + OpenRouter key for consumers) |
+| 3 | Cledwyn | Network workspace agent (`XAI`, tools) | Verified → Network `/api/v1/cledwyn/chat`; others → xAI generalist | Critical | **Done** (needs Network publish) |
 | 4 | Identity SoT | Network users / workspaces | Own `users` + sync-lekker | High | Open |
 | 5 | Directory → enquiry UX | Privacy-first Instant Match | Anonymous enquire default | High | **Done** |
 | 5b | Phonebook → chat / invite | Match registered phones; WA deep-link invite | On-app DM + multi-select / invite-all WA | High | **Done** |
