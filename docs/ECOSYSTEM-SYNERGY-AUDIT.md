@@ -133,11 +133,12 @@ Effort: **S** &lt;1w · **M** 1–3w · **L** multi-sprint
 
 | Item | Current | Synergy opportunity | P | E |
 |------|---------|---------------------|---|---|
-| iOS bundle id | `app.replit.lekkerchatios` | `com.lekker.chat` (align Android) — App Store migration plan | P1 | M |
-| Duplicate roots | Root `routes.ts` (~1.9k), loose `settings.tsx`, `(tabs)/` | Delete or quarantine; single `server/` + `app/` SoT | P1 | S |
-| Docs | HANDOVER / LEKKER-CHAT still mention Replit URL | Cloud Run–only truth | P2 | S |
-| Dev default URL | `lekkerNetwork.ts` still has old Replit fallback host | Default to `https://lekker.network` always | P1 | S |
-| Store builds | Client features ahead of last Play build | EAS from `206246e+` | P0 | S |
+| iOS bundle id | **Mismatch:** `app.json` = `app.replit.lekkerchatios` (build 14); local `ios/.../project.pbxproj` = `com.lekker.chat` | Make Expo SoT `com.lekker.chat`; next `expo prebuild` will overwrite Xcode unless fixed first — ASC migration plan | P1 | M |
+| EAS projectId | Real UUID in `app.json` (`385aa478-…`) | HANDOVER “placeholder projectId” note is **stale** — refresh docs | P2 | S |
+| Duplicate roots | Root `routes.ts` (~1.9k lines, **not mounted**), loose `settings.tsx`, `(tabs)/`, `replit_integrations/` | Delete or quarantine; risk of editing dead code | P1 | S |
+| Docs | HANDOVER / AGENTS / GOOGLE_PLAY still cite Replit API | Cloud Run–only truth (`eas.json` already correct) | P2 | S |
+| Dev default URL | `lekkerNetwork.ts` still has old Replit `.spock.replit.dev` fallback when not production | Default to `https://lekker.network` always | P1 | S |
+| Store builds | Client features ahead of last Play build | EAS from `206246e+` / `0660e40+` | P0 | S |
 
 ---
 
@@ -155,10 +156,11 @@ Effort: **S** &lt;1w · **M** 1–3w · **L** multi-sprint
 
 ## 5. Recommended sequence (synergy-first)
 
-### Now (ops — no big code)
+### Now (ops — no big code) — **P0**
 1. **Publish Network** `main` (Cledwyn admin access, first-name enquire mask).  
-2. **EAS Android (+ iOS) build** from Chat `206246e+`.  
-3. Device QA: enquire loop, phonebook invite, Assistant modes, photo/email.
+2. **EAS Android (+ iOS) build** from Chat `0660e40+`.  
+3. **Production E2E:** Directory → anonymous enquire → Network/Marketplace Leads reply → Chat enquiry thread → reveal contact.  
+4. Device QA: phonebook invite (on-app DM vs WA), Assistant modes (workspace vs generalist), profile photo/email.
 
 ### Next sprint (P0–P1 synergy)
 1. Fix Chat `LEKKER_API_BASE` hard-coded Replit fallback → always production Network.  
@@ -208,9 +210,21 @@ Effort: **S** &lt;1w · **M** 1–3w · **L** multi-sprint
 ## 8. Decision prompts for Delano
 
 1. **Identity:** Keep dual DB long-term, or commit to Network-id-first migration this quarter?  
-2. **Commerce:** Native Events in Chat next, or deepen enquire→DM loop first?  
+2. **Commerce:** Native Events in Chat next, or deepen enquire→DM / push-on-reply loop first?  
 3. **Cledwyn:** Invest in Network mobile tool parity, or accept advisor-lite + Software for power users?  
-4. **iOS bundle id:** Schedule App Store migration now or after Android QA stabilises?
+4. **iOS bundle id:** Fix `app.json` before next prebuild (Xcode already `com.lekker.chat`) — schedule ASC migration now or after Android QA?
+
+---
+
+## 9. Explore-pass addenda (2026-09-12)
+
+Additional evidence from a full codebase explore (aligned with this audit):
+
+- Chat DMs are intentionally **not** Network CRM threads; enquire leads are the cross-product conversation SoT.  
+- Connect checkout proxies + `lib/connect-bookings.ts` exist with `retailChannel=chat` defaults — **zero `app/` imports** (dead synergy).  
+- Instant Match (`marketplace_leads_enabled`) vs Chat directory (`directory_listed`) must stay separate consent models.  
+- PayLekker belongs only via Connect — never a Chat-local gateway.  
+- 12‑month vision: Chat as phone-native front door; Network remains SoT for businesses, CRM, payments, and AI.
 
 ---
 
