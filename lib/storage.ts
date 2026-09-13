@@ -102,9 +102,14 @@ export interface Conversation {
 
 export interface CledwynMessage {
   id: string;
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "notification";
   content: string;
   timestamp: string;
+  /** Network unified notification id — for dedupe */
+  notificationId?: string;
+  source?: string;
+  href?: string;
+  title?: string;
 }
 
 export interface FeedPost {

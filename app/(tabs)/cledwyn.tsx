@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { fetch } from "expo/fetch";
+import { router, useFocusEffect } from "expo-router";
 import { getAuthToken } from "@/lib/auth-token";
 import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
@@ -21,6 +22,8 @@ import { isSmallScreen, fontScale, responsiveMaxBubbleWidth } from "@/lib/respon
 import { getApiUrl } from "@/lib/query-client";
 import { storage, CledwynMessage } from "@/lib/storage";
 import { useAuth } from "@/lib/auth-context";
+import { fetchLekkerSoftwareUrl } from "@/lib/lekker-session";
+import { LEKKER_NETWORK_URL } from "@/constants/ecosystem";
 
 const NETWORK_SESSION_KEY = "lekker_cledwyn_network_session";
 
@@ -57,8 +60,56 @@ const typingStyles = StyleSheet.create({
   dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.primary },
 });
 
-function MessageBubble({ message }: { message: CledwynMessage }) {
+async function openWorkspaceCledwyn(hint?: string) {
+  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  try {
+    const url = await fetchLekkerSoftwareUrl("/app/cledwyn");
+    router.push({
+      pathname: "/in-app-browser",
+      params: {
+        url,
+        title: "Cledwyn AI",
+        ...(hint ? { hint } : {}),
+      },
+    });
+  } catch {
+    router.push({
+      pathname: "/in-app-browser",
+      params: { url: `${LEKKER_NETWORK_URL}/app/cledwyn`, title: "Cledwyn AI" },
+    });
+  }
+}
+
+function MessageBubble({
+  message,
+  onOpenNotif,
+}: {
+  message: CledwynMessage;
+  onOpenNotif?: (msg: CledwynMessage) => void;
+}) {
   const isUser = message.role === "user";
+  const isNotif = message.role === "notification";
+
+  if (isNotif) {
+    return (
+      <Pressable
+        onPress={() => onOpenNotif?.(message)}
+        style={({ pressed }) => [bubbleStyles.notifWrap, pressed && { opacity: 0.85 }]}
+      >
+        <View style={bubbleStyles.botAvatar}>
+          <Ionicons name="sparkles" size={16} color={Colors.background} />
+        </View>
+        <View style={bubbleStyles.notifBubble}>
+          <Text style={bubbleStyles.notifLabel}>Cledwyn · {message.source || "alert"}</Text>
+          {message.title ? <Text style={bubbleStyles.notifTitle}>{message.title}</Text> : null}
+          <Text style={bubbleStyles.notifText}>{message.content}</Text>
+          {message.href ? (
+            <Text style={bubbleStyles.notifLink}>Open in Software →</Text>
+          ) : null}
+        </View>
+      </Pressable>
+    );
+  }
 
   return (
     <View style={[bubbleStyles.container, isUser ? bubbleStyles.userContainer : bubbleStyles.assistantContainer]}>
@@ -95,6 +146,33 @@ const bubbleStyles = StyleSheet.create({
   text: { fontFamily: "Poppins_400Regular", fontSize: fontScale(15), lineHeight: fontScale(22) },
   userText: { color: Colors.background },
   assistantText: { color: Colors.text },
+  notifWrap: {
+    paddingHorizontal: 16,
+    paddingVertical: 4,
+    flexDirection: "row",
+    gap: 8,
+    alignItems: "flex-end",
+  },
+  notifBubble: {
+    maxWidth: responsiveMaxBubbleWidth(),
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: "rgba(245,184,0,0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(245,184,0,0.35)",
+    gap: 2,
+  },
+  notifLabel: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 10,
+    color: Colors.primary,
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  },
+  notifTitle: { fontFamily: "Poppins_600SemiBold", fontSize: fontScale(14), color: Colors.text },
+  notifText: { fontFamily: "Poppins_400Regular", fontSize: fontScale(13), color: Colors.textSecondary, lineHeight: 18 },
+  notifLink: { fontFamily: "Poppins_600SemiBold", fontSize: 12, color: Colors.primary, marginTop: 4 },
 });
 
 export default function CledwynScreen() {
@@ -127,6 +205,74 @@ export default function CledwynScreen() {
     }
   }, []);
 
+  const workspaceMode =
+    !!user?.lekkerNetworkAccess && !!user?.isVerifiedLekkerpreneur && !!user?.lekkerWorkspaceId;
+
+  const mergeNotifications = useCallback(async () => {
+    if (!workspaceMode) return;
+    try {
+      const token = getAuthToken();
+      const res = await fetch(`${getApiUrl()}api/cledwyn/notifications?limit=25`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      const items = Array.isArray(data.items) ? data.items : [];
+      if (!items.length) return;
+
+      setMessages((prev) => {
+        const existing = new Set(
+          prev.filter((m) => m.role === "notification" && m.notificationId).map((m) => m.notificationId!),
+        );
+        const incoming: CledwynMessage[] = [];
+        for (const n of items) {
+          const nid = String(n.id || "");
+          if (!nid || existing.has(nid)) continue;
+          incoming.push({
+            id: `notif-${nid}`,
+            role: "notification",
+            notificationId: nid,
+            title: n.title || undefined,
+            content: n.message || n.title || "Workspace update",
+            source: n.source || "network",
+            href: n.href || undefined,
+            timestamp: n.createdAt || new Date().toISOString(),
+          });
+        }
+        if (!incoming.length) return prev;
+        const next = [...prev, ...incoming].sort(
+          (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+        );
+        // Cap stored history
+        const trimmed = next.length > 200 ? next.slice(next.length - 200) : next;
+        storage.saveCledwynMessages(trimmed);
+        return trimmed;
+      });
+    } catch {
+      /* offline — ignore */
+    }
+  }, [workspaceMode]);
+
+  useFocusEffect(
+    useCallback(() => {
+      mergeNotifications();
+      if (!workspaceMode) return;
+      const t = setInterval(mergeNotifications, 30000);
+      return () => clearInterval(t);
+    }, [mergeNotifications, workspaceMode]),
+  );
+
+  async function openNotif(msg: CledwynMessage) {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const next = msg.href?.startsWith("/app") ? msg.href : "/app";
+    try {
+      const url = await fetchLekkerSoftwareUrl(next);
+      router.push({ pathname: "/in-app-browser", params: { url, title: msg.title || "lekker.network" } });
+    } catch {
+      router.push("/(tabs)/software");
+    }
+  }
+
   async function handleSend() {
     const text = inputText.trim();
     if (!text || isStreaming) return;
@@ -149,7 +295,9 @@ export default function CledwynScreen() {
     try {
       const baseUrl = getApiUrl();
       const chatHistory = [
-        ...currentMessages.map((m) => ({ role: m.role, content: m.content })),
+        ...currentMessages
+          .filter((m) => m.role === "user" || m.role === "assistant")
+          .map((m) => ({ role: m.role, content: m.content })),
         { role: "user", content: text },
       ];
 
@@ -293,22 +441,39 @@ export default function CledwynScreen() {
           <View>
             <Text style={styles.headerTitle}>Cledwyn AI</Text>
             <Text style={styles.headerSubtitle}>
-              {user?.isVerifiedLekkerpreneur && user?.lekkerWorkspaceId
-                ? "Your business AI on lekker.network"
+              {workspaceMode
+                ? "Workspace mode — alerts + business help"
                 : "Your AI assistant"}
             </Text>
           </View>
         </View>
-        <Pressable onPress={handleClearChat} style={styles.clearButton}>
-          <Ionicons name="trash-outline" size={20} color={Colors.textMuted} />
-        </Pressable>
+        <View style={styles.headerRight}>
+          {workspaceMode ? (
+            <Pressable onPress={() => openWorkspaceCledwyn()} style={styles.handoffButton} hitSlop={8}>
+              <Ionicons name="grid-outline" size={18} color={Colors.primary} />
+            </Pressable>
+          ) : null}
+          <Pressable onPress={handleClearChat} style={styles.clearButton}>
+            <Ionicons name="trash-outline" size={20} color={Colors.textMuted} />
+          </Pressable>
+        </View>
       </View>
+
+      {workspaceMode ? (
+        <Pressable style={styles.banner} onPress={() => openWorkspaceCledwyn()}>
+          <Ionicons name="sparkles" size={14} color={Colors.primary} />
+          <Text style={styles.bannerText}>
+            Full website & workspace tools → Software Cledwyn. Alerts land here as Cledwyn.
+          </Text>
+          <Ionicons name="chevron-forward" size={14} color={Colors.textMuted} />
+        </Pressable>
+      ) : null}
 
       <FlatList
         ref={listRef}
         data={messages}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => <MessageBubble message={item} />}
+        renderItem={({ item }) => <MessageBubble message={item} onOpenNotif={openNotif} />}
         ListFooterComponent={showTyping ? <TypingIndicator /> : null}
         onContentSizeChange={() => scrollToLatest(false)}
         keyboardDismissMode="interactive"
@@ -321,7 +486,9 @@ export default function CledwynScreen() {
             </View>
             <Text style={styles.emptyTitle}>Cledwyn AI</Text>
             <Text style={styles.emptySubtitle}>
-              Ask Cledwyn about business strategy, quotes, marketing, or anything else
+              {workspaceMode
+                ? "Ask about your business — or wait for workspace alerts from lekker.network"
+                : "Ask Cledwyn about business strategy, quotes, marketing, or anything else"}
             </Text>
           </View>
         }
@@ -395,11 +562,38 @@ const styles = StyleSheet.create({
     fontSize: fontScale(12),
     color: Colors.textSecondary,
   },
+  headerRight: { flexDirection: "row", alignItems: "center" },
+  handoffButton: {
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   clearButton: {
     width: 44,
     height: 44,
     alignItems: "center",
     justifyContent: "center",
+  },
+  banner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginHorizontal: 12,
+    marginBottom: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: "rgba(245,184,0,0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(245,184,0,0.25)",
+  },
+  bannerText: {
+    flex: 1,
+    fontFamily: "Poppins_400Regular",
+    fontSize: 11,
+    color: Colors.textSecondary,
+    lineHeight: 15,
   },
   messagesList: {
     paddingVertical: 8,

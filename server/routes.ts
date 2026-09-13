@@ -39,6 +39,7 @@ import {
   fetchMarketplaceLeadDetail,
   sendMarketplaceLeadMessage,
   updateMarketplaceLeadStatus,
+  fetchMobileNotifications,
   LekkerNetworkApiError,
   type LekkerNetworkEntry,
   type WorkspaceDetail,
@@ -2659,7 +2660,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const emailStatus = await fetchWorkspaceEmailStatus(profileData.lekkerWorkspaceId);
         workspaceEmailActive = emailStatus.active;
       }
-      const updated = await storage.updateUser(user.id, { ...profileData, workspaceEmailActive });
+      // Sync success → turn on Cledwyn workspace mode (satellite agent + Network alerts).
+      const updated = await storage.updateUser(user.id, {
+        ...profileData,
+        workspaceEmailActive,
+        lekkerNetworkAccess: true,
+      });
 
       await storage.logAuthEvent("lekker_network_sync", user.id, req.ip, undefined, `Synced with: ${match.businessName} (${match.id})`);
 
@@ -2744,15 +2750,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  /** Network unified notifications for Cledwyn thread (workspace mode). */
+  app.get("/api/cledwyn/notifications", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const user = await storage.getUser(req.user!.userId);
+      if (
+        !user?.lekkerNetworkAccess ||
+        !user.isVerifiedLekkerpreneur ||
+        !user.lekkerNetworkId ||
+        !user.lekkerWorkspaceId
+      ) {
+        return res.json({ success: true, items: [] });
+      }
+      if (!isLekkerNetworkConfigured()) {
+        return res.status(503).json({ success: false, message: "lekker.network unavailable" });
+      }
+      const data = await fetchMobileNotifications({
+        userId: user.lekkerNetworkId,
+        workspaceId: user.lekkerWorkspaceId,
+        limit: req.query.limit != null ? Number(req.query.limit) : 25,
+      });
+      return res.json({ success: true, items: data?.items || [] });
+    } catch (error: any) {
+      console.error("Cledwyn notifications error:", error);
+      const status = error instanceof LekkerNetworkApiError ? error.status : 500;
+      res.status(status).json({
+        success: false,
+        message: error?.message || "Failed to load notifications",
+        items: [],
+      });
+    }
+  });
+
   /**
-   * Cledwyn Assistant — always Network SoT (no local LLM on Chat Cloud Run).
-   * - Verified lekkerpreneur with workspace → Network workspace advisor
+   * Cledwyn AI — always Network SoT (no local LLM on Chat Cloud Run).
+   * - Synced lekkerpreneur + lekkerNetworkAccess ON → Network workspace (satellite) Cledwyn
    * - Everyone else (or workspace failure) → Network generalist / consumer Cledwyn
    * Always responds as SSE for the mobile client.
    */
   app.post("/api/cledwyn/chat", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { messages, sessionId: bodySessionId } = req.body || {};
+      const { messages, sessionId: bodySessionId, lekkerNetworkAccess: bodyAccess } = req.body || {};
       const userId = req.user!.userId;
       const userProfile = await storage.getUser(userId);
 
@@ -2770,7 +2808,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
+      // Body may be ahead of DB briefly after toggle; prefer stored profile, allow body true only if synced.
+      const accessOn =
+        userProfile?.lekkerNetworkAccess === true ||
+        (bodyAccess === true &&
+          !!userProfile?.isVerifiedLekkerpreneur &&
+          !!userProfile?.lekkerWorkspaceId);
+
       const useWorkspaceCledwyn =
+        accessOn &&
         !!userProfile?.isVerifiedLekkerpreneur &&
         !!userProfile?.lekkerNetworkId &&
         !!userProfile?.lekkerWorkspaceId;

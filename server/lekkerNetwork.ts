@@ -607,6 +607,33 @@ export async function* streamNetworkGeneralistCledwyn(input: {
   yield* parseNetworkCledwynSse(res);
 }
 
+/** Unified workspace notifications for Chat Cledwyn thread. */
+export async function fetchMobileNotifications(input: {
+  userId: string;
+  workspaceId: string;
+  limit?: number;
+}) {
+  const qs = new URLSearchParams({
+    userId: input.userId,
+    workspaceId: input.workspaceId,
+    limit: String(input.limit || 25),
+  });
+  return lekkerMobileFetchStrict<{
+    success?: boolean;
+    items?: Array<{
+      id: string;
+      source: string;
+      type: string;
+      title: string;
+      message: string;
+      isRead: boolean;
+      createdAt: string;
+      href: string;
+    }>;
+    total?: number;
+  }>(`/api/v1/mobile/notifications?${qs}`);
+}
+
 /** Provider Marketplace Leads inbox (Network SoT). */
 export async function fetchMarketplaceLeads(input: {
   userId: string;

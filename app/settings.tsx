@@ -1073,12 +1073,19 @@ export default function SettingsScreen() {
           <Text style={styles.sectionTitle}>Lekker Network</Text>
           <View style={styles.sectionCard}>
             <View style={styles.optionRow}>
-              <Ionicons name="globe-outline" size={20} color={Colors.textSecondary} />
-              <Text style={styles.optionLabel}>Network Access</Text>
+              <Ionicons name="sparkles-outline" size={20} color={Colors.textSecondary} />
+              <Text style={styles.optionLabel}>Cledwyn workspace mode</Text>
               <Switch
                 value={!!user?.lekkerNetworkAccess}
                 onValueChange={async (val) => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  if (val && !user?.isVerifiedLekkerpreneur) {
+                    Alert.alert(
+                      "Sync required",
+                      "Verify with Lekker Network first so Cledwyn can open your workspace.",
+                    );
+                    return;
+                  }
                   await updateProfile({ lekkerNetworkAccess: val });
                 }}
                 trackColor={{ false: Colors.border, true: Colors.primary }}
@@ -1086,7 +1093,10 @@ export default function SettingsScreen() {
               />
             </View>
           </View>
-          <Text style={styles.toggleHint}>Enable to browse lekker.network directly in the app</Text>
+          <Text style={styles.toggleHint}>
+            When on, Cledwyn AI uses your lekker.network workspace (alerts + guidance). Heavy edits open
+            full Cledwyn in Software. When off, Cledwyn stays a general assistant.
+          </Text>
         </View>
 
         <View style={styles.section}>
