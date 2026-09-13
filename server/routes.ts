@@ -3799,13 +3799,119 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json({ success: true, notified: false, reason: "no_chat_user" });
       }
 
-      await notifyUserPush(user.id, businessName, preview, {
-        type: "enquiry_reply",
-        leadId,
-      });
+      await notifyUserPush(
+        user.id,
+        businessName,
+        preview,
+        {
+          type: "enquiry_reply",
+          leadId,
+        },
+        { category: "enquiries" },
+      );
       return res.json({ success: true, notified: true, userId: user.id });
     } catch (e) {
       console.error("[enquiry-reply-notify]", e);
+      return res.status(500).json({ success: false, message: "Failed" });
+    }
+  });
+
+  /** Per-category Expo notification preferences */
+  app.get("/api/notifications/preferences", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const user = await storage.getUser(req.user!.userId);
+      if (!user) return res.status(401).json({ success: false, message: "Unauthorized" });
+      const { parseNotificationPreferences, NOTIFICATION_CATEGORY_META } = await import(
+        "@shared/notification-prefs"
+      );
+      return res.json({
+        success: true,
+        notificationsEnabled: user.notificationsEnabled !== false,
+        presence: user.presence || "online",
+        preferences: parseNotificationPreferences(user.notificationPreferences),
+        categories: NOTIFICATION_CATEGORY_META,
+      });
+    } catch (e) {
+      console.error("[notif prefs get]", e);
+      res.status(500).json({ success: false, message: "Failed" });
+    }
+  });
+
+  app.put("/api/notifications/preferences", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { notificationPreferencesSchema, parseNotificationPreferences, stringifyNotificationPreferences } =
+        await import("@shared/notification-prefs");
+      const user = await storage.getUser(req.user!.userId);
+      if (!user) return res.status(401).json({ success: false, message: "Unauthorized" });
+
+      const parsed = notificationPreferencesSchema.safeParse(req.body?.preferences || req.body || {});
+      if (!parsed.success) {
+        return res.status(400).json({ success: false, message: "Invalid preferences" });
+      }
+      const next = {
+        ...parseNotificationPreferences(user.notificationPreferences),
+        ...parsed.data,
+      };
+      await storage.updateUser(req.user!.userId, {
+        notificationPreferences: stringifyNotificationPreferences(next),
+      } as any);
+      return res.json({ success: true, preferences: next });
+    } catch (e) {
+      console.error("[notif prefs put]", e);
+      res.status(500).json({ success: false, message: "Failed" });
+    }
+  });
+
+  /**
+   * Network → Chat Expo bridge for workspace events (leads, orders, mail, etc.).
+   * Auth: LEKKER_NETWORK_API_KEY. Body: { lekkerNetworkId | phone | email, title, body, type? }
+   */
+  app.post("/api/internal/workspace-notify", async (req: Request, res: Response) => {
+    try {
+      const key = req.headers["x-api-key"];
+      const expected = process.env.LEKKER_NETWORK_API_KEY;
+      if (!expected || !key || key !== expected) {
+        return res.status(401).json({ success: false, message: "Unauthorized" });
+      }
+      const title = String(req.body?.title || "Lekker Network").trim();
+      const body = String(req.body?.body || req.body?.message || "").trim();
+      if (!body) {
+        return res.status(400).json({ success: false, message: "body required" });
+      }
+      const lekkerNetworkId =
+        typeof req.body?.lekkerNetworkId === "string" ? req.body.lekkerNetworkId.trim() : "";
+      const phone = typeof req.body?.phone === "string" ? req.body.phone.trim() : "";
+      const email =
+        typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
+      const chatUserId =
+        typeof req.body?.chatUserId === "string" ? req.body.chatUserId.trim() : "";
+
+      let user =
+        (chatUserId ? await storage.getUser(chatUserId) : null) ||
+        (lekkerNetworkId ? await storage.getUserByLekkerNetworkId(lekkerNetworkId) : null) ||
+        (phone ? await storage.getUserByPhone(phone) : null) ||
+        (email ? await storage.getUserByEmail(email) : null);
+
+      if (!user) {
+        return res.json({ success: true, notified: false, reason: "user_not_found" });
+      }
+
+      const eventType = String(req.body?.type || "workspace").trim() || "workspace";
+      await notifyUserPush(
+        user.id,
+        title,
+        body,
+        {
+          type: "workspace",
+          category: "workspace",
+          eventType,
+          ...(typeof req.body?.href === "string" ? { href: req.body.href.slice(0, 500) } : {}),
+        },
+        { category: "workspace" },
+      );
+      return res.json({ success: true, notified: true, userId: user.id });
+    } catch (e) {
+      console.error("[workspace-notify]", e);
       return res.status(500).json({ success: false, message: "Failed" });
     }
   });

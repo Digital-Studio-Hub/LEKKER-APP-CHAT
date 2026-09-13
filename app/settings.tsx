@@ -23,6 +23,14 @@ import Colors from "@/constants/colors";
 import { fontScale } from "@/lib/responsive";
 import { useAuth } from "@/lib/auth-context";
 import { requestNotificationPermissions, areNotificationsEnabled, disableNotifications, canAskForNotifications, registerDevicePushToken } from "@/lib/notifications";
+import {
+  fetchNotificationPreferences,
+  saveNotificationPreferences,
+  NOTIFICATION_CATEGORY_META,
+  DEFAULT_NOTIFICATION_PREFERENCES,
+  type NotificationPreferences,
+  type NotificationCategory,
+} from "@/lib/notification-prefs-api";
 import { requestLocationPermissions, isLocationEnabled, getLastLocation, disableLocation, UserLocation } from "@/lib/location";
 import { fetchBlockedUsers, unblockUserServer, type BlockedUserRow } from "@/lib/safety-api";
 import {
@@ -74,6 +82,9 @@ export default function SettingsScreen() {
   );
   const [isEditingAutoReply, setIsEditingAutoReply] = useState(false);
   const [notificationsOn, setNotificationsOn] = useState(false);
+  const [notifPrefs, setNotifPrefs] = useState<NotificationPreferences>({
+    ...DEFAULT_NOTIFICATION_PREFERENCES,
+  });
   const [locationOn, setLocationOn] = useState(false);
   const [lastLocation, setLastLocation] = useState<UserLocation | null>(null);
   const [blockedUsers, setBlockedUsers] = useState<BlockedUserRow[]>([]);
@@ -103,11 +114,13 @@ export default function SettingsScreen() {
 
   useEffect(() => {
     async function loadPermissions() {
-      const [notif, loc] = await Promise.all([
+      const [notif, loc, prefsPayload] = await Promise.all([
         areNotificationsEnabled(),
         isLocationEnabled(),
+        fetchNotificationPreferences(),
       ]);
-      setNotificationsOn(notif);
+      setNotificationsOn(notif && prefsPayload.notificationsEnabled);
+      setNotifPrefs(prefsPayload.preferences);
       setLocationOn(loc);
       if (loc) {
         const l = await getLastLocation();
@@ -118,6 +131,19 @@ export default function SettingsScreen() {
     loadBlockedUsers();
     loadLinkedEmails();
   }, []);
+
+  async function toggleNotifCategory(id: NotificationCategory, value: boolean) {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const next = { ...notifPrefs, [id]: value };
+    setNotifPrefs(next);
+    try {
+      const saved = await saveNotificationPreferences({ [id]: value });
+      setNotifPrefs(saved);
+    } catch {
+      setNotifPrefs(notifPrefs);
+      Alert.alert("Couldn’t save", "Check your connection and try again.");
+    }
+  }
 
   async function loadLinkedEmails() {
     setIsLoadingEmails(true);
@@ -1028,8 +1054,29 @@ export default function SettingsScreen() {
                 thumbColor="#fff"
               />
             </View>
+            {notificationsOn &&
+              NOTIFICATION_CATEGORY_META.map((cat) => (
+                <View key={cat.id} style={styles.optionRow}>
+                  <Ionicons name="ellipse-outline" size={16} color={Colors.textMuted} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.optionLabel}>{cat.label}</Text>
+                    <Text style={[styles.toggleHint, { marginTop: 2, marginBottom: 0 }]}>
+                      {cat.hint}
+                    </Text>
+                  </View>
+                  <Switch
+                    value={notifPrefs[cat.id] !== false}
+                    onValueChange={(v) => toggleNotifCategory(cat.id, v)}
+                    trackColor={{ false: Colors.border, true: Colors.primary }}
+                    thumbColor="#fff"
+                  />
+                </View>
+              ))}
           </View>
-          <Text style={styles.toggleHint}>Get notified when you receive new messages</Text>
+          <Text style={styles.toggleHint}>
+            Master switch controls all pushes. Categories let you mute types. Do Not Disturb
+            status silences non-urgent alerts (care + meeting reminders may still notify).
+          </Text>
         </View>
 
         <View style={styles.section}>

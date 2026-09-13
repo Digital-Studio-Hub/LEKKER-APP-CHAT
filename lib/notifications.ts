@@ -27,15 +27,24 @@ async function getNotifications() {
         shouldShowList: true,
       }),
     });
-    // High-importance channel required for heads-up + closed-app delivery on Android
+    // High-importance channels for heads-up + closed-app delivery on Android
     if (Platform.OS === "android" && !androidChannelReady) {
-      await Notifications.setNotificationChannelAsync("messages", {
-        name: "Messages",
-        importance: Notifications.AndroidImportance.MAX,
-        vibrationPattern: [0, 250, 250, 250],
-        lightColor: "#F5B800",
-        sound: "default",
-      });
+      const channels: Array<{ id: string; name: string }> = [
+        { id: "messages", name: "Messages" },
+        { id: "enquiries", name: "Enquiries" },
+        { id: "companion", name: "Companion care" },
+        { id: "schedule", name: "Schedule & Meet" },
+        { id: "workspace", name: "Workspace updates" },
+      ];
+      for (const ch of channels) {
+        await Notifications.setNotificationChannelAsync(ch.id, {
+          name: ch.name,
+          importance: Notifications.AndroidImportance.MAX,
+          vibrationPattern: [0, 250, 250, 250],
+          lightColor: "#F5B800",
+          sound: "default",
+        });
+      }
       androidChannelReady = true;
     }
     return Notifications;

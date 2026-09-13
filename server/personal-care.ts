@@ -176,6 +176,7 @@ export async function runCompanionCron(): Promise<{
           "Cledwyn",
           `Hi ${patient.firstName || "there"} — just checking in. How are you feeling? Open Cledwyn anytime.`,
           { type: "companion_checkin" },
+          { category: "companion" },
         );
         await db
           .update(personalCareSettings)
@@ -206,6 +207,7 @@ export async function runCompanionCron(): Promise<{
         "Cledwyn Companion",
         `${patientName} hasn't replied for ${formatDurationHours(sinceReply)}.`,
         { type: "companion_silence", chatId: chat.id },
+        { category: "companion", urgent: true },
       );
 
       await db

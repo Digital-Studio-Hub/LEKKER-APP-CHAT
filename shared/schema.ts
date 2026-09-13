@@ -40,6 +40,8 @@ export const users = pgTable("users", {
   autoReplyEnabled: boolean("auto_reply_enabled").default(false),
   autoReplyMessage: text("auto_reply_message"),
   notificationsEnabled: boolean("notifications_enabled").default(true),
+  /** JSON map of NotificationCategory → boolean (see shared/notification-prefs.ts) */
+  notificationPreferences: text("notification_preferences"),
   locationEnabled: boolean("location_enabled").default(false),
   lastLatitude: text("last_latitude"),
   lastLongitude: text("last_longitude"),

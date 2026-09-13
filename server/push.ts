@@ -2,6 +2,11 @@ import { and, eq, inArray } from "drizzle-orm";
 import { db } from "./storage";
 import { pushTokens, users } from "@shared/schema";
 import type { ChatMessage } from "@shared/schema";
+import {
+  parseNotificationPreferences,
+  DND_BYPASS_CATEGORIES,
+  type NotificationCategory,
+} from "@shared/notification-prefs";
 
 const EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send";
 
@@ -48,6 +53,7 @@ async function sendExpoPush(
     body: string;
     data?: Record<string, string>;
     sound?: "default" | null;
+    channelId?: string;
   }>,
 ): Promise<void> {
   if (messages.length === 0) return;
@@ -66,9 +72,7 @@ async function sendExpoPush(
         data: m.data,
         sound: m.sound ?? "default",
         priority: "high" as const,
-        // Android closed-app / heads-up channel (must match client channel id)
-        channelId: "messages",
-        // Wake iOS for background delivery when possible
+        channelId: m.channelId || "messages",
         _contentAvailable: true,
       }));
       const res = await fetch(EXPO_PUSH_URL, {
@@ -130,6 +134,42 @@ function messagePreview(message: ChatMessage): string {
   }
 }
 
+function androidChannelFor(category: NotificationCategory): string {
+  switch (category) {
+    case "enquiries":
+      return "enquiries";
+    case "companion":
+      return "companion";
+    case "schedule":
+      return "schedule";
+    case "workspace":
+      return "workspace";
+    default:
+      return "messages";
+  }
+}
+
+/**
+ * Whether this user should receive a push for the given category.
+ * Master switch off → never. Category off → no. DND → only bypass categories.
+ */
+export function shouldDeliverPush(opts: {
+  notificationsEnabled: boolean | null | undefined;
+  notificationPreferences: unknown;
+  presence: string | null | undefined;
+  category: NotificationCategory;
+  /** Force deliver even in DND (e.g. explicit urgent family alert). */
+  urgent?: boolean;
+}): boolean {
+  if (opts.notificationsEnabled === false) return false;
+  const prefs = parseNotificationPreferences(opts.notificationPreferences);
+  if (prefs[opts.category] === false) return false;
+  if (opts.presence === "dnd" && !opts.urgent && !DND_BYPASS_CATEGORIES.has(opts.category)) {
+    return false;
+  }
+  return true;
+}
+
 export async function notifyChatMessage(
   chatId: string,
   senderId: string,
@@ -137,6 +177,12 @@ export async function notifyChatMessage(
 ): Promise<void> {
   try {
     const { storage } = await import("./storage");
+    const chat = await storage.getChat(chatId);
+    if (!chat || chat.type === "notes") return; // Quick Notes — self only
+
+    const category: NotificationCategory =
+      chat.type === "group" ? "messages_group" : "messages_dm";
+
     const participants = await storage.getChatParticipants(chatId);
     const recipientIds = participants
       .map((p) => p.userId)
@@ -148,12 +194,21 @@ export async function notifyChatMessage(
       .select({
         id: users.id,
         notificationsEnabled: users.notificationsEnabled,
+        notificationPreferences: users.notificationPreferences,
+        presence: users.presence,
       })
       .from(users)
       .where(inArray(users.id, recipientIds));
 
     const enabledIds = recipientUsers
-      .filter((u) => u.notificationsEnabled !== false)
+      .filter((u) =>
+        shouldDeliverPush({
+          notificationsEnabled: u.notificationsEnabled,
+          notificationPreferences: u.notificationPreferences,
+          presence: u.presence,
+          category,
+        }),
+      )
       .map((u) => u.id);
 
     if (enabledIds.length === 0) return;
@@ -183,9 +238,11 @@ export async function notifyChatMessage(
           to: t.expoPushToken,
           title: String(senderName),
           body: preview,
+          channelId: androidChannelFor(category),
           data: {
             chatId,
             type: "message",
+            category,
             messageId: message.id,
           },
         })),
@@ -196,20 +253,53 @@ export async function notifyChatMessage(
   }
 }
 
-/** Push a user by Chat userId (enquiry replies, system alerts). */
+export type NotifyUserPushOpts = {
+  category?: NotificationCategory;
+  urgent?: boolean;
+};
+
+/** Push a user by Chat userId (enquiry replies, companion, workspace, system). */
 export async function notifyUserPush(
   userId: string,
   title: string,
   body: string,
   data?: Record<string, string>,
+  opts?: NotifyUserPushOpts,
 ): Promise<void> {
   try {
+    const category: NotificationCategory =
+      opts?.category ||
+      (data?.type === "enquiry_reply"
+        ? "enquiries"
+        : data?.type === "companion_checkin" || data?.type === "companion_silence"
+          ? "companion"
+          : data?.type === "schedule" || data?.type === "meet_reminder"
+            ? "schedule"
+            : data?.type === "workspace" || data?.category === "workspace"
+              ? "workspace"
+              : "workspace");
+
     const [u] = await db
-      .select({ notificationsEnabled: users.notificationsEnabled })
+      .select({
+        notificationsEnabled: users.notificationsEnabled,
+        notificationPreferences: users.notificationPreferences,
+        presence: users.presence,
+      })
       .from(users)
       .where(eq(users.id, userId))
       .limit(1);
-    if (u && u.notificationsEnabled === false) return;
+
+    if (
+      !shouldDeliverPush({
+        notificationsEnabled: u?.notificationsEnabled,
+        notificationPreferences: u?.notificationPreferences,
+        presence: u?.presence,
+        category,
+        urgent: opts?.urgent,
+      })
+    ) {
+      return;
+    }
 
     const tokens = await db
       .select({ expoPushToken: pushTokens.expoPushToken })
@@ -222,7 +312,8 @@ export async function notifyUserPush(
         to: t.expoPushToken,
         title,
         body: body.length > 120 ? `${body.slice(0, 117)}…` : body,
-        data: data || {},
+        channelId: androidChannelFor(category),
+        data: { ...(data || {}), category },
       })),
     );
   } catch (e) {
