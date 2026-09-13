@@ -3911,6 +3911,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   /**
+   * Network Cledwyn → set Lekker Chat presence (online/away/dnd/offline).
+   * Auth: LEKKER_NETWORK_API_KEY. Body: { lekkerNetworkId | chatUserId, presence }
+   */
+  app.post("/api/internal/set-presence", async (req: Request, res: Response) => {
+    try {
+      const key = req.headers["x-api-key"];
+      const expected = process.env.LEKKER_NETWORK_API_KEY;
+      if (!expected || !key || key !== expected) {
+        return res.status(401).json({ success: false, message: "Unauthorized" });
+      }
+      const presence = String(req.body?.presence || "").toLowerCase().trim();
+      if (!["online", "away", "dnd", "offline"].includes(presence)) {
+        return res.status(400).json({ success: false, message: "Invalid presence" });
+      }
+      const lekkerNetworkId =
+        typeof req.body?.lekkerNetworkId === "string" ? req.body.lekkerNetworkId.trim() : "";
+      const chatUserId =
+        typeof req.body?.chatUserId === "string" ? req.body.chatUserId.trim() : "";
+      const user =
+        (chatUserId ? await storage.getUser(chatUserId) : null) ||
+        (lekkerNetworkId ? await storage.getUserByLekkerNetworkId(lekkerNetworkId) : null);
+      if (!user) {
+        return res.json({ success: false, message: "Chat user not found for this Network id" });
+      }
+      await storage.updateUser(user.id, { presence } as any);
+      return res.json({ success: true, userId: user.id, presence });
+    } catch (e) {
+      console.error("[set-presence]", e);
+      return res.status(500).json({ success: false, message: "Failed" });
+    }
+  });
+
+  /**
    * Network → Chat Expo bridge for workspace events (leads, orders, mail, etc.).
    * Auth: LEKKER_NETWORK_API_KEY. Body: { lekkerNetworkId | phone | email, title, body, type? }
    */
