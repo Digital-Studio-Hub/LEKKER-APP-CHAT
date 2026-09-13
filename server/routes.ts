@@ -43,6 +43,7 @@ import {
   updateMarketplaceLeadStatus,
   fetchMobileNotifications,
   fetchMobileSchedule,
+  transcribeMobileAudio,
   LekkerNetworkApiError,
   type LekkerNetworkEntry,
   type WorkspaceDetail,
@@ -3027,9 +3028,50 @@ export async function registerRoutes(app: Express): Promise<Server> {
    * - Everyone else (or workspace failure) → Network generalist / consumer Cledwyn
    * Always responds as SSE for the mobile client.
    */
+  /** Speech-to-text for Cledwyn mic (proxies Network STT). */
+  app.post("/api/cledwyn/stt", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      if (!isLekkerNetworkConfigured()) {
+        return res.status(503).json({ success: false, message: "lekker.network unavailable" });
+      }
+      const audioBase64 = String(req.body?.audioBase64 || "").trim();
+      const contentType = String(req.body?.contentType || "audio/m4a").trim();
+      if (!audioBase64 || audioBase64.length < 32) {
+        return res.status(400).json({ success: false, message: "audioBase64 required" });
+      }
+      if (audioBase64.length > 11_000_000) {
+        return res.status(413).json({ success: false, message: "Audio too large" });
+      }
+      const data = await transcribeMobileAudio({
+        audioBase64,
+        contentType,
+        languageHint: typeof req.body?.languageHint === "string" ? req.body.languageHint : null,
+      });
+      return res.json({
+        success: true,
+        text: data.text,
+        language: data.language || null,
+        provider: data.provider,
+      });
+    } catch (error: any) {
+      console.error("Cledwyn STT error:", error);
+      const status = error instanceof LekkerNetworkApiError ? error.status : 500;
+      res.status(status).json({
+        success: false,
+        message: error?.message || "Transcription failed",
+      });
+    }
+  });
+
   app.post("/api/cledwyn/chat", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { messages, sessionId: bodySessionId, lekkerNetworkAccess: bodyAccess } = req.body || {};
+      const {
+        messages,
+        sessionId: bodySessionId,
+        lekkerNetworkAccess: bodyAccess,
+        voiceInput: bodyVoiceInput,
+      } = req.body || {};
+      const voiceInput = bodyVoiceInput === true;
       const userId = req.user!.userId;
       const userProfile = await storage.getUser(userId);
       const personalCare = await getPersonalCare(userId);
@@ -3093,6 +3135,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             displayName,
             history,
             sessionId: typeof bodySessionId === "string" ? bodySessionId : null,
+            voiceInput,
           })) {
             if (ev.meta?.sessionId) {
               res.write(
@@ -3112,6 +3155,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               displayName,
               history,
               sessionId: typeof bodySessionId === "string" ? bodySessionId : null,
+              voiceInput,
             });
             const reply = result.reply || "Sorry, I couldn't generate a response. Please try again.";
             res.write(`data: ${JSON.stringify({ content: reply })}\n\n`);
@@ -3148,6 +3192,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             history,
             sessionId: typeof bodySessionId === "string" ? bodySessionId : null,
             profile: personalCare?.companionProfile || "dementia",
+            voiceInput,
           })) {
             if (ev.meta?.sessionId) {
               res.write(
@@ -3168,6 +3213,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               history,
               sessionId: typeof bodySessionId === "string" ? bodySessionId : null,
               profile: personalCare?.companionProfile || "dementia",
+              voiceInput,
             });
             const reply = result.reply || "I'm here with you. Tell me how you're feeling.";
             res.write(`data: ${JSON.stringify({ content: reply })}\n\n`);
@@ -3193,6 +3239,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             workspaceId: userProfile!.lekkerWorkspaceId!,
             message: latestText,
             sessionId: typeof bodySessionId === "string" ? bodySessionId : null,
+            voiceInput,
           })) {
             if (ev.meta?.sessionId) {
               res.write(
@@ -3211,6 +3258,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               workspaceId: userProfile!.lekkerWorkspaceId!,
               message: latestText,
               sessionId: typeof bodySessionId === "string" ? bodySessionId : null,
+              voiceInput,
             });
             const reply = result.reply || "Sorry, I couldn't generate a response. Please try again.";
             if (result.sessionId || result.threadId) {

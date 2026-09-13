@@ -8,7 +8,9 @@ import {
   StyleSheet,
   Platform,
   ActivityIndicator,
+  Alert,
 } from "react-native";
+import { Audio } from "expo-av";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -29,6 +31,13 @@ import {
   fetchPersonalCare,
   reportPatientActivity,
 } from "@/lib/personal-settings";
+import {
+  startVoiceRecording,
+  stopVoiceRecording,
+  transcribeCledwynAudio,
+  resetAudioModeAfterRecording,
+} from "@/lib/cledwyn-voice";
+import { formatDuration } from "@/lib/chat-attachments";
 
 const NETWORK_SESSION_KEY = "lekker_cledwyn_network_session";
 
@@ -188,9 +197,15 @@ export default function CledwynScreen() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [showTyping, setShowTyping] = useState(false);
   const [companionMode, setCompanionMode] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingSecs, setRecordingSecs] = useState(0);
+  const [isTranscribing, setIsTranscribing] = useState(false);
   const inputRef = useRef<TextInput>(null);
   const listRef = useRef<FlatList>(null);
   const initializedRef = useRef(false);
+  const recordingRef = useRef<Audio.Recording | null>(null);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const voiceSendRef = useRef(false);
 
   function scrollToLatest(animated = true) {
     requestAnimationFrame(() => {
@@ -301,12 +316,13 @@ export default function CledwynScreen() {
     }
   }
 
-  async function handleSend() {
-    const text = inputText.trim();
-    if (!text || isStreaming) return;
+  async function handleSend(overrideText?: string, fromVoice = false) {
+    const text = (overrideText ?? inputText).trim();
+    if (!text || isStreaming || isTranscribing) return;
 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setInputText("");
+    voiceSendRef.current = fromVoice;
 
     const currentMessages = [...messages];
     const userMessage: CledwynMessage = {
@@ -344,6 +360,7 @@ export default function CledwynScreen() {
         body: JSON.stringify({
           messages: chatHistory,
           lekkerNetworkAccess: !!user?.lekkerNetworkAccess,
+          voiceInput: fromVoice || voiceSendRef.current,
           ...(sessionId ? { sessionId } : {}),
         }),
       });
@@ -447,6 +464,66 @@ export default function CledwynScreen() {
     } finally {
       setIsStreaming(false);
       setShowTyping(false);
+      voiceSendRef.current = false;
+    }
+  }
+
+  async function handleStartVoice() {
+    if (isStreaming || isRecording || isTranscribing) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    const recording = await startVoiceRecording();
+    if (!recording) return;
+    recordingRef.current = recording;
+    setIsRecording(true);
+    setRecordingSecs(0);
+    recordingTimerRef.current = setInterval(() => {
+      setRecordingSecs((s) => s + 1);
+    }, 1000);
+  }
+
+  async function handleCancelVoice() {
+    if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+    recordingTimerRef.current = null;
+    try {
+      if (recordingRef.current) {
+        await recordingRef.current.stopAndUnloadAsync();
+      }
+    } catch {
+      /* ignore */
+    }
+    recordingRef.current = null;
+    setIsRecording(false);
+    setRecordingSecs(0);
+    await resetAudioModeAfterRecording();
+  }
+
+  async function handleStopVoiceAndSend() {
+    if (!recordingRef.current) return;
+    if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+    recordingTimerRef.current = null;
+    setIsRecording(false);
+    setIsTranscribing(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    try {
+      const note = await stopVoiceRecording(recordingRef.current);
+      recordingRef.current = null;
+      await resetAudioModeAfterRecording();
+      if (!note?.audioUri) {
+        Alert.alert("Recording failed", "Could not save the voice note.");
+        return;
+      }
+      const text = await transcribeCledwynAudio(note.audioUri);
+      if (!text) {
+        Alert.alert("Didn’t catch that", "Try speaking again a bit louder or closer.");
+        return;
+      }
+      setInputText(text);
+      await handleSend(text, true);
+    } catch (e: any) {
+      Alert.alert("Voice failed", e?.message || "Try again");
+    } finally {
+      setIsTranscribing(false);
+      setRecordingSecs(0);
     }
   }
 
@@ -538,33 +615,71 @@ export default function CledwynScreen() {
         }
       />
 
-      <View style={[styles.inputContainer, { paddingBottom: bottomPadding }]}>
-        <TextInput
-          ref={inputRef}
-          style={styles.input}
-          placeholder={companionMode ? "Say hello…" : "Ask Cledwyn..."}
-          placeholderTextColor={Colors.textMuted}
-          value={inputText}
-          onChangeText={setInputText}
-          multiline
-          maxLength={2000}
-          blurOnSubmit={false}
-        />
-        <Pressable
-          onPress={() => {
-            handleSend();
-            inputRef.current?.focus();
-          }}
-          style={[styles.sendButton, (!inputText.trim() || isStreaming) && styles.sendButtonDisabled]}
-          disabled={!inputText.trim() || isStreaming}
-        >
-          {isStreaming ? (
-            <ActivityIndicator size="small" color={Colors.background} />
-          ) : (
-            <Ionicons name="arrow-up" size={20} color={Colors.background} />
-          )}
-        </Pressable>
-      </View>
+      {isRecording ? (
+        <View style={[styles.inputContainer, { paddingBottom: bottomPadding }]}>
+          <View style={styles.recordingBar}>
+            <View style={styles.recordingDot} />
+            <Text style={styles.recordingText}>{formatDuration(recordingSecs)}</Text>
+            <Text style={styles.recordingHint}>Listening…</Text>
+          </View>
+          <Pressable onPress={handleCancelVoice} style={styles.micCancel}>
+            <Ionicons name="close" size={20} color={Colors.danger} />
+          </Pressable>
+          <Pressable onPress={handleStopVoiceAndSend} style={styles.sendButton}>
+            <Ionicons name="send" size={18} color={Colors.background} />
+          </Pressable>
+        </View>
+      ) : (
+        <View style={[styles.inputContainer, { paddingBottom: bottomPadding }]}>
+          <Pressable
+            onPress={handleStartVoice}
+            style={styles.micButton}
+            disabled={isStreaming || isTranscribing}
+            testID="cledwyn-mic"
+          >
+            {isTranscribing ? (
+              <ActivityIndicator size="small" color={Colors.primary} />
+            ) : (
+              <Ionicons name="mic" size={22} color={Colors.primary} />
+            )}
+          </Pressable>
+          <TextInput
+            ref={inputRef}
+            style={styles.input}
+            placeholder={
+              isTranscribing
+                ? "Transcribing…"
+                : companionMode
+                  ? "Say hello… or tap the mic"
+                  : "Ask Cledwyn… or tap the mic"
+            }
+            placeholderTextColor={Colors.textMuted}
+            value={inputText}
+            onChangeText={setInputText}
+            multiline
+            maxLength={2000}
+            blurOnSubmit={false}
+            editable={!isTranscribing}
+          />
+          <Pressable
+            onPress={() => {
+              handleSend();
+              inputRef.current?.focus();
+            }}
+            style={[
+              styles.sendButton,
+              (!inputText.trim() || isStreaming || isTranscribing) && styles.sendButtonDisabled,
+            ]}
+            disabled={!inputText.trim() || isStreaming || isTranscribing}
+          >
+            {isStreaming ? (
+              <ActivityIndicator size="small" color={Colors.background} />
+            ) : (
+              <Ionicons name="arrow-up" size={20} color={Colors.background} />
+            )}
+          </Pressable>
+        </View>
+      )}
     </KeyboardAvoidingView>
   );
 }
@@ -607,6 +722,47 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
   },
   headerRight: { flexDirection: "row", alignItems: "center" },
+  micButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 2,
+  },
+  micCancel: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  recordingBar: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: Colors.card,
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  recordingDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: Colors.danger,
+  },
+  recordingText: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 14,
+    color: Colors.text,
+  },
+  recordingHint: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12,
+    color: Colors.textMuted,
+  },
   handoffButton: {
     width: 40,
     height: 40,

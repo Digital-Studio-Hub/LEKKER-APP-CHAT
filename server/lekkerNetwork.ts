@@ -461,6 +461,7 @@ export async function chatWithNetworkCledwyn(input: {
   workspaceId: string;
   message: string;
   sessionId?: string | null;
+  voiceInput?: boolean;
 }): Promise<{ reply: string; sessionId?: string; threadId?: string; mode?: string }> {
   return lekkerMobileFetchStrict("/api/v1/cledwyn/chat", {
     method: "POST",
@@ -469,6 +470,7 @@ export async function chatWithNetworkCledwyn(input: {
       workspaceId: input.workspaceId,
       message: input.message,
       sessionId: input.sessionId || undefined,
+      voiceInput: input.voiceInput === true,
     }),
   });
 }
@@ -480,6 +482,7 @@ export async function chatWithNetworkGeneralistCledwyn(input: {
   displayName?: string | null;
   history?: Array<{ role: string; content: string }>;
   sessionId?: string | null;
+  voiceInput?: boolean;
 }): Promise<{ reply: string; sessionId?: string | null; mode?: string }> {
   return lekkerMobileFetchStrict("/api/v1/cledwyn/chat", {
     method: "POST",
@@ -490,6 +493,7 @@ export async function chatWithNetworkGeneralistCledwyn(input: {
       displayName: input.displayName || undefined,
       history: input.history,
       sessionId: input.sessionId || undefined,
+      voiceInput: input.voiceInput === true,
     }),
   });
 }
@@ -554,6 +558,7 @@ export async function* streamNetworkCledwyn(input: {
   workspaceId: string;
   message: string;
   sessionId?: string | null;
+  voiceInput?: boolean;
 }): AsyncGenerator<{ meta?: any; content?: string; done?: boolean }> {
   if (!LEKKER_API_KEY) {
     throw new LekkerNetworkApiError("Lekker Network API is not configured", 503);
@@ -570,6 +575,7 @@ export async function* streamNetworkCledwyn(input: {
       workspaceId: input.workspaceId,
       message: input.message,
       sessionId: input.sessionId || undefined,
+      voiceInput: input.voiceInput === true,
       stream: true,
     }),
   });
@@ -583,6 +589,7 @@ export async function* streamNetworkGeneralistCledwyn(input: {
   displayName?: string | null;
   history?: Array<{ role: string; content: string }>;
   sessionId?: string | null;
+  voiceInput?: boolean;
 }): AsyncGenerator<{ meta?: any; content?: string; done?: boolean }> {
   if (!LEKKER_API_KEY) {
     throw new LekkerNetworkApiError("Lekker Network API is not configured", 503);
@@ -601,6 +608,7 @@ export async function* streamNetworkGeneralistCledwyn(input: {
       displayName: input.displayName || undefined,
       history: input.history,
       sessionId: input.sessionId || undefined,
+      voiceInput: input.voiceInput === true,
       stream: true,
     }),
   });
@@ -615,6 +623,7 @@ export async function chatWithNetworkCompanionCledwyn(input: {
   history?: Array<{ role: string; content: string }>;
   sessionId?: string | null;
   profile?: string;
+  voiceInput?: boolean;
 }): Promise<{ reply: string; sessionId?: string | null; mode?: string }> {
   return lekkerMobileFetchStrict("/api/v1/cledwyn/chat", {
     method: "POST",
@@ -626,6 +635,7 @@ export async function chatWithNetworkCompanionCledwyn(input: {
       displayName: input.displayName || undefined,
       history: input.history,
       sessionId: input.sessionId || undefined,
+      voiceInput: input.voiceInput === true,
     }),
   });
 }
@@ -637,6 +647,7 @@ export async function* streamNetworkCompanionCledwyn(input: {
   history?: Array<{ role: string; content: string }>;
   sessionId?: string | null;
   profile?: string;
+  voiceInput?: boolean;
 }): AsyncGenerator<{ meta?: any; content?: string; done?: boolean }> {
   if (!LEKKER_API_KEY) {
     throw new LekkerNetworkApiError("Lekker Network API is not configured", 503);
@@ -656,6 +667,7 @@ export async function* streamNetworkCompanionCledwyn(input: {
       displayName: input.displayName || undefined,
       history: input.history,
       sessionId: input.sessionId || undefined,
+      voiceInput: input.voiceInput === true,
       stream: true,
     }),
   });
@@ -700,6 +712,22 @@ export type MobileScheduleItem = {
   type?: string;
   mode?: string;
 };
+
+/** Speech-to-text via Network (same stack as WhatsApp Cledwyn voice notes). */
+export async function transcribeMobileAudio(input: {
+  audioBase64: string;
+  contentType?: string;
+  languageHint?: string | null;
+}): Promise<{ text: string; language?: string | null; provider?: string }> {
+  return lekkerMobileFetchStrict("/api/v1/mobile/stt", {
+    method: "POST",
+    body: JSON.stringify({
+      audioBase64: input.audioBase64,
+      contentType: input.contentType || "audio/m4a",
+      languageHint: input.languageHint || undefined,
+    }),
+  });
+}
 
 /** Meet rooms + bookings calendar for Chat Schedule / auto-DND. */
 export async function fetchMobileSchedule(input: {
