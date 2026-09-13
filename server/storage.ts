@@ -429,6 +429,7 @@ class PgStorage implements IStorage {
       if (extras.pollOptions) values.pollOptions = extras.pollOptions;
       if (extras.sharedContactName) values.sharedContactName = extras.sharedContactName;
       if (extras.sharedContactPhone) values.sharedContactPhone = extras.sharedContactPhone;
+      if (extras.replyToMessageId) values.replyToMessageId = extras.replyToMessageId;
     }
 
     const [message] = await db.insert(chatMessages).values(values).returning();

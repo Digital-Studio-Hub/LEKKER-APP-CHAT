@@ -268,6 +268,8 @@ export const chatMessages = pgTable("chat_messages", {
   pollOptions: text("poll_options"),
   sharedContactName: varchar("shared_contact_name", { length: 255 }),
   sharedContactPhone: varchar("shared_contact_phone", { length: 50 }),
+  /** Optional reply-to (used for “reply to Cledwyn” group triggers) */
+  replyToMessageId: varchar("reply_to_message_id", { length: 36 }),
   editedAt: timestamp("edited_at"),
   isDeleted: boolean("is_deleted").default(false).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),

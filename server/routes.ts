@@ -156,6 +156,7 @@ async function findUserByPhoneFlexible(phone: string) {
 }
 
 async function enrichParticipants(chatId: string) {
+  const { isCledwynBotUser } = await import("./cledwyn-group");
   const rawParticipants = await storage.getChatParticipants(chatId);
   const participantUsers = [];
   for (const p of rawParticipants) {
@@ -171,6 +172,8 @@ async function enrichParticipants(chatId: string) {
         isVerifiedLekkerpreneur: u.isVerifiedLekkerpreneur,
         businessName: u.businessName,
         presence: u.presence,
+        role: p.role,
+        isCledwyn: isCledwynBotUser(u),
       });
     }
   }
@@ -1542,7 +1545,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       if (chatType === "group") {
-        const { participantIds } = req.body;
+        const { participantIds, addCledwyn } = req.body;
         if (!participantIds || !Array.isArray(participantIds) || participantIds.length < 1) {
           return res.status(400).json({ message: "At least one participant is required for group chat" });
         }
@@ -1551,6 +1554,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         for (const pid of participantIds) {
           if (pid !== userId) {
             await storage.addChatParticipant(chat.id, pid, "member");
+          }
+        }
+        if (addCledwyn === true) {
+          const owner = await storage.getUser(userId);
+          if (owner) {
+            const { addCledwynToGroup } = await import("./cledwyn-group");
+            await addCledwynToGroup(chat.id, owner);
           }
         }
         const participants = await enrichParticipants(chat.id);
@@ -1691,7 +1701,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      const message = await storage.sendMessage(chatId, userId, content || null, msgType, extras);
+      const replyToMessageId =
+        typeof extras.replyToMessageId === "string"
+          ? extras.replyToMessageId
+          : typeof req.body?.replyToMessageId === "string"
+            ? req.body.replyToMessageId
+            : null;
+
+      const message = await storage.sendMessage(chatId, userId, content || null, msgType, {
+        ...extras,
+        ...(replyToMessageId ? { replyToMessageId } : {}),
+      });
 
       // Expo push via push.ts (uses expoPushToken schema)
       void notifyChatMessage(chatId, userId, message);
@@ -1700,6 +1720,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       for (const p of participants) {
         if (p.userId !== userId) {
           const otherUser = await storage.getUser(p.userId);
+          const { isCledwynBotUser } = await import("./cledwyn-group");
+          if (otherUser && isCledwynBotUser(otherUser)) continue; // bots don't auto-reply as humans
           if (otherUser?.autoReplyEnabled && otherUser.autoReplyMessage) {
             const autoReply = await storage.sendMessage(chatId, p.userId, otherUser.autoReplyMessage, "text");
             void notifyChatMessage(chatId, p.userId, autoReply);
@@ -1707,10 +1729,54 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
+      // Group Cledwyn: @mention or reply-to → workspace Cledwyn (Memory Palace)
+      void import("./cledwyn-group").then(({ maybeReplyAsGroupCledwyn }) =>
+        maybeReplyAsGroupCledwyn({
+          chatId,
+          senderId: userId,
+          content: content || null,
+          replyToMessageId,
+        }),
+      );
+
       res.status(201).json({ message });
     } catch (error) {
       console.error("Send message error:", error);
       res.status(500).json({ message: "Failed to send message" });
+    }
+  });
+
+  /** Add the caller's workspace Cledwyn ("{Name}'s Cledwyn") to a group. */
+  app.post("/api/chats/:chatId/add-cledwyn", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const chatId = req.params.chatId;
+      const userId = req.user!.userId;
+      if (!(await storage.isUserInChat(chatId, userId))) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      const owner = await storage.getUser(userId);
+      if (!owner) return res.status(401).json({ message: "Unauthorized" });
+      const { addCledwynToGroup } = await import("./cledwyn-group");
+      const result = await addCledwynToGroup(chatId, owner);
+      if (!result.ok) {
+        return res.status(400).json({ message: result.message || "Could not add Cledwyn" });
+      }
+      const participants = await enrichParticipants(chatId);
+      return res.json({
+        success: true,
+        bot: result.bot
+          ? {
+              id: result.bot.id,
+              firstName: result.bot.firstName,
+              lastName: result.bot.lastName,
+              username: result.bot.username,
+            }
+          : null,
+        participants,
+      });
+    } catch (error) {
+      console.error("add-cledwyn error:", error);
+      res.status(500).json({ message: "Failed to add Cledwyn" });
     }
   });
 

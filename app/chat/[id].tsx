@@ -55,6 +55,7 @@ import {
   getPresenceColor,
   getPresenceLabel,
   isQuickNotesChat,
+  addCledwynToChat,
   editMessage,
   deleteMessage,
   uploadChatAttachment,
@@ -303,6 +304,7 @@ function MessageBubbleInner({
   onEdit,
   onDelete,
   onReport,
+  onReply,
   isSelecting,
   isSelected,
   onToggleSelect,
@@ -317,6 +319,7 @@ function MessageBubbleInner({
   onEdit: (msg: ServerMessage) => void;
   onDelete: (msg: ServerMessage) => void;
   onReport?: (msg: ServerMessage) => void;
+  onReply?: (msg: ServerMessage) => void;
   isSelecting: boolean;
   isSelected: boolean;
   onToggleSelect: (msg: ServerMessage) => void;
@@ -346,11 +349,19 @@ function MessageBubbleInner({
     if (!isMe) {
       if (Platform.OS === "ios") {
         ActionSheetIOS.showActionSheetWithOptions(
-          { options: ["Report message", "Cancel"], cancelButtonIndex: 1, destructiveButtonIndex: 0 },
-          (idx) => { if (idx === 0) onReport?.(message); },
+          {
+            options: ["Reply", "Report message", "Cancel"],
+            cancelButtonIndex: 2,
+            destructiveButtonIndex: 1,
+          },
+          (idx) => {
+            if (idx === 0) onReply?.(message);
+            if (idx === 1) onReport?.(message);
+          },
         );
       } else {
         Alert.alert("Message", undefined, [
+          { text: "Reply", onPress: () => onReply?.(message) },
           { text: "Report message", style: "destructive", onPress: () => onReport?.(message) },
           { text: "Cancel", style: "cancel" },
         ]);
@@ -362,6 +373,8 @@ function MessageBubbleInner({
       const options: string[] = [];
       const actions: (() => void)[] = [];
 
+      options.push("Reply");
+      actions.push(() => onReply?.(message));
       if (msgType === "text") {
         options.push("Edit");
         actions.push(() => onEdit(message));
@@ -386,6 +399,7 @@ function MessageBubbleInner({
       );
     } else {
       const alertButtons: { text: string; onPress?: () => void; style?: "cancel" | "destructive" | "default" }[] = [];
+      alertButtons.push({ text: "Reply", onPress: () => onReply?.(message) });
       if (msgType === "text") {
         alertButtons.push({ text: "Edit", onPress: () => onEdit(message) });
       }
@@ -638,6 +652,7 @@ export default function ChatDetailScreen() {
   const [pollQuestion, setPollQuestion] = useState("");
   const [pollOptions, setPollOptions] = useState(["", ""]);
   const [editingMessage, setEditingMessage] = useState<ServerMessage | null>(null);
+  const [replyToMessage, setReplyToMessage] = useState<ServerMessage | null>(null);
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set());
   const [recordingWaveform, setRecordingWaveform] = useState<number[]>([]);
   const isSelecting = selectedMessageIds.size > 0;
@@ -801,14 +816,38 @@ export default function ChatDetailScreen() {
     if (warnBlockedContent(text)) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setInputText("");
-    await sendChatMessage(id, text, "text");
+    const replyId = replyToMessage?.id;
+    setReplyToMessage(null);
+    await sendChatMessage(id, text, "text", replyId ? { replyToMessageId: replyId } : undefined);
     await loadMessages();
   }
 
   function handleEditMessage(msg: ServerMessage) {
     setEditingMessage(msg);
+    setReplyToMessage(null);
     setInputText(msg.content || "");
     inputRef.current?.focus();
+  }
+
+  function handleReplyMessage(msg: ServerMessage) {
+    setEditingMessage(null);
+    setReplyToMessage(msg);
+    inputRef.current?.focus();
+  }
+
+  async function handleAddCledwyn() {
+    if (!id) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    const result = await addCledwynToChat(id);
+    if (!result.success) {
+      Alert.alert("Couldn’t add Cledwyn", result.message || "Try again");
+      return;
+    }
+    await loadChatData();
+    Alert.alert(
+      "Cledwyn added",
+      "Your workspace Cledwyn is in this group. @mention Cledwyn or reply to its messages for help.",
+    );
   }
 
   async function handleDeleteMessage(msg: ServerMessage) {
@@ -1155,7 +1194,11 @@ export default function ChatDetailScreen() {
               </View>
             </Pressable>
           )}
-          {chat && !isGroup && !isNotes ? (
+          {chat && isGroup && !chat.participants?.some((p) => p.isCledwyn) && user?.isVerifiedLekkerpreneur && user?.lekkerWorkspaceId ? (
+            <Pressable onPress={handleAddCledwyn} style={styles.backButton} hitSlop={8}>
+              <Ionicons name="sparkles" size={20} color={Colors.primary} />
+            </Pressable>
+          ) : chat && !isGroup && !isNotes ? (
             <View style={{ flexDirection: "row", alignItems: "center" }}>
               <Pressable onPress={handleReportUser} style={styles.backButton}>
                 <Ionicons name="flag-outline" size={20} color={Colors.textMuted} />
@@ -1189,6 +1232,7 @@ export default function ChatDetailScreen() {
             onEdit={handleEditMessage}
             onDelete={handleDeleteMessage}
             onReport={handleReportMessage}
+            onReply={handleReplyMessage}
             isSelecting={isSelecting}
             isSelected={selectedMessageIds.has(item.id)}
             onToggleSelect={handleToggleSelect}
@@ -1286,6 +1330,22 @@ export default function ChatDetailScreen() {
               </Pressable>
             </View>
           )}
+          {!editingMessage && replyToMessage && (
+            <View style={styles.editBanner}>
+              <View style={styles.editBannerLeft}>
+                <Ionicons name="return-down-forward" size={16} color={Colors.primary} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.editBannerTitle}>Replying</Text>
+                  <Text style={styles.editBannerText} numberOfLines={1}>
+                    {replyToMessage.content || "Message"}
+                  </Text>
+                </View>
+              </View>
+              <Pressable onPress={() => setReplyToMessage(null)} style={styles.editBannerClose}>
+                <Ionicons name="close" size={20} color={Colors.textMuted} />
+              </Pressable>
+            </View>
+          )}
           <View style={[styles.inputContainer, { paddingBottom: Math.max(insets.bottom, 8) }]}>
           <Pressable
             onPress={() => {
@@ -1303,7 +1363,13 @@ export default function ChatDetailScreen() {
           <TextInput
             ref={inputRef}
             style={styles.input}
-            placeholder={isNotes ? "Write a quick note…" : "Type a message..."}
+            placeholder={
+              isNotes
+                ? "Write a quick note…"
+                : isGroup && chat?.participants?.some((p) => p.isCledwyn)
+                  ? "Message or @Cledwyn…"
+                  : "Type a message..."
+            }
             placeholderTextColor={Colors.textMuted}
             value={inputText}
             onChangeText={(text) => {

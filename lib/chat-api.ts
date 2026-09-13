@@ -13,6 +13,8 @@ export interface ChatParticipant {
   isVerifiedLekkerpreneur: boolean | null;
   businessName: string | null;
   presence: string | null;
+  role?: string | null;
+  isCledwyn?: boolean;
 }
 
 export interface ServerMessage {
@@ -36,6 +38,7 @@ export interface ServerMessage {
   pollOptions: string | null;
   sharedContactName: string | null;
   sharedContactPhone: string | null;
+  replyToMessageId?: string | null;
   editedAt: string | null;
   isDeleted: boolean;
   createdAt: string;
@@ -195,15 +198,35 @@ export async function createP2PChat(participantId: string): Promise<ServerChat |
   }
 }
 
-export async function createGroupChat(name: string, participantIds: string[]): Promise<ServerChat | null> {
+export async function createGroupChat(
+  name: string,
+  participantIds: string[],
+  opts?: { addCledwyn?: boolean },
+): Promise<ServerChat | null> {
   try {
-    const res = await apiRequest("POST", "/api/chats", { type: "group", name, participantIds });
+    const res = await apiRequest("POST", "/api/chats", {
+      type: "group",
+      name,
+      participantIds,
+      ...(opts?.addCledwyn ? { addCledwyn: true } : {}),
+    });
     if (!res.ok) return null;
     const data = await res.json();
     return data.chat || null;
   } catch (e) {
     console.error("Failed to create group:", e);
     return null;
+  }
+}
+
+export async function addCledwynToChat(chatId: string): Promise<{ success: boolean; message?: string }> {
+  try {
+    const res = await apiRequest("POST", `/api/chats/${chatId}/add-cledwyn`, {});
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return { success: false, message: data.message || "Failed" };
+    return { success: true };
+  } catch (e: any) {
+    return { success: false, message: e?.message || "Failed" };
   }
 }
 

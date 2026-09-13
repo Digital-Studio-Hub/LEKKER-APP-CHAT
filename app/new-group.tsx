@@ -8,6 +8,7 @@ import {
   Platform,
   FlatList,
   ActivityIndicator,
+  Switch,
 } from "react-native";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -47,8 +48,10 @@ export default function NewGroupScreen() {
   const [isSearching, setIsSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const [addCledwyn, setAddCledwyn] = useState(false);
 
   const webTopInset = Platform.OS === "web" ? 67 : 0;
+  const canAddCledwyn = !!user?.isVerifiedLekkerpreneur && !!user?.lekkerWorkspaceId;
   const selectedUsers = users.filter((u) => u.selected);
   const selectedCount = selectedUsers.length;
 
@@ -118,7 +121,9 @@ export default function NewGroupScreen() {
 
     try {
       const participantIds = selectedUsers.map((u) => u.id);
-      const chat = await createGroupChat(groupName.trim(), participantIds);
+      const chat = await createGroupChat(groupName.trim(), participantIds, {
+        addCledwyn: canAddCledwyn && addCledwyn,
+      });
 
       if (chat) {
         router.back();
@@ -170,6 +175,23 @@ export default function NewGroupScreen() {
               </View>
             ))}
           </View>
+
+          {canAddCledwyn ? (
+            <View style={styles.cledwynRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.cledwynLabel}>Add my Cledwyn</Text>
+                <Text style={styles.cledwynHint}>
+                  @{user?.firstName || "Your"}'s Cledwyn — @mention in the group for help, notes, and actions
+                </Text>
+              </View>
+              <Switch
+                value={addCledwyn}
+                onValueChange={setAddCledwyn}
+                trackColor={{ false: Colors.border, true: Colors.primary }}
+                thumbColor="#fff"
+              />
+            </View>
+          ) : null}
 
           <Pressable
             style={({ pressed }) => [
@@ -423,6 +445,27 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_400Regular",
     fontSize: 12,
     color: Colors.text,
+  },
+  cledwynRow: {
+    width: "100%",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    backgroundColor: Colors.card,
+    borderRadius: 12,
+    padding: 14,
+  },
+  cledwynLabel: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 14,
+    color: Colors.text,
+  },
+  cledwynHint: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 11,
+    color: Colors.textMuted,
+    marginTop: 2,
+    lineHeight: 16,
   },
   createButton: {
     flexDirection: "row",
