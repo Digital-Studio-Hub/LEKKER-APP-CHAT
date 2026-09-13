@@ -146,11 +146,15 @@ function serveLandingPage({
   res,
   landingPageTemplate,
   appName,
+  businessName,
+  workspaceId,
 }: {
   req: Request;
   res: Response;
   landingPageTemplate: string;
   appName: string;
+  businessName?: string | null;
+  workspaceId?: string | null;
 }) {
   const forwardedProto = req.header("x-forwarded-proto");
   const protocol = forwardedProto || req.protocol || "https";
@@ -162,13 +166,48 @@ function serveLandingPage({
   log(`baseUrl`, baseUrl);
   log(`expsUrl`, expsUrl);
 
-  const html = landingPageTemplate
+  const deepLink = workspaceId
+    ? `lekkerchat://open-business/${encodeURIComponent(workspaceId)}`
+    : "";
+  const headline = businessName
+    ? `Chat with <span>${escapeHtml(businessName)}</span>`
+    : `Lekker <span>Chat</span>`;
+  const lead = businessName
+    ? `Open the Lekker Chat app to message this business. If you don’t have it yet, download below — we’ll take you straight there after you sign in.`
+    : `WhatsApp-style messaging for Lekkerpreneurs — find nearby businesses, Instant Match, enquire, and grow together on Lekker Network.`;
+
+  let html = landingPageTemplate
     .replace(/BASE_URL_PLACEHOLDER/g, baseUrl)
     .replace(/EXPS_URL_PLACEHOLDER/g, expsUrl)
-    .replace(/APP_NAME_PLACEHOLDER/g, appName);
+    .replace(/APP_NAME_PLACEHOLDER/g, appName)
+    .replace(/<h1>Lekker <span>Chat<\/span><\/h1>/, `<h1>${headline}</h1>`)
+    .replace(
+      /WhatsApp-style messaging for Lekkerpreneurs — find nearby businesses,\s*Instant Match, enquire, and grow together on Lekker Network\./,
+      lead,
+    );
+
+  if (deepLink) {
+    const openBtn = `
+      <a class="store-btn apple" href="${deepLink}" style="margin-bottom:12px;background:var(--yellow);color:var(--bg)">
+        <span class="label"><small>Already have the app?</small><span>Open in Lekker Chat</span></span>
+      </a>`;
+    html = html.replace('<div class="stores">', `<div class="stores">${openBtn}`);
+    html = html.replace(
+      "</body>",
+      `<script>(function(){try{var u=${JSON.stringify(deepLink)};setTimeout(function(){window.location.href=u;},400);}catch(e){}})();</script></body>`,
+    );
+  }
 
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.status(200).send(html);
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function configureExpoAndLanding(app: express.Application) {
@@ -186,6 +225,48 @@ function configureExpoAndLanding(app: express.Application) {
   app.use((req: Request, res: Response, next: NextFunction) => {
     if (req.path.startsWith("/api")) {
       return next();
+    }
+
+    const openMatch = req.path.match(/^\/o\/([^/]+)\/?$/);
+    if (openMatch) {
+      const workspaceId = decodeURIComponent(openMatch[1]);
+      // Best-effort business name for landing copy (non-blocking if Network down)
+      import("./lekkerNetwork")
+        .then(({ fetchWorkspaceById, isLekkerNetworkConfigured }) => {
+          if (!isLekkerNetworkConfigured()) {
+            return serveLandingPage({
+              req,
+              res,
+              landingPageTemplate,
+              appName,
+              workspaceId,
+              businessName: null,
+            });
+          }
+          return fetchWorkspaceById(workspaceId).then((ws) => {
+            const businessName =
+              ws?.businessName || ws?.tradingName || ws?.workspaceName || null;
+            return serveLandingPage({
+              req,
+              res,
+              landingPageTemplate,
+              appName,
+              workspaceId,
+              businessName,
+            });
+          });
+        })
+        .catch(() =>
+          serveLandingPage({
+            req,
+            res,
+            landingPageTemplate,
+            appName,
+            workspaceId,
+            businessName: null,
+          }),
+        );
+      return;
     }
 
     if (req.path !== "/" && req.path !== "/manifest") {

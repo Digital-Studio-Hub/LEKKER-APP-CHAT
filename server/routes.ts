@@ -2217,6 +2217,53 @@ export async function registerRoutes(app: Express): Promise<Server> {
    * in Marketplace / Network portal; seeker continues in Chat enquiry thread.
    * Body.shareContact=true opts in to share phone + email with the provider.
    */
+  /** Resolve a website deep link workspace → directory entry + Chat registration. */
+  app.get("/api/directory/by-workspace/:workspaceId", optionalAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const workspaceId = String(req.params.workspaceId || "").trim();
+      if (!workspaceId) {
+        return res.status(400).json({ success: false, message: "workspaceId required" });
+      }
+      if (!isLekkerNetworkConfigured()) {
+        return res.status(503).json({ success: false, message: "lekker.network unavailable" });
+      }
+      const ws = await fetchWorkspaceById(workspaceId);
+      if (!ws) {
+        return res.status(404).json({ success: false, message: "Business not found" });
+      }
+      const businessName =
+        ws.businessName || ws.tradingName || ws.workspaceName || "Business";
+      // Prefer Chat user linked to this workspace
+      const chatUsers = await db
+        .select()
+        .from(users)
+        .where(eq(users.lekkerWorkspaceId, workspaceId))
+        .limit(5);
+      const owner =
+        chatUsers.find((u) => u.isVerifiedLekkerpreneur) || chatUsers[0] || null;
+      let lekkerNetworkId = owner?.lekkerNetworkId || null;
+      let phone = owner?.phone || ws.phone || null;
+      if (!lekkerNetworkId && phone) {
+        const byPhone = await storage.getUserByPhone(phone);
+        if (byPhone?.lekkerNetworkId) lekkerNetworkId = byPhone.lekkerNetworkId;
+      }
+      return res.json({
+        success: true,
+        business: {
+          workspaceId,
+          businessName,
+          lekkerNetworkId,
+          phone,
+          chatUserRegistered: !!owner,
+          province: ws.province || null,
+        },
+      });
+    } catch (error) {
+      console.error("by-workspace resolve error:", error);
+      res.status(500).json({ success: false, message: "Failed to resolve business" });
+    }
+  });
+
   app.post("/api/directory/enquire", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const userId = req.user!.userId;
@@ -2264,7 +2311,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           shareLocation: privacyBody?.shareLocation === true,
           shareBrief: true,
         },
-        sourceUrl: "lekker-chat://directory",
+        sourceUrl:
+          typeof req.body?.sourceUrl === "string" && req.body.sourceUrl.trim()
+            ? req.body.sourceUrl.trim().slice(0, 500)
+            : "lekker-chat://directory",
       });
 
       if (!result?.success || !result.leadId) {
