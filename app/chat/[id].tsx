@@ -641,11 +641,22 @@ export default function ChatDetailScreen() {
   const [recordingWaveform, setRecordingWaveform] = useState<number[]>([]);
   const isSelecting = selectedMessageIds.size > 0;
   const inputRef = useRef<TextInput>(null);
+  const listRef = useRef<FlatList>(null);
   const refreshIntervalRef = useRef<ReturnType<typeof setInterval>>();
   const recordingRef = useRef<Audio.Recording | null>(null);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval>>();
   const meteringIntervalRef = useRef<ReturnType<typeof setInterval>>();
   const waveformRef = useRef<number[]>([]);
+
+  function scrollToLatest(animated = true) {
+    requestAnimationFrame(() => {
+      listRef.current?.scrollToEnd({ animated });
+    });
+  }
+
+  useEffect(() => {
+    if (messages.length > 0) scrollToLatest(true);
+  }, [messages.length]);
 
   useEffect(() => {
     loadChatData();
@@ -1058,7 +1069,7 @@ export default function ChatDetailScreen() {
     return participant ? getDisplayName(participant) : undefined;
   }
 
-  const reversedMessages = [...messages].reverse();
+
   const webTopInset = Platform.OS === "web" ? 67 : 0;
 
   const attachmentOptions: { icon: keyof typeof Ionicons.glyphMap; label: string; onPress: () => void; color?: string }[] = [
@@ -1156,7 +1167,8 @@ export default function ChatDetailScreen() {
       )}
 
       <FlatList
-        data={reversedMessages}
+        ref={listRef}
+        data={messages}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
           <MessageBubble
@@ -1175,7 +1187,7 @@ export default function ChatDetailScreen() {
             onStartSelect={handleStartSelect}
           />
         )}
-        inverted
+        onContentSizeChange={() => scrollToLatest(false)}
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
         maxToRenderPerBatch={15}
@@ -1581,7 +1593,6 @@ const styles = StyleSheet.create({
   emptyState: {
     alignItems: "center",
     paddingTop: 60,
-    transform: [{ scaleY: -1 }],
   },
   emptyText: {
     fontFamily: "Poppins_400Regular",

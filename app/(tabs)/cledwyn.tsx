@@ -105,7 +105,18 @@ export default function CledwynScreen() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [showTyping, setShowTyping] = useState(false);
   const inputRef = useRef<TextInput>(null);
+  const listRef = useRef<FlatList>(null);
   const initializedRef = useRef(false);
+
+  function scrollToLatest(animated = true) {
+    requestAnimationFrame(() => {
+      listRef.current?.scrollToEnd({ animated });
+    });
+  }
+
+  useEffect(() => {
+    if (messages.length > 0 || showTyping) scrollToLatest(true);
+  }, [messages.length, showTyping]);
 
   useEffect(() => {
     if (!initializedRef.current) {
@@ -266,7 +277,6 @@ export default function CledwynScreen() {
     await storage.saveCledwynMessages([]);
   }
 
-  const reversedMessages = [...messages].reverse();
   const webTopInset = Platform.OS === "web" ? 67 : 0;
   const isWeb = Platform.OS === "web";
   const TAB_BAR_HEIGHT = 49;
@@ -295,11 +305,12 @@ export default function CledwynScreen() {
       </View>
 
       <FlatList
-        data={reversedMessages}
+        ref={listRef}
+        data={messages}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => <MessageBubble message={item} />}
-        inverted
-        ListHeaderComponent={showTyping ? <TypingIndicator /> : null}
+        ListFooterComponent={showTyping ? <TypingIndicator /> : null}
+        onContentSizeChange={() => scrollToLatest(false)}
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={[styles.messagesList, messages.length === 0 && styles.emptyListContent]}
@@ -439,7 +450,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 40,
-    transform: [{ scaleY: -1 }],
   },
   emptyIcon: {
     width: 80,
