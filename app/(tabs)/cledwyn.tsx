@@ -37,6 +37,12 @@ import {
   transcribeCledwynAudio,
   resetAudioModeAfterRecording,
 } from "@/lib/cledwyn-voice";
+import {
+  getCledwynSpeakEnabled,
+  setCledwynSpeakEnabled,
+  speakCledwynReply,
+  stopCledwynSpeech,
+} from "@/lib/cledwyn-speech";
 import { formatDuration } from "@/lib/chat-attachments";
 
 const NETWORK_SESSION_KEY = "lekker_cledwyn_network_session";
@@ -200,6 +206,7 @@ export default function CledwynScreen() {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSecs, setRecordingSecs] = useState(0);
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const [speakReplies, setSpeakReplies] = useState(true);
   const inputRef = useRef<TextInput>(null);
   const listRef = useRef<FlatList>(null);
   const initializedRef = useRef(false);
@@ -223,6 +230,7 @@ export default function CledwynScreen() {
         setMessages(msgs);
         initializedRef.current = true;
       });
+      getCledwynSpeakEnabled().then(setSpeakReplies);
     }
   }, []);
 
@@ -323,6 +331,7 @@ export default function CledwynScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setInputText("");
     voiceSendRef.current = fromVoice;
+    await stopCledwynSpeech();
 
     const currentMessages = [...messages];
     const userMessage: CledwynMessage = {
@@ -450,6 +459,14 @@ export default function CledwynScreen() {
         storage.saveCledwynMessages(prev);
         return prev;
       });
+
+      // Speak-back after the full reply (on-device TTS)
+      if (fullContent.trim()) {
+        const shouldSpeak = speakReplies || fromVoice || voiceSendRef.current;
+        if (shouldSpeak) {
+          void speakCledwynReply(fullContent, { force: fromVoice || voiceSendRef.current });
+        }
+      }
     } catch (error) {
       setShowTyping(false);
       setMessages((prev) => [
@@ -466,6 +483,14 @@ export default function CledwynScreen() {
       setShowTyping(false);
       voiceSendRef.current = false;
     }
+  }
+
+  async function toggleSpeakReplies() {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const next = !speakReplies;
+    setSpeakReplies(next);
+    await setCledwynSpeakEnabled(next);
+    if (!next) await stopCledwynSpeech();
   }
 
   async function handleStartVoice() {
@@ -529,6 +554,7 @@ export default function CledwynScreen() {
 
   async function handleClearChat() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    await stopCledwynSpeech();
     setMessages([]);
     await storage.saveCledwynMessages([]);
   }
@@ -558,6 +584,18 @@ export default function CledwynScreen() {
           </View>
         </View>
         <View style={styles.headerRight}>
+          <Pressable
+            onPress={toggleSpeakReplies}
+            style={styles.clearButton}
+            hitSlop={8}
+            testID="cledwyn-speak-toggle"
+          >
+            <Ionicons
+              name={speakReplies ? "volume-high" : "volume-mute"}
+              size={20}
+              color={speakReplies ? Colors.primary : Colors.textMuted}
+            />
+          </Pressable>
           {workspaceMode ? (
             <Pressable onPress={() => openWorkspaceCledwyn()} style={styles.handoffButton} hitSlop={8}>
               <Ionicons name="grid-outline" size={18} color={Colors.primary} />
