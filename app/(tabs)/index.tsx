@@ -25,13 +25,30 @@ import {
   getChatProfilePhoto,
   getOtherParticipant,
   getPresenceColor,
+  isQuickNotesChat,
   type ServerChat,
 } from "@/lib/chat-api";
 import { isSmallScreen, fontScale, responsivePadding, responsiveAvatarSize } from "@/lib/responsive";
 
-function Avatar({ name, color, size = 50, photo, isGroup, presence }: { name: string; color: string; size?: number; photo?: string | null; isGroup?: boolean; presence?: string | null }) {
+function Avatar({
+  name,
+  color,
+  size = 50,
+  photo,
+  isGroup,
+  isNotes,
+  presence,
+}: {
+  name: string;
+  color: string;
+  size?: number;
+  photo?: string | null;
+  isGroup?: boolean;
+  isNotes?: boolean;
+  presence?: string | null;
+}) {
   const dotSize = Math.max(10, size * 0.24);
-  const showDot = !isGroup;
+  const showDot = !isGroup && !isNotes;
 
   const dot = showDot ? (
     <View style={{
@@ -52,6 +69,13 @@ function Avatar({ name, color, size = 50, photo, isGroup, presence }: { name: st
       <View style={{ width: size, height: size }}>
         <Image source={{ uri: photo }} style={{ width: size, height: size, borderRadius: size / 2 }} />
         {dot}
+      </View>
+    );
+  }
+  if (isNotes) {
+    return (
+      <View style={[styles.avatar, { width: size, height: size, borderRadius: size / 2, backgroundColor: color }]}>
+        <Ionicons name="document-text" size={size * 0.42} color={Colors.background} />
       </View>
     );
   }
@@ -124,9 +148,15 @@ export default function ChatsScreen() {
   const [enquiries, setEnquiries] = useState<EnquiryPreview[]>([]);
 
   const filteredChats = useMemo(() => {
-    if (!searchQuery.trim()) return chats;
+    const sorted = [...chats].sort((a, b) => {
+      const aNotes = isQuickNotesChat(a) ? 1 : 0;
+      const bNotes = isQuickNotesChat(b) ? 1 : 0;
+      if (aNotes !== bNotes) return bNotes - aNotes;
+      return 0; // keep server order otherwise
+    });
+    if (!searchQuery.trim()) return sorted;
     const q = searchQuery.toLowerCase().trim();
-    return chats.filter((c) => {
+    return sorted.filter((c) => {
       const name = getChatDisplayName(c, user?.id || "");
       if (name.toLowerCase().includes(q)) return true;
       if (c.lastMessage?.content?.toLowerCase().includes(q)) return true;
@@ -219,6 +249,16 @@ export default function ChatsScreen() {
     const other = getOtherParticipant(chat, user?.id || "");
     const isBlocked = other ? blockedIds.has(other.id) : false;
     const name = getDisplayNameForChat(chat);
+    const notes = isQuickNotesChat(chat);
+
+    if (notes) {
+      Alert.alert(
+        "Quick Notes",
+        "Your personal scratchpad — always pinned at the top. Open it to jot reminders to yourself.",
+        [{ text: "OK", style: "cancel" }],
+      );
+      return;
+    }
 
     const blockOption = chat.type === "group" ? [] : [
       {
@@ -398,21 +438,36 @@ export default function ChatsScreen() {
           const other = getOtherParticipant(item, myUserId);
           const isBlocked = other ? blockedIds.has(other.id) : false;
           const isVerified = other?.isVerifiedLekkerpreneur || false;
+          const notes = isQuickNotesChat(item);
 
           return (
             <Pressable
-              style={({ pressed }) => [styles.chatItem, pressed && styles.chatItemPressed]}
+              style={({ pressed }) => [
+                styles.chatItem,
+                notes && styles.notesChatItem,
+                pressed && styles.chatItemPressed,
+              ]}
               onPress={() => router.push({ pathname: "/chat/[id]", params: { id: item.id } })}
               onLongPress={() => handleChatActions(item)}
-              testID={`chat-item-${item.id}`}
+              testID={notes ? "chat-item-quick-notes" : `chat-item-${item.id}`}
             >
-              <Avatar name={chatName} color={avatarColor} photo={photo} isGroup={item.type === "group"} presence={other?.presence} />
+              <Avatar
+                name={chatName}
+                color={avatarColor}
+                photo={photo}
+                isGroup={item.type === "group"}
+                isNotes={notes}
+                presence={other?.presence}
+              />
               <View style={styles.chatInfo}>
                 <View style={styles.chatTopRow}>
                   <View style={styles.nameRow}>
                     <Text style={styles.chatName} numberOfLines={1}>
                       {chatName}
                     </Text>
+                    {notes && (
+                      <Ionicons name="pin" size={14} color={Colors.primary} />
+                    )}
                     {isBlocked && (
                       <Ionicons name="ban-outline" size={14} color={Colors.danger} />
                     )}
@@ -428,9 +483,10 @@ export default function ChatsScreen() {
                 </View>
                 <View style={styles.chatBottomRow}>
                   <View style={styles.lastMessageRow}>
-                    <ReceiptIcon chat={item} myUserId={myUserId} />
+                    {!notes && <ReceiptIcon chat={item} myUserId={myUserId} />}
                     <Text style={styles.chatLastMessage} numberOfLines={1}>
-                      {item.lastMessage?.content || "Start a conversation"}
+                      {item.lastMessage?.content ||
+                        (notes ? "Jot a reminder to yourself" : "Start a conversation")}
                     </Text>
                   </View>
                   {item.unreadCount > 0 && (
@@ -582,6 +638,12 @@ const styles = StyleSheet.create({
     borderBottomColor: Colors.border,
     gap: isSmallScreen ? 10 : 14,
     minHeight: 64,
+  },
+  notesChatItem: {
+    backgroundColor: "rgba(245,184,0,0.06)",
+    borderRadius: 12,
+    marginBottom: 4,
+    borderBottomWidth: 0,
   },
   chatItemPressed: {
     backgroundColor: Colors.card,

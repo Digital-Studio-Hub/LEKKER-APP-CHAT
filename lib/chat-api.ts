@@ -288,10 +288,15 @@ export function getDisplayName(participant: ChatParticipant): string {
   const combined = `${participant.firstName || ""} ${participant.lastName || ""}`.trim();
   if (combined && combined.toLowerCase() !== "user") return combined;
   // Phone is primary identity when name/username not set yet
-  return participant.username || participant.phone || "User";
+  return participant.username || (participant as any).phone || "User";
+}
+
+export function isQuickNotesChat(chat: Pick<ServerChat, "type" | "name">): boolean {
+  return chat.type === "notes" || chat.name === "Quick Notes";
 }
 
 export function getChatDisplayName(chat: ServerChat, myUserId: string): string {
+  if (isQuickNotesChat(chat)) return "Quick Notes";
   if (chat.type === "group" && chat.name) return chat.name;
   const other = chat.participants.find(p => p.id !== myUserId);
   if (other) return getDisplayName(other);
@@ -299,18 +304,20 @@ export function getChatDisplayName(chat: ServerChat, myUserId: string): string {
 }
 
 export function getChatAvatarColor(chat: ServerChat, myUserId: string): string {
+  if (isQuickNotesChat(chat)) return "#F5B800";
   if (chat.type === "group") return "#F5B800";
   const other = chat.participants.find(p => p.id !== myUserId);
   return other?.avatarColor || "#F5B800";
 }
 
 export function getChatProfilePhoto(chat: ServerChat, myUserId: string): string | null {
-  if (chat.type === "group") return null;
+  if (isQuickNotesChat(chat) || chat.type === "group") return null;
   const other = chat.participants.find(p => p.id !== myUserId);
   return other?.profilePhoto || null;
 }
 
 export function getOtherParticipant(chat: ServerChat, myUserId: string): ChatParticipant | undefined {
+  if (isQuickNotesChat(chat)) return undefined;
   return chat.participants.find(p => p.id !== myUserId);
 }
 

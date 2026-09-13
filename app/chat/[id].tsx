@@ -54,6 +54,7 @@ import {
   getDisplayName,
   getPresenceColor,
   getPresenceLabel,
+  isQuickNotesChat,
   editMessage,
   deleteMessage,
   uploadChatAttachment,
@@ -730,6 +731,7 @@ export default function ChatDetailScreen() {
   const profilePhoto = chat ? getChatProfilePhoto(chat, myUserId) : null;
   const isVerified = otherParticipant?.isVerifiedLekkerpreneur ?? false;
   const isGroup = chat?.type === "group";
+  const isNotes = chat ? isQuickNotesChat(chat) : false;
 
   async function handleToggleBlock() {
     if (!chat || isGroup || !otherParticipant) return;
@@ -1103,7 +1105,7 @@ export default function ChatDetailScreen() {
             <Pressable
               style={styles.headerCenter}
               onPress={() => {
-                if (!isGroup && otherParticipant) {
+                if (!isNotes && !isGroup && otherParticipant) {
                   router.push({
                     pathname: "/user-profile/[id]",
                     params: {
@@ -1118,6 +1120,8 @@ export default function ChatDetailScreen() {
               <View style={[styles.avatar, { backgroundColor: avatarColor }]}>
                 {profilePhoto ? (
                   <Image source={{ uri: profilePhoto }} style={{ width: 36, height: 36, borderRadius: 18 }} />
+                ) : isNotes ? (
+                  <Ionicons name="document-text" size={16} color={Colors.background} />
                 ) : isGroup ? (
                   <Ionicons name="people" size={16} color="#fff" />
                 ) : (
@@ -1129,16 +1133,20 @@ export default function ChatDetailScreen() {
               <View>
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
                   <Text style={styles.headerName} numberOfLines={1}>{chatName}</Text>
-                  {isVerified && !isGroup && (
+                  {isNotes && <Ionicons name="pin" size={14} color={Colors.primary} />}
+                  {isVerified && !isGroup && !isNotes && (
                     <Ionicons name="checkmark-circle" size={16} color={Colors.primary} />
                   )}
                 </View>
+                {isNotes && (
+                  <Text style={styles.headerMembers}>Notes to yourself</Text>
+                )}
                 {isGroup && chat.participants && (
                   <Text style={styles.headerMembers} numberOfLines={1}>
                     {chat.participants.map((p) => p.firstName || p.username).join(", ")}
                   </Text>
                 )}
-                {!isGroup && otherParticipant && (
+                {!isGroup && !isNotes && otherParticipant && (
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
                     <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: getPresenceColor(otherParticipant.presence) }} />
                     <Text style={styles.headerMembers}>{getPresenceLabel(otherParticipant.presence)}</Text>
@@ -1147,7 +1155,7 @@ export default function ChatDetailScreen() {
               </View>
             </Pressable>
           )}
-          {chat && !isGroup ? (
+          {chat && !isGroup && !isNotes ? (
             <View style={{ flexDirection: "row", alignItems: "center" }}>
               <Pressable onPress={handleReportUser} style={styles.backButton}>
                 <Ionicons name="flag-outline" size={20} color={Colors.textMuted} />
@@ -1295,7 +1303,7 @@ export default function ChatDetailScreen() {
           <TextInput
             ref={inputRef}
             style={styles.input}
-            placeholder="Type a message..."
+            placeholder={isNotes ? "Write a quick note…" : "Type a message..."}
             placeholderTextColor={Colors.textMuted}
             value={inputText}
             onChangeText={(text) => {

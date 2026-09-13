@@ -1566,6 +1566,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/chats", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const userId = req.user!.userId;
+      // Ensure every account has a pinned Quick Notes (self) chat
+      await storage.ensureQuickNotesChat(userId);
       const chatList = await storage.getUserChats(userId);
 
       const enriched = [];
@@ -1866,6 +1868,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const isParticipant = await storage.isUserInChat(chatId, userId);
       if (!isParticipant) {
         return res.status(403).json({ message: "Access denied" });
+      }
+
+      const chat = await storage.getChat(chatId);
+      if (chat?.type === "notes") {
+        return res.status(400).json({
+          message: "Quick Notes stays pinned — clear messages inside instead of deleting the chat.",
+          code: "QUICK_NOTES_PROTECTED",
+        });
       }
 
       await storage.deleteChat(chatId);

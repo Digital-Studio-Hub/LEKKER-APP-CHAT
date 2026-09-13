@@ -48,6 +48,8 @@ export interface IStorage {
   isUserInChat(chatId: string, userId: string): Promise<boolean>;
   getUserChats(userId: string): Promise<Array<Chat & { participants: Array<{ userId: string; role: string }>; lastMessage?: ChatMessage; unreadCount: number }>>;
   findExistingP2PChat(userId1: string, userId2: string): Promise<Chat | undefined>;
+  findNotesChat(userId: string): Promise<Chat | undefined>;
+  ensureQuickNotesChat(userId: string): Promise<Chat>;
   getChatMessages(chatId: string, limit?: number, before?: string): Promise<ChatMessage[]>;
   sendMessage(chatId: string, senderId: string, content: string | null, type?: string, extras?: Partial<ChatMessage>): Promise<ChatMessage>;
   markMessagesRead(chatId: string, userId: string): Promise<void>;
@@ -277,6 +279,46 @@ class PgStorage implements IStorage {
     return undefined;
   }
 
+  async findNotesChat(userId: string): Promise<Chat | undefined> {
+    const result = await db.execute(sql`
+      SELECT c.* FROM chats c
+      INNER JOIN chat_participants cp ON cp.chat_id = c.id AND cp.user_id = ${userId}
+      WHERE c.type = 'notes'
+      LIMIT 1
+    `);
+    if (result.rows && result.rows.length > 0) {
+      const row = result.rows[0] as any;
+      return {
+        id: row.id,
+        type: row.type,
+        name: row.name,
+        createdBy: row.created_by,
+        createdAt: new Date(row.created_at),
+        updatedAt: new Date(row.updated_at),
+      };
+    }
+    return undefined;
+  }
+
+  /** Self-chat for personal scratchpad — one per user, labelled Quick Notes. */
+  async ensureQuickNotesChat(userId: string): Promise<Chat> {
+    const existing = await this.findNotesChat(userId);
+    if (existing) {
+      if (existing.name !== "Quick Notes") {
+        const [updated] = await db
+          .update(chats)
+          .set({ name: "Quick Notes", updatedAt: new Date() })
+          .where(eq(chats.id, existing.id))
+          .returning();
+        return updated || existing;
+      }
+      return existing;
+    }
+    const chat = await this.createChat("notes", userId, "Quick Notes");
+    await this.addChatParticipant(chat.id, userId, "owner");
+    return chat;
+  }
+
   async getUserChats(userId: string): Promise<Array<Chat & { participants: Array<{ userId: string; role: string }>; lastMessage?: ChatMessage; unreadCount: number }>> {
     const userParticipations = await db.select()
       .from(chatParticipants)
@@ -330,6 +372,9 @@ class PgStorage implements IStorage {
     }
 
     results.sort((a, b) => {
+      const aNotes = a.type === "notes" ? 1 : 0;
+      const bNotes = b.type === "notes" ? 1 : 0;
+      if (aNotes !== bNotes) return bNotes - aNotes; // Quick Notes pinned first
       const aTime = a.lastMessage?.createdAt?.getTime() || a.createdAt.getTime();
       const bTime = b.lastMessage?.createdAt?.getTime() || b.createdAt.getTime();
       return bTime - aTime;
