@@ -12,6 +12,8 @@ import {
   ScrollView,
   Alert,
   Switch,
+  Modal,
+  KeyboardAvoidingView,
 } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -408,40 +410,67 @@ export function DirectoryView() {
         />
       )}
 
-      {enquireFor && (
-        <View style={dirStyles.modalOverlay}>
-          <View style={dirStyles.modalCard}>
-            <Text style={dirStyles.modalTitle}>Enquire — {enquireFor.businessName}</Text>
-            <Text style={dirStyles.privacyHint}>
-              They reply in their Marketplace / Lekker Network portal. You keep the thread in Lekker Chat.
-            </Text>
-            <TextInput
-              style={dirStyles.enquiryInput}
-              placeholder="What do you need? (short brief)"
-              placeholderTextColor={Colors.textMuted}
-              value={enquiryText}
-              onChangeText={setEnquiryText}
-              multiline
-              maxLength={800}
-            />
-            <View style={dirStyles.anonRow}>
-              <View style={{ flex: 1, paddingRight: 12 }}>
-                <Text style={dirStyles.anonTitle}>
-                  {shareContact ? "Share my contact" : "Enquire anonymously"}
-                </Text>
-                <Text style={dirStyles.privacyHint}>
-                  {shareContact
-                    ? "They will see your phone and email with this enquiry."
-                    : `They only see “${user?.firstName || "your first name"}” — not your phone or email — until you reveal it.`}
-                </Text>
-              </View>
-              <Switch
-                value={shareContact}
-                onValueChange={setShareContact}
-                trackColor={{ false: Colors.border, true: Colors.primary }}
-                accessibilityLabel="Share contact details with this business"
+      <Modal
+        visible={!!enquireFor}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setEnquireFor(null)}
+        statusBarTranslucent
+      >
+        <KeyboardAvoidingView
+          style={dirStyles.modalOverlay}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
+          <Pressable style={dirStyles.modalBackdrop} onPress={() => setEnquireFor(null)} />
+          <View
+            style={[
+              dirStyles.modalCard,
+              {
+                // Clear home indicator + tab bar so Cancel / Send are always visible
+                paddingBottom: Math.max(dirInsets.bottom, 12) + (Platform.OS === "web" ? 24 : 56),
+              },
+            ]}
+          >
+            <ScrollView
+              keyboardShouldPersistTaps="handled"
+              bounces={false}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={dirStyles.modalScrollContent}
+            >
+              <Text style={dirStyles.modalTitle}>
+                Enquire — {enquireFor?.businessName}
+              </Text>
+              <Text style={dirStyles.privacyHint}>
+                They reply in their Marketplace / Lekker Network portal. You keep the thread in Lekker Chat.
+              </Text>
+              <TextInput
+                style={dirStyles.enquiryInput}
+                placeholder="What do you need? (short brief)"
+                placeholderTextColor={Colors.textMuted}
+                value={enquiryText}
+                onChangeText={setEnquiryText}
+                multiline
+                maxLength={800}
               />
-            </View>
+              <View style={dirStyles.anonRow}>
+                <View style={{ flex: 1, paddingRight: 12 }}>
+                  <Text style={dirStyles.anonTitle}>
+                    {shareContact ? "Share my contact" : "Enquire anonymously"}
+                  </Text>
+                  <Text style={dirStyles.privacyHint}>
+                    {shareContact
+                      ? "They will see your phone and email with this enquiry."
+                      : `They only see “${user?.firstName || "your first name"}” — not your phone or email — until you reveal it.`}
+                  </Text>
+                </View>
+                <Switch
+                  value={shareContact}
+                  onValueChange={setShareContact}
+                  trackColor={{ false: Colors.border, true: Colors.primary }}
+                  accessibilityLabel="Share contact details with this business"
+                />
+              </View>
+            </ScrollView>
             <View style={dirStyles.modalActions}>
               <Pressable onPress={() => setEnquireFor(null)} style={dirStyles.modalCancel}>
                 <Text style={dirStyles.chatOutlineText}>Cancel</Text>
@@ -461,8 +490,8 @@ export function DirectoryView() {
               </Pressable>
             </View>
           </View>
-        </View>
-      )}
+        </KeyboardAvoidingView>
+      </Modal>
     </View>
   );
 }
@@ -636,18 +665,25 @@ const dirStyles = StyleSheet.create({
     color: Colors.text,
   },
   modalOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.65)",
+    flex: 1,
     justifyContent: "flex-end",
-    zIndex: 50,
+    backgroundColor: "rgba(0,0,0,0.65)",
+  },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
   },
   modalCard: {
     backgroundColor: Colors.card,
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,
-    padding: 20,
-    paddingBottom: 36,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    maxHeight: "88%",
+    gap: 12,
+  },
+  modalScrollContent: {
     gap: 10,
+    paddingBottom: 4,
   },
   modalTitle: {
     fontFamily: "Poppins_600SemiBold",
@@ -656,6 +692,7 @@ const dirStyles = StyleSheet.create({
   },
   enquiryInput: {
     minHeight: 100,
+    maxHeight: 160,
     borderWidth: 1,
     borderColor: Colors.border,
     borderRadius: 12,
@@ -665,7 +702,12 @@ const dirStyles = StyleSheet.create({
     fontSize: 14,
     textAlignVertical: "top",
   },
-  modalActions: { flexDirection: "row", gap: 10, alignItems: "center" },
+  modalActions: {
+    flexDirection: "row",
+    gap: 10,
+    alignItems: "center",
+    paddingTop: 4,
+  },
   modalCancel: { paddingVertical: 10, paddingHorizontal: 12 },
   emptyState: {
     alignItems: "center",
