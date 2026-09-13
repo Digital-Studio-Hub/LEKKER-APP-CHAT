@@ -33,6 +33,7 @@ function RootLayoutNav() {
       <Stack.Screen name="settings" options={{ animation: "slide_from_right" }} />
       <Stack.Screen name="personal-settings" options={{ animation: "slide_from_right" }} />
       <Stack.Screen name="open-business/[workspaceId]" options={{ animation: "slide_from_right" }} />
+      <Stack.Screen name="schedule" options={{ animation: "slide_from_right" }} />
       <Stack.Screen name="profile" options={{ animation: "slide_from_right" }} />
       <Stack.Screen name="new-chat" options={{ presentation: "formSheet", sheetAllowedDetents: [0.85], sheetGrabberVisible: true }} />
       <Stack.Screen name="new-group" options={{ presentation: "formSheet", sheetAllowedDetents: [0.85], sheetGrabberVisible: true }} />

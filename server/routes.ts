@@ -42,6 +42,7 @@ import {
   sendMarketplaceLeadMessage,
   updateMarketplaceLeadStatus,
   fetchMobileNotifications,
+  fetchMobileSchedule,
   LekkerNetworkApiError,
   type LekkerNetworkEntry,
   type WorkspaceDetail,
@@ -2816,6 +2817,53 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Network endpoint error:", error);
       res.status(500).json({ success: false, message: "Internal server error" });
+    }
+  });
+
+  /** Meet + bookings schedule for Lekkerpreneurs (today / week). */
+  app.get("/api/schedule", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const user = await storage.getUser(req.user!.userId);
+      if (!user?.isVerifiedLekkerpreneur || !user.lekkerNetworkId || !user.lekkerWorkspaceId) {
+        return res.json({
+          success: true,
+          meetings: [],
+          offerings: [],
+          bookings: [],
+          activeNow: [],
+          available: false,
+        });
+      }
+      if (!isLekkerNetworkConfigured()) {
+        return res.status(503).json({ success: false, message: "lekker.network unavailable" });
+      }
+      const data = await fetchMobileSchedule({
+        userId: user.lekkerNetworkId,
+        workspaceId: user.lekkerWorkspaceId,
+        from: typeof req.query.from === "string" ? req.query.from : undefined,
+        to: typeof req.query.to === "string" ? req.query.to : undefined,
+      });
+      return res.json({
+        success: true,
+        available: true,
+        from: data.from,
+        to: data.to,
+        meetings: data.meetings || [],
+        offerings: data.offerings || [],
+        bookings: data.bookings || [],
+        activeNow: data.activeNow || [],
+      });
+    } catch (error: any) {
+      console.error("Schedule error:", error);
+      const status = error instanceof LekkerNetworkApiError ? error.status : 500;
+      res.status(status).json({
+        success: false,
+        message: error?.message || "Failed to load schedule",
+        meetings: [],
+        bookings: [],
+        offerings: [],
+        activeNow: [],
+      });
     }
   });
 

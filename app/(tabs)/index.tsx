@@ -25,10 +25,21 @@ import {
   getChatProfilePhoto,
   getOtherParticipant,
   getPresenceColor,
+  getPresenceLabel,
   isQuickNotesChat,
   type ServerChat,
 } from "@/lib/chat-api";
 import { isSmallScreen, fontScale, responsivePadding, responsiveAvatarSize } from "@/lib/responsive";
+import { syncMeetAutoPresence } from "@/lib/meet-presence";
+
+type PresenceStatus = "online" | "away" | "dnd" | "offline";
+
+const QUICK_PRESENCE: { value: PresenceStatus; label: string; color: string }[] = [
+  { value: "online", label: "Online", color: Colors.online },
+  { value: "away", label: "Away", color: Colors.away },
+  { value: "dnd", label: "Do Not Disturb", color: Colors.dnd },
+  { value: "offline", label: "Offline", color: Colors.offline },
+];
 
 function Avatar({
   name,
@@ -141,7 +152,7 @@ type EnquiryPreview = {
 
 export default function ChatsScreen() {
   const insets = useSafeAreaInsets();
-  const { user } = useAuth();
+  const { user, updateProfile } = useAuth();
   const [chats, setChats] = useState<ServerChat[]>([]);
   const [blockedIds, setBlockedIds] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState("");
@@ -169,13 +180,42 @@ export default function ChatsScreen() {
       loadChats();
       loadBlockedUsers();
       loadEnquiries();
+      // Auto-DND while in Meet / active booking (lekkerpreneurs with synced workspace)
+      if (user?.isVerifiedLekkerpreneur && user?.lekkerWorkspaceId) {
+        syncMeetAutoPresence({
+          enabled: true,
+          currentPresence: user.presence,
+          updatePresence: async (presence) => {
+            await updateProfile({ presence });
+          },
+        });
+      }
       const interval = setInterval(() => {
         loadChats();
         loadEnquiries();
       }, 5000);
       return () => clearInterval(interval);
-    }, []),
+    }, [user?.id, user?.presence, user?.isVerifiedLekkerpreneur, user?.lekkerWorkspaceId]),
   );
+
+  function handleQuickStatus() {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const current = (user?.presence as PresenceStatus) || "online";
+    Alert.alert(
+      "Your status",
+      `Currently ${getPresenceLabel(current)}. During Lekker Meet, status can switch to Do Not Disturb automatically.`,
+      [
+        ...QUICK_PRESENCE.map((opt) => ({
+          text: `${opt.label}${opt.value === current ? " ✓" : ""}`,
+          onPress: async () => {
+            Haptics.selectionAsync();
+            await updateProfile({ presence: opt.value });
+          },
+        })),
+        { text: "Cancel", style: "cancel" as const },
+      ],
+    );
+  }
 
   async function loadChats() {
     const serverChats = await fetchChats();
@@ -305,8 +345,37 @@ export default function ChatsScreen() {
   return (
     <View style={[styles.container, { paddingTop: insets.top + webTopInset }]}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Chats</Text>
+        <Pressable
+          onPress={handleQuickStatus}
+          style={styles.statusHit}
+          hitSlop={8}
+          testID="quick-status"
+        >
+          <Text style={styles.headerTitle}>Chats</Text>
+          <View style={styles.statusRow}>
+            <View
+              style={[
+                styles.statusDot,
+                { backgroundColor: getPresenceColor(user?.presence) },
+              ]}
+            />
+            <Text style={styles.statusLabel}>{getPresenceLabel(user?.presence)}</Text>
+            <Ionicons name="chevron-down" size={14} color={Colors.textMuted} />
+          </View>
+        </Pressable>
         <View style={styles.headerActions}>
+          {user?.isVerifiedLekkerpreneur && user?.lekkerWorkspaceId ? (
+            <Pressable
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                router.push("/schedule");
+              }}
+              style={styles.iconButton}
+              testID="schedule-button"
+            >
+              <Ionicons name="calendar-outline" size={24} color={Colors.text} />
+            </Pressable>
+          ) : null}
           <Pressable
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -547,6 +616,25 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_700Bold",
     fontSize: fontScale(28),
     color: Colors.text,
+  },
+  statusHit: {
+    flexShrink: 1,
+  },
+  statusRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 2,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  statusLabel: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12,
+    color: Colors.textMuted,
   },
   headerActions: {
     flexDirection: "row",

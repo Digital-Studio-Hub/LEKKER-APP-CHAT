@@ -689,6 +689,42 @@ export async function fetchMobileNotifications(input: {
   }>(`/api/v1/mobile/notifications?${qs}`);
 }
 
+export type MobileScheduleItem = {
+  id: string;
+  title: string;
+  startsAt: string | null;
+  endsAt: string | null;
+  status: string;
+  href?: string | null;
+  kind?: string;
+  type?: string;
+  mode?: string;
+};
+
+/** Meet rooms + bookings calendar for Chat Schedule / auto-DND. */
+export async function fetchMobileSchedule(input: {
+  userId: string;
+  workspaceId: string;
+  from?: string;
+  to?: string;
+}) {
+  const qs = new URLSearchParams({
+    userId: input.userId,
+    workspaceId: input.workspaceId,
+  });
+  if (input.from) qs.set("from", input.from);
+  if (input.to) qs.set("to", input.to);
+  return lekkerMobileFetchStrict<{
+    success?: boolean;
+    from?: string;
+    to?: string;
+    meetings?: MobileScheduleItem[];
+    offerings?: MobileScheduleItem[];
+    bookings?: MobileScheduleItem[];
+    activeNow?: MobileScheduleItem[];
+  }>(`/api/v1/mobile/schedule?${qs}`);
+}
+
 /** Provider Marketplace Leads inbox (Network SoT). */
 export async function fetchMarketplaceLeads(input: {
   userId: string;
