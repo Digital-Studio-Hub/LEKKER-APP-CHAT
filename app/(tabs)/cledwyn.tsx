@@ -177,7 +177,7 @@ export default function CledwynScreen() {
             {
               id: generateUniqueId(),
               role: "assistant" as const,
-              content: "Sorry, I couldn't reach the assistant right now. Please try again in a moment.",
+              content: "Sorry, I couldn't reach Cledwyn right now. Please try again in a moment.",
               timestamp: new Date().toISOString(),
             },
           ];
@@ -291,11 +291,11 @@ export default function CledwynScreen() {
             <Ionicons name="sparkles" size={20} color={Colors.background} />
           </View>
           <View>
-            <Text style={styles.headerTitle}>Your Assistant</Text>
+            <Text style={styles.headerTitle}>Cledwyn AI</Text>
             <Text style={styles.headerSubtitle}>
               {user?.isVerifiedLekkerpreneur && user?.lekkerWorkspaceId
-                ? "Your business assistant"
-                : "General assistant"}
+                ? "Your business AI on lekker.network"
+                : "Your AI assistant"}
             </Text>
           </View>
         </View>
@@ -319,9 +319,9 @@ export default function CledwynScreen() {
             <View style={styles.emptyIcon}>
               <Ionicons name="sparkles" size={48} color={Colors.primary} />
             </View>
-            <Text style={styles.emptyTitle}>Your Assistant</Text>
+            <Text style={styles.emptyTitle}>Cledwyn AI</Text>
             <Text style={styles.emptySubtitle}>
-              Ask me about business strategy, quotes, marketing, or anything else
+              Ask Cledwyn about business strategy, quotes, marketing, or anything else
             </Text>
           </View>
         }
@@ -331,7 +331,7 @@ export default function CledwynScreen() {
         <TextInput
           ref={inputRef}
           style={styles.input}
-          placeholder="Ask your assistant..."
+          placeholder="Ask Cledwyn..."
           placeholderTextColor={Colors.textMuted}
           value={inputText}
           onChangeText={setInputText}
