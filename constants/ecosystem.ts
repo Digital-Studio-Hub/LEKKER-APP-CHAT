@@ -10,6 +10,8 @@ export const LEKKER_CHAT_WEB_URL = "https://chat.lekker.network";
 export const LEKKER_CHAT_PLAY_STORE_URL =
   "https://play.google.com/store/apps/details?id=com.lekker.chat";
 export const GOOGLE_SEARCH_URL = "https://www.google.com/search?q=";
+/** SafeSearch-on Google search (Personal Settings → Safe Browse). */
+export const GOOGLE_SAFE_SEARCH_URL = "https://www.google.com/search?safe=active&ssui=on&q=";
 
 /** Native in-app route (not a URL) — Browse handles specially */
 export const NATIVE_EVENTS_ROUTE = "/events";

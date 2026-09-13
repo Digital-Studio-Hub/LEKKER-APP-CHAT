@@ -24,6 +24,11 @@ import { storage, CledwynMessage } from "@/lib/storage";
 import { useAuth } from "@/lib/auth-context";
 import { fetchLekkerSoftwareUrl } from "@/lib/lekker-session";
 import { LEKKER_NETWORK_URL } from "@/constants/ecosystem";
+import {
+  getCachedPersonalCare,
+  fetchPersonalCare,
+  reportPatientActivity,
+} from "@/lib/personal-settings";
 
 const NETWORK_SESSION_KEY = "lekker_cledwyn_network_session";
 
@@ -182,6 +187,7 @@ export default function CledwynScreen() {
   const [inputText, setInputText] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [showTyping, setShowTyping] = useState(false);
+  const [companionMode, setCompanionMode] = useState(false);
   const inputRef = useRef<TextInput>(null);
   const listRef = useRef<FlatList>(null);
   const initializedRef = useRef(false);
@@ -206,10 +212,32 @@ export default function CledwynScreen() {
   }, []);
 
   const workspaceMode =
-    !!user?.lekkerNetworkAccess && !!user?.isVerifiedLekkerpreneur && !!user?.lekkerWorkspaceId;
+    !companionMode &&
+    !!user?.lekkerNetworkAccess &&
+    !!user?.isVerifiedLekkerpreneur &&
+    !!user?.lekkerWorkspaceId;
+
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      (async () => {
+        const cached = await getCachedPersonalCare();
+        if (!cancelled) setCompanionMode(!!cached.companionEnabled);
+        try {
+          const remote = await fetchPersonalCare();
+          if (!cancelled) setCompanionMode(!!remote.companionEnabled);
+        } catch {
+          /* keep cache */
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }, []),
+  );
 
   const mergeNotifications = useCallback(async () => {
-    if (!workspaceMode) return;
+    if (!workspaceMode || companionMode) return;
     try {
       const token = getAuthToken();
       const res = await fetch(`${getApiUrl()}api/cledwyn/notifications?limit=25`, {
@@ -291,6 +319,9 @@ export default function CledwynScreen() {
     setMessages((prev) => [...prev, userMessage]);
     setIsStreaming(true);
     setShowTyping(true);
+    if (companionMode) {
+      reportPatientActivity();
+    }
 
     try {
       const baseUrl = getApiUrl();
@@ -441,9 +472,11 @@ export default function CledwynScreen() {
           <View>
             <Text style={styles.headerTitle}>Cledwyn AI</Text>
             <Text style={styles.headerSubtitle}>
-              {workspaceMode
-                ? "Workspace mode — alerts + business help"
-                : "Your AI assistant"}
+              {companionMode
+                ? "Your companion · here whenever you need"
+                : workspaceMode
+                  ? "Workspace mode — alerts + business help"
+                  : "Your AI assistant"}
             </Text>
           </View>
         </View>
@@ -459,7 +492,14 @@ export default function CledwynScreen() {
         </View>
       </View>
 
-      {workspaceMode ? (
+      {companionMode ? (
+        <View style={styles.banner}>
+          <Ionicons name="heart" size={14} color={Colors.primary} />
+          <Text style={styles.bannerText}>
+            Companion mode — a calm friend who checks in. Not a doctor or emergency service.
+          </Text>
+        </View>
+      ) : workspaceMode ? (
         <Pressable style={styles.banner} onPress={() => openWorkspaceCledwyn()}>
           <Ionicons name="sparkles" size={14} color={Colors.primary} />
           <Text style={styles.bannerText}>
@@ -484,11 +524,15 @@ export default function CledwynScreen() {
             <View style={styles.emptyIcon}>
               <Ionicons name="sparkles" size={48} color={Colors.primary} />
             </View>
-            <Text style={styles.emptyTitle}>Cledwyn AI</Text>
+            <Text style={styles.emptyTitle}>
+              {companionMode ? "Hi, I’m Cledwyn" : "Cledwyn AI"}
+            </Text>
             <Text style={styles.emptySubtitle}>
-              {workspaceMode
-                ? "Ask about your business — or wait for workspace alerts from lekker.network"
-                : "Ask Cledwyn about business strategy, quotes, marketing, or anything else"}
+              {companionMode
+                ? "I’m here for a chat whenever you like — about your day, how you’re feeling, or just to say hello."
+                : workspaceMode
+                  ? "Ask about your business — or wait for workspace alerts from lekker.network"
+                  : "Ask Cledwyn about business strategy, quotes, marketing, or anything else"}
             </Text>
           </View>
         }
@@ -498,7 +542,7 @@ export default function CledwynScreen() {
         <TextInput
           ref={inputRef}
           style={styles.input}
-          placeholder="Ask Cledwyn..."
+          placeholder={companionMode ? "Say hello…" : "Ask Cledwyn..."}
           placeholderTextColor={Colors.textMuted}
           value={inputText}
           onChangeText={setInputText}

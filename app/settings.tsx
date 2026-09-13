@@ -1130,6 +1130,28 @@ export default function SettingsScreen() {
         </View>
 
         <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Personal</Text>
+          <View style={styles.sectionCard}>
+            <Pressable
+              style={styles.optionRow}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                router.push("/personal-settings");
+              }}
+              testID="personal-settings-entry"
+            >
+              <Ionicons name="lock-closed-outline" size={20} color={Colors.textSecondary} />
+              <Text style={styles.optionLabel}>Personal Settings</Text>
+              <Text style={styles.optionValue}>PIN</Text>
+              <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
+            </Pressable>
+          </View>
+          <Text style={styles.toggleHint}>
+            Family care options — Safe Browse and Cledwyn Companion — locked with a PIN
+          </Text>
+        </View>
+
+        <View style={styles.section}>
           <Text style={styles.sectionTitle}>Support</Text>
           <View style={styles.sectionCard}>
             <Pressable

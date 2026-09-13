@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "node:http";
 import rateLimit, { type Options } from "express-rate-limit";
-import { registerSchema, loginSchema, updateProfileSchema, users, chatMessages, passwordResetCodes, phoneVerificationCodes, emailVerificationCodes, userEmails } from "@shared/schema";
+import { registerSchema, loginSchema, updateProfileSchema, updatePersonalCareSchema, users, chatMessages, passwordResetCodes, phoneVerificationCodes, emailVerificationCodes, userEmails } from "@shared/schema";
 import { storage, db } from "./storage";
 import { sql, or, and, ne, eq, inArray, desc } from "drizzle-orm";
 import {
@@ -33,7 +33,9 @@ import {
   chatWithNetworkCledwyn,
   streamNetworkCledwyn,
   streamNetworkGeneralistCledwyn,
+  streamNetworkCompanionCledwyn,
   chatWithNetworkGeneralistCledwyn,
+  chatWithNetworkCompanionCledwyn,
   fetchMarketplaceLeads,
   fetchMarketplaceLeadsUnreadCount,
   fetchMarketplaceLeadDetail,
@@ -61,6 +63,13 @@ import {
   addFeedComment,
 } from "./feed";
 import { registerPushToken, unregisterPushToken, notifyChatMessage, notifyUserPush } from "./push";
+import {
+  getPersonalCare,
+  publicPersonalCare,
+  updatePersonalCare,
+  bumpPatientReply,
+  runCompanionCron,
+} from "./personal-care";
 import { containsBlockedContent, CONTENT_FILTER_MESSAGE } from "./content-filter";
 import { isSocialMediaAllowed, type AgeRangeSource } from "../shared/age-gate";
 import { requireSocialMediaAccess } from "./age-gate";
@@ -2782,8 +2791,64 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  /** Personal Settings (Safe Browse + Companion). PIN is device-only. */
+  app.get("/api/personal/settings", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const row = await getPersonalCare(req.user!.userId);
+      return res.json({ success: true, settings: publicPersonalCare(row) });
+    } catch (error) {
+      console.error("personal settings get error:", error);
+      res.status(500).json({ success: false, message: "Failed to load personal settings" });
+    }
+  });
+
+  app.put("/api/personal/settings", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const parsed = updatePersonalCareSchema.safeParse(req.body || {});
+      if (!parsed.success) {
+        return res.status(400).json({
+          success: false,
+          message: parsed.error.errors[0]?.message || "Invalid settings",
+        });
+      }
+      const updated = await updatePersonalCare(req.user!.userId, parsed.data);
+      return res.json({ success: true, settings: publicPersonalCare(updated) });
+    } catch (error: any) {
+      const status = error?.status || 500;
+      console.error("personal settings put error:", error);
+      res.status(status).json({ success: false, message: error?.message || "Failed to save" });
+    }
+  });
+
+  app.post("/api/personal/patient-activity", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      await bumpPatientReply(req.user!.userId);
+      return res.json({ success: true });
+    } catch (error) {
+      console.error("patient-activity error:", error);
+      res.status(500).json({ success: false, message: "Failed" });
+    }
+  });
+
+  /** Cloud Scheduler → companion check-ins + family silence alerts */
+  app.post("/api/cron/companion", async (req: Request, res: Response) => {
+    const secret = process.env.COMPANION_CRON_SECRET || process.env.CRON_SECRET;
+    const header = req.header("X-Cron-Secret") || req.header("Authorization")?.replace(/^Bearer\s+/i, "");
+    if (!secret || header !== secret) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+    try {
+      const result = await runCompanionCron();
+      return res.json({ success: true, ...result });
+    } catch (error) {
+      console.error("companion cron error:", error);
+      res.status(500).json({ success: false, message: "Cron failed" });
+    }
+  });
+
   /**
    * Cledwyn AI — always Network SoT (no local LLM on Chat Cloud Run).
+   * - Personal Companion ON → Network companion (dementia) mode (wins over workspace)
    * - Synced lekkerpreneur + lekkerNetworkAccess ON → Network workspace (satellite) Cledwyn
    * - Everyone else (or workspace failure) → Network generalist / consumer Cledwyn
    * Always responds as SSE for the mobile client.
@@ -2793,6 +2858,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { messages, sessionId: bodySessionId, lekkerNetworkAccess: bodyAccess } = req.body || {};
       const userId = req.user!.userId;
       const userProfile = await storage.getUser(userId);
+      const personalCare = await getPersonalCare(userId);
+      const useCompanion = personalCare?.companionEnabled === true;
 
       const lastUserMessage = Array.isArray(messages)
         ? [...messages].reverse().find((m: any) => m?.role === "user" && typeof m.content === "string")
@@ -2816,6 +2883,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           !!userProfile?.lekkerWorkspaceId);
 
       const useWorkspaceCledwyn =
+        !useCompanion &&
         accessOn &&
         !!userProfile?.isVerifiedLekkerpreneur &&
         !!userProfile?.lekkerNetworkId &&
@@ -2886,6 +2954,61 @@ export async function registerRoutes(app: Express): Promise<Server> {
         res.write("data: [DONE]\n\n");
         res.end();
       };
+
+      if (useCompanion) {
+        try {
+          await bumpPatientReply(userId);
+          res.write(
+            `data: ${JSON.stringify({
+              meta: {
+                mode: "companion",
+                profile: personalCare?.companionProfile || "dementia",
+              },
+            })}\n\n`,
+          );
+          let gotContent = false;
+          for await (const ev of streamNetworkCompanionCledwyn({
+            message: latestText,
+            userId: userProfile?.lekkerNetworkId || userId,
+            displayName,
+            history,
+            sessionId: typeof bodySessionId === "string" ? bodySessionId : null,
+            profile: personalCare?.companionProfile || "dementia",
+          })) {
+            if (ev.meta?.sessionId) {
+              res.write(
+                `data: ${JSON.stringify({ meta: { sessionId: ev.meta.sessionId, mode: "companion" } })}\n\n`,
+              );
+            }
+            if (ev.content) {
+              gotContent = true;
+              res.write(`data: ${JSON.stringify({ content: ev.content })}\n\n`);
+            }
+            if (ev.done) break;
+          }
+          if (!gotContent) {
+            const result = await chatWithNetworkCompanionCledwyn({
+              message: latestText,
+              userId: userProfile?.lekkerNetworkId || userId,
+              displayName,
+              history,
+              sessionId: typeof bodySessionId === "string" ? bodySessionId : null,
+              profile: personalCare?.companionProfile || "dementia",
+            });
+            const reply = result.reply || "I'm here with you. Tell me how you're feeling.";
+            res.write(`data: ${JSON.stringify({ content: reply })}\n\n`);
+          }
+          res.write("data: [DONE]\n\n");
+          res.end();
+          return;
+        } catch (compErr: any) {
+          console.warn("[cledwyn] companion mode failed, falling back:", compErr?.message || compErr);
+          return runGeneralist(
+            "companion-fallback",
+            "I'm having a little trouble connecting, but I'm still here with you.\n\n",
+          );
+        }
+      }
 
       if (useWorkspaceCledwyn) {
         try {

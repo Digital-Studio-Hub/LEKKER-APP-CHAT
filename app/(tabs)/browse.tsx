@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useCallback, useState } from "react";
 import {
   View,
   Text,
@@ -9,7 +9,7 @@ import {
   ScrollView,
   KeyboardAvoidingView,
 } from "react-native";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
@@ -17,27 +17,53 @@ import Colors from "@/constants/colors";
 import { fontScale } from "@/lib/responsive";
 import {
   ECOSYSTEM_SHORTCUTS,
+  GOOGLE_SAFE_SEARCH_URL,
   GOOGLE_SEARCH_URL,
   LEKKER_SOCIAL_URL,
   NATIVE_EVENTS_ROUTE,
 } from "@/constants/ecosystem";
 import { useAgeGate } from "@/lib/age-gate-context";
 import { Alert } from "react-native";
-
-function normaliseUrl(input: string): string {
-  const trimmed = input.trim();
-  if (!trimmed) return "";
-  if (/^https?:\/\//i.test(trimmed)) return trimmed;
-  if (trimmed.includes(".") && !trimmed.includes(" ")) return `https://${trimmed}`;
-  return `${GOOGLE_SEARCH_URL}${encodeURIComponent(trimmed)}`;
-}
+import { getCachedPersonalCare, fetchPersonalCare } from "@/lib/personal-settings";
 
 export default function BrowseScreen() {
   const insets = useSafeAreaInsets();
   const { socialMediaAllowed } = useAgeGate();
   const webTopInset = Platform.OS === "web" ? 67 : 0;
   const [urlInput, setUrlInput] = useState("");
+  const [safeBrowse, setSafeBrowse] = useState(false);
   const bottomPad = Platform.OS === "web" ? 84 : 49 + insets.bottom + 16;
+
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      (async () => {
+        const cached = await getCachedPersonalCare();
+        if (!cancelled) setSafeBrowse(!!cached.safeBrowseEnabled);
+        try {
+          const remote = await fetchPersonalCare();
+          if (!cancelled) setSafeBrowse(!!remote.safeBrowseEnabled);
+        } catch {
+          /* keep cache */
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }, []),
+  );
+
+  function searchBase(): string {
+    return safeBrowse ? GOOGLE_SAFE_SEARCH_URL : GOOGLE_SEARCH_URL;
+  }
+
+  function normaliseUrl(input: string): string {
+    const trimmed = input.trim();
+    if (!trimmed) return "";
+    if (/^https?:\/\//i.test(trimmed)) return trimmed;
+    if (trimmed.includes(".") && !trimmed.includes(" ")) return `https://${trimmed}`;
+    return `${searchBase()}${encodeURIComponent(trimmed)}`;
+  }
 
   function openUrl(url: string, title: string) {
     if (url === NATIVE_EVENTS_ROUTE || url === "/events") {
@@ -75,7 +101,9 @@ export default function BrowseScreen() {
       <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: bottomPad }]}>
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Browse</Text>
-          <Text style={styles.headerSubtitle}>Explore the Lekker ecosystem</Text>
+          <Text style={styles.headerSubtitle}>
+            {safeBrowse ? "Safe Search on · Explore the Lekker ecosystem" : "Explore the Lekker ecosystem"}
+          </Text>
         </View>
 
         <View style={styles.omnibox}>
@@ -120,10 +148,12 @@ export default function BrowseScreen() {
         <Text style={styles.sectionLabel}>Quick search</Text>
         <Pressable
           style={({ pressed }) => [styles.searchCard, pressed && { opacity: 0.85 }]}
-          onPress={() => openUrl(`${GOOGLE_SEARCH_URL}lekkerpreneur+South+Africa`, "Google")}
+          onPress={() => openUrl(`${searchBase()}lekkerpreneur+South+Africa`, "Google")}
         >
           <Ionicons name="search" size={20} color={Colors.primary} />
-          <Text style={styles.searchCardText}>Search the web with Google</Text>
+          <Text style={styles.searchCardText}>
+            {safeBrowse ? "Safe Search with Google" : "Search the web with Google"}
+          </Text>
         </Pressable>
       </ScrollView>
     </KeyboardAvoidingView>

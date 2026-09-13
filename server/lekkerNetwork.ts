@@ -607,6 +607,61 @@ export async function* streamNetworkGeneralistCledwyn(input: {
   yield* parseNetworkCledwynSse(res);
 }
 
+/** Companion Cledwyn (Personal Settings — dementia support, etc.). */
+export async function chatWithNetworkCompanionCledwyn(input: {
+  message: string;
+  userId?: string | null;
+  displayName?: string | null;
+  history?: Array<{ role: string; content: string }>;
+  sessionId?: string | null;
+  profile?: string;
+}): Promise<{ reply: string; sessionId?: string | null; mode?: string }> {
+  return lekkerMobileFetchStrict("/api/v1/cledwyn/chat", {
+    method: "POST",
+    body: JSON.stringify({
+      mode: "companion",
+      profile: input.profile || "dementia",
+      message: input.message,
+      userId: input.userId || undefined,
+      displayName: input.displayName || undefined,
+      history: input.history,
+      sessionId: input.sessionId || undefined,
+    }),
+  });
+}
+
+export async function* streamNetworkCompanionCledwyn(input: {
+  message: string;
+  userId?: string | null;
+  displayName?: string | null;
+  history?: Array<{ role: string; content: string }>;
+  sessionId?: string | null;
+  profile?: string;
+}): AsyncGenerator<{ meta?: any; content?: string; done?: boolean }> {
+  if (!LEKKER_API_KEY) {
+    throw new LekkerNetworkApiError("Lekker Network API is not configured", 503);
+  }
+  const res = await fetch(`${LEKKER_MOBILE_BASE}/api/v1/cledwyn/chat?stream=true`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-API-Key": LEKKER_API_KEY,
+      Accept: "text/event-stream",
+    },
+    body: JSON.stringify({
+      mode: "companion",
+      profile: input.profile || "dementia",
+      message: input.message,
+      userId: input.userId || undefined,
+      displayName: input.displayName || undefined,
+      history: input.history,
+      sessionId: input.sessionId || undefined,
+      stream: true,
+    }),
+  });
+  yield* parseNetworkCledwynSse(res);
+}
+
 /** Unified workspace notifications for Chat Cledwyn thread. */
 export async function fetchMobileNotifications(input: {
   userId: string;

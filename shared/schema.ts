@@ -275,6 +275,44 @@ export const chatMessages = pgTable("chat_messages", {
   index("idx_chat_messages_sender").on(table.senderId),
 ]);
 
+/** Family-care Personal Settings (PIN is device-only; prefs sync here for companion cron). */
+export const personalCareSettings = pgTable("personal_care_settings", {
+  userId: varchar("user_id", { length: 36 }).primaryKey(),
+  safeBrowseEnabled: boolean("safe_browse_enabled").default(false).notNull(),
+  companionEnabled: boolean("companion_enabled").default(false).notNull(),
+  companionProfile: varchar("companion_profile", { length: 40 }).default("dementia").notNull(),
+  checkInIntervalHours: integer("check_in_interval_hours").default(4).notNull(),
+  silenceAlertAfterHours: integer("silence_alert_after_hours").default(4).notNull(),
+  familyContactUserId: varchar("family_contact_user_id", { length: 36 }),
+  lastPatientReplyAt: timestamp("last_patient_reply_at"),
+  lastCheckInSentAt: timestamp("last_check_in_sent_at"),
+  lastFamilyAlertSentAt: timestamp("last_family_alert_sent_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("idx_personal_care_companion").on(table.companionEnabled),
+  index("idx_personal_care_family").on(table.familyContactUserId),
+]);
+
+export const CHECK_IN_INTERVAL_PRESETS = [2, 4, 6, 8, 12] as const;
+export const SILENCE_ALERT_PRESETS = [1, 2, 4, 8, 12, 24] as const;
+export const COMPANION_PROFILES = ["dementia"] as const;
+
+export const updatePersonalCareSchema = z.object({
+  safeBrowseEnabled: z.boolean().optional(),
+  companionEnabled: z.boolean().optional(),
+  companionProfile: z.enum(COMPANION_PROFILES).optional(),
+  checkInIntervalHours: z.number().refine(
+    (n) => (CHECK_IN_INTERVAL_PRESETS as readonly number[]).includes(n),
+    "Invalid check-in interval",
+  ).optional(),
+  silenceAlertAfterHours: z.number().refine(
+    (n) => (SILENCE_ALERT_PRESETS as readonly number[]).includes(n),
+    "Invalid silence alert interval",
+  ).optional(),
+  familyContactUserId: z.string().min(1).max(36).nullable().optional(),
+});
+
 export const passwordSchema = z.string()
   .min(8, "Password must be at least 8 characters")
   .regex(/[A-Z]/, "Password must contain at least one uppercase letter")
@@ -346,3 +384,5 @@ export type FeedLike = typeof feedLikes.$inferSelect;
 export type FeedComment = typeof feedComments.$inferSelect;
 export type FeedShare = typeof feedShares.$inferSelect;
 export type PushToken = typeof pushTokens.$inferSelect;
+export type PersonalCareSettings = typeof personalCareSettings.$inferSelect;
+export type UpdatePersonalCareInput = z.infer<typeof updatePersonalCareSchema>;
