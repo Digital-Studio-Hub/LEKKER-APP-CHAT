@@ -4,12 +4,13 @@
 
 | Context | ID |
 |---------|-----|
-| Previous `app.json` | `app.replit.lekkerchatios` |
-| Local Xcode (`ios/…/project.pbxproj`) | Often already `com.lekker.chat` |
-| Target | `com.lekker.chat` |
+| Previous / legacy ASC listing | `app.replit.lekkerchatios` (ASC app `6761997512`) |
+| Apple Developer bundle ID | `com.lekker.chat` (exists — resource `T5UXQSQ2BY`) |
+| Target listing | **New** ASC app for `com.lekker.chat` (create in browser; API key cannot CREATE apps) |
+
+**2026-09-13 decision:** Ship Android + iOS as `com.lekker.chat`. Do **not** keep submitting to the Replit-id listing. Create a new App Store Connect app for `com.lekker.chat`, then set `eas.json` → `submit.production.ios.ascAppId` to that numeric ID.
 
 **Notes**
 
-- Next `expo prebuild` will keep iOS aligned with `app.json`.
-- If the live App Store app was shipped under `app.replit.lekkerchatios`, App Store Connect migration (or a new listing) may be required before submitting as `com.lekker.chat`.
 - Prefer building from `~/Projects/LEKKER-APP-CHAT` (no spaces in path).
+- Legacy listing (`app.replit.lekkerchatios`) can stay listed until the new app is live, then sunset.

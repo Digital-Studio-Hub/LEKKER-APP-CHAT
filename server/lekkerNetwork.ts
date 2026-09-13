@@ -373,7 +373,9 @@ export function extractLekkerpreneurProfile(entry: LekkerNetworkEntry) {
 
   return {
     ...(firstName ? { firstName, lastName: lastName || "" } : {}),
-    ...(realEmail ? { email: realEmail, emailVerified: !!entry.emailVerified } : {}),
+    // Email is optional for Chat messaging — never import Network emailVerified
+    // into Chat (that flag used to block sending). Linked-email verify stays in Settings.
+    ...(realEmail ? { email: realEmail } : {}),
     businessName: ws.businessName || entry.businessName,
     tradingName: ws.tradingName || entry.tradingName || null,
     lekkerNetworkId: entry.id,

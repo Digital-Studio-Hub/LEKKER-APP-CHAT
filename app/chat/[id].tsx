@@ -1217,15 +1217,11 @@ export default function ChatDetailScreen() {
             <Text style={styles.unblockButtonText}>Unblock</Text>
           </Pressable>
         </View>
-      ) : (!user?.phoneVerified || !user?.emailVerified) ? (
+      ) : !user?.phoneVerified ? (
         <View style={[styles.blockedBar, { paddingBottom: Math.max(insets.bottom, 8), backgroundColor: "rgba(245,184,0,0.12)", borderTopColor: "rgba(245,184,0,0.3)" }]}>
           <Ionicons name="shield-checkmark-outline" size={16} color={Colors.primary} />
           <Text style={[styles.blockedBarText, { color: Colors.primary, flex: 1 }]}>
-            {!user?.phoneVerified && !user?.emailVerified
-              ? "Verify your phone & email to send messages"
-              : !user?.phoneVerified
-              ? "Verify your phone number to send messages"
-              : "Verify your email address to send messages"}
+            Verify your phone number to send messages
           </Text>
           <Pressable onPress={() => router.push("/settings")} style={[styles.unblockButton, { backgroundColor: Colors.primary }]}>
             <Text style={[styles.unblockButtonText, { color: Colors.background }]}>Settings</Text>

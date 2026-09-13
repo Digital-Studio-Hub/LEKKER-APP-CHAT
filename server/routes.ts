@@ -245,6 +245,8 @@ async function applyLekkerSync(user: User, req: Request): Promise<User> {
         workspaceEmailActive,
       };
       if (!profileData.email && user.email) delete patch.email;
+      // Chat messaging is phone/WhatsApp-based — do not overwrite emailVerified from Network.
+      delete patch.emailVerified;
       const updated = await storage.updateUser(user.id, patch as any);
       if (updated) {
         finalUser = updated;
@@ -670,7 +672,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           passwordHash: null,
           avatarColor: randomColor,
           role: "user",
-          emailVerified: !!(prefill.emailVerified && email),
+          // WhatsApp OTP is sufficient identity — email verify is never required to use Chat.
+          emailVerified: true,
           phoneVerified: true,
           lekkerNetworkAccess: false,
           autoReplyEnabled: false,
@@ -678,8 +681,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           locationEnabled: false,
           presence: "online",
           ...prefill,
-          // Ensure phone-based nulls win over empty prefill
+          // Ensure phone-based identity wins over Network prefill
           email: email ?? (typeof prefill.email === "string" ? prefill.email : null),
+          emailVerified: true,
+          phoneVerified: true,
           username: null,
         } as any);
 
@@ -692,8 +697,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
         await storage.logAuthEvent("register_whatsapp", user.id, req.ip, req.headers["user-agent"]?.toString());
       } else {
-        if (!user.phoneVerified) {
-          await storage.updateUser(user.id, { phoneVerified: true });
+        // Phone OTP login is enough — clear any legacy emailVerified=false gate.
+        const waPatch: { phoneVerified?: boolean; emailVerified?: boolean } = {};
+        if (!user.phoneVerified) waPatch.phoneVerified = true;
+        if (!user.emailVerified) waPatch.emailVerified = true;
+        if (Object.keys(waPatch).length) {
+          await storage.updateUser(user.id, waPatch);
           user = (await storage.getUser(user.id))!;
         }
         await storage.logAuthEvent("login_whatsapp", user.id, req.ip, req.headers["user-agent"]?.toString());
