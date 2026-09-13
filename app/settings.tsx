@@ -25,7 +25,14 @@ import { useAuth } from "@/lib/auth-context";
 import { requestNotificationPermissions, areNotificationsEnabled, disableNotifications, canAskForNotifications, registerDevicePushToken } from "@/lib/notifications";
 import { requestLocationPermissions, isLocationEnabled, getLastLocation, disableLocation, UserLocation } from "@/lib/location";
 import { fetchBlockedUsers, unblockUserServer, type BlockedUserRow } from "@/lib/safety-api";
-import { ABUSE_CONTACT_EMAIL, COMMUNITY_GUIDELINES_URL, PRIVACY_POLICY_URL } from "@/constants/safety";
+import {
+  ABUSE_CONTACT_EMAIL,
+  COMMUNITY_GUIDELINES_URL,
+  PRIVACY_POLICY_URL,
+  SUPPORT_PHONE_DISPLAY,
+  SUPPORT_PHONE_E164,
+  SUPPORT_WHATSAPP_URL,
+} from "@/constants/safety";
 import { getApiUrl, apiRequest } from "@/lib/query-client";
 import * as FileSystem from "expo-file-system";
 
@@ -1120,6 +1127,32 @@ export default function SettingsScreen() {
             )}
           </View>
           <Text style={styles.toggleHint}>Blocked users cannot send you messages</Text>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Support</Text>
+          <View style={styles.sectionCard}>
+            <Pressable
+              style={styles.optionRow}
+              onPress={() => Linking.openURL(SUPPORT_WHATSAPP_URL)}
+              testID="support-whatsapp"
+            >
+              <Ionicons name="logo-whatsapp" size={20} color={Colors.textSecondary} />
+              <Text style={styles.optionLabel}>WhatsApp support</Text>
+              <Text style={styles.optionValue}>{SUPPORT_PHONE_DISPLAY}</Text>
+              <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
+            </Pressable>
+            <Pressable
+              style={styles.optionRow}
+              onPress={() => Linking.openURL(`tel:${SUPPORT_PHONE_E164}`)}
+              testID="support-call"
+            >
+              <Ionicons name="call-outline" size={20} color={Colors.textSecondary} />
+              <Text style={styles.optionLabel}>Call support</Text>
+              <Text style={styles.optionValue}>{SUPPORT_PHONE_DISPLAY}</Text>
+              <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
+            </Pressable>
+          </View>
         </View>
 
         <Pressable
