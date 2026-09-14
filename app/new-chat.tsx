@@ -13,7 +13,7 @@ import {
   Linking,
   Share,
 } from "react-native";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
@@ -62,6 +62,20 @@ function normalizePhone(phone: string): string {
   return phone;
 }
 
+/** Match name, raw phone string, or digit-normalized numbers (e.g. 082 vs +2782…). */
+function contactMatchesQuery(contact: { name: string; phone: string }, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  if (contact.name.toLowerCase().includes(q)) return true;
+  if (contact.phone.toLowerCase().includes(q)) return true;
+  const qDigits = q.replace(/\D/g, "");
+  if (qDigits.length >= 3) {
+    const phoneDigits = contact.phone.replace(/\D/g, "");
+    if (phoneDigits.includes(qDigits)) return true;
+  }
+  return false;
+}
+
 export default function NewChatScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
@@ -86,6 +100,29 @@ export default function NewChatScreen() {
   useEffect(() => {
     loadContacts();
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (Platform.OS === "web") return;
+      let cancelled = false;
+      (async () => {
+        try {
+          const Contacts = await import("expo-contacts");
+          const { status } = await Contacts.getPermissionsAsync();
+          if (cancelled) return;
+          if (status === "granted") {
+            setPermissionDenied(false);
+            await loadContacts();
+          }
+        } catch {
+          /* ignore — initial loadContacts still runs on mount */
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }, []),
+  );
 
   useEffect(() => {
     if (searchText.trim().length < 2) {
@@ -136,20 +173,21 @@ export default function NewChatScreen() {
       }
 
       const { data } = await Contacts.getContactsAsync({
-        fields: [Contacts.Fields.PhoneNumbers, Contacts.Fields.Name],
+        fields: [Contacts.Fields.PhoneNumbers, Contacts.Fields.Name, Contacts.Fields.FirstName],
       });
 
-      // Device contacts → normalize phones
+      // Device contacts → normalize phones (keep nameless entries as Unknown)
       const deviceContacts: { name: string; phone: string }[] = [];
       const seen = new Set<string>();
       for (const contact of data) {
-        if (!contact.phoneNumbers || !contact.name) continue;
+        if (!contact.phoneNumbers) continue;
+        const displayName = (contact.name || contact.firstName || "Unknown").trim() || "Unknown";
         for (const pn of contact.phoneNumbers) {
           if (!pn.number) continue;
           const normalized = normalizePhone(pn.number);
           if (seen.has(normalized)) continue;
           seen.add(normalized);
-          deviceContacts.push({ name: contact.name, phone: normalized });
+          deviceContacts.push({ name: displayName, phone: normalized });
         }
       }
 
@@ -465,11 +503,11 @@ export default function NewChatScreen() {
   }
 
   const filteredMatched = searchText
-    ? matchedContacts.filter((c) => c.name.toLowerCase().includes(searchText.toLowerCase()) || c.phone.includes(searchText))
+    ? matchedContacts.filter((c) => contactMatchesQuery(c, searchText))
     : matchedContacts;
 
   const filteredOthers = searchText
-    ? otherContacts.filter((c) => c.name.toLowerCase().includes(searchText.toLowerCase()) || c.phone.includes(searchText))
+    ? otherContacts.filter((c) => contactMatchesQuery(c, searchText))
     : otherContacts;
 
   type SectionItem = { _isSearchUser: boolean } & Record<string, any>;
@@ -579,6 +617,7 @@ export default function NewChatScreen() {
       ) : (
         <SectionList
           sections={sections}
+          keyboardShouldPersistTaps="handled"
           keyExtractor={(item) => item._isSearchUser ? (item as any).id : (item as any).id}
           renderSectionHeader={({ section }) => (
             <View style={styles.sectionHeader}>

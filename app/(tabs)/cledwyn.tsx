@@ -148,7 +148,7 @@ function MessageBubble({
 }
 
 const bubbleStyles = StyleSheet.create({
-  container: { paddingHorizontal: 16, paddingVertical: 3, flexDirection: "row", gap: 8 },
+  container: { paddingHorizontal: 16, paddingVertical: 3, flexDirection: "row", gap: 8, direction: "ltr", writingDirection: "ltr" },
   userContainer: { justifyContent: "flex-end" },
   assistantContainer: { justifyContent: "flex-start", alignItems: "flex-end" },
   botAvatar: {
@@ -726,6 +726,8 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: Colors.background,
+    direction: "ltr",
+    writingDirection: "ltr",
   },
   header: {
     flexDirection: "row",
@@ -735,6 +737,8 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
     borderBottomWidth: 0.5,
     borderBottomColor: Colors.border,
+    direction: "ltr",
+    writingDirection: "ltr",
   },
   headerLeft: {
     flexDirection: "row",
@@ -848,6 +852,8 @@ const styles = StyleSheet.create({
     gap: 8,
     borderTopWidth: 0.5,
     borderTopColor: Colors.border,
+    direction: "ltr",
+    writingDirection: "ltr",
   },
   input: {
     flex: 1,

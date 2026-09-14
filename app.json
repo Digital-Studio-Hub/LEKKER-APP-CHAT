@@ -2,8 +2,8 @@
   "expo": {
     "name": "Lekker Chat",
     "slug": "lekker-chat",
-    "version": "1.1.5",
-    "runtimeVersion": "1.1.5",
+    "version": "1.1.6",
+    "runtimeVersion": "1.1.6",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "lekkerchat",
@@ -39,7 +39,7 @@
     },
     "android": {
       "package": "com.lekker.chat",
-      "versionCode": 36,
+      "versionCode": 37,
       "compileSdkVersion": 35,
       "targetSdkVersion": 35,
       "minSdkVersion": 23,
@@ -64,7 +64,6 @@
       "adaptiveIcon": {
         "backgroundColor": "#F5B800",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "intentFilters": [
