@@ -1,1 +1,1 @@
-PLACEHOLDER
+@/tmp/new-chat-content.txt
