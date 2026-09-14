@@ -1,1 +1,1 @@
-@/tmp/new-chat-content.txt
+LOADING_FROM_DISK
