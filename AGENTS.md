@@ -8,6 +8,10 @@
 4. iOS App Store: `IOS-PRODUCTION-READINESS.md` + `APP_STORE_COMPLIANCE.md` (rejections / resubmission)
 5. `../user knowledge/narrative/IDEA-TO-CODE.md` — Lekker Chat ↔ lekker.network
 
+## Standing rules
+
+- **Schema:** read `docs/SCHEMA_APPLY.md` before deploy. Deploy ≠ migrate.
+
 ## What this is
 
 Expo React Native mobile app (iOS + Android) — messaging, CledwynAI, Lekkerpreneur directory, social feed. Backend is Express + PostgreSQL (**Neon**, centralized with lekker.network) deployed on Replit.
