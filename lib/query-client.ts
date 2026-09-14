@@ -42,6 +42,20 @@ async function throwIfResNotOk(res: Response) {
   }
 }
 
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs = 20000,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function apiRequest(
   method: string,
   route: string,
@@ -57,15 +71,31 @@ export async function apiRequest(
     headers["Content-Type"] = "application/json";
   }
 
-  const res = await fetch(url.toString(), {
+  const init: RequestInit = {
     method,
     headers,
     body: data ? JSON.stringify(data) : undefined,
     credentials: "include",
-  });
+  };
 
-  await throwIfResNotOk(res);
-  return res;
+  let lastErr: unknown;
+  // One retry for flaky mobile networks / brief DNS blips
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetchWithTimeout(url.toString(), init, 20000);
+      await throwIfResNotOk(res);
+      return res;
+    } catch (e) {
+      lastErr = e;
+      if (attempt === 0) {
+        await new Promise((r) => setTimeout(r, 600));
+        continue;
+      }
+    }
+  }
+  throw lastErr instanceof Error
+    ? lastErr
+    : new Error("Network request failed. Check your connection and try again.");
 }
 
 type UnauthorizedBehavior = "returnNull" | "throw";

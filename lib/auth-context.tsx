@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode } from "react";
+import { AppState, type AppStateStatus } from "react-native";
 import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as SecureStore from "expo-secure-store";
@@ -168,6 +169,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     loadUser();
   }, []);
 
+  // Re-register Expo push token when returning to foreground (fixes stale/missing tokens)
+  useEffect(() => {
+    if (!user) return;
+    const onChange = (state: AppStateStatus) => {
+      if (state === "active") {
+        maybeRegisterPush(user);
+      }
+    };
+    const sub = AppState.addEventListener("change", onChange);
+    maybeRegisterPush(user);
+    return () => sub.remove();
+  }, [user?.id, user?.notificationsEnabled]);
+
   async function loadUser() {
     try {
       const token = await loadStoredToken();
@@ -192,13 +206,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const enriched = enrichUser(data.user);
           setUser(enriched);
           await storeUser(enriched);
+          maybeRegisterPush(enriched);
         } else if (res.status === 401) {
           await clearStorage();
           setUser(null);
         }
       } catch (e) {
         if (storedUser) {
-          setUser(enrichUser(storedUser));
+          const enriched = enrichUser(storedUser);
+          setUser(enriched);
+          maybeRegisterPush(enriched);
         }
       }
     } catch (e) {
@@ -230,12 +247,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function maybeRegisterPush(user: AuthUser) {
-    if (!user.notificationsEnabled) return;
+    // Default on unless explicitly disabled — required for closed-app message alerts
+    if (user.notificationsEnabled === false) return;
     try {
-      // Registers Expo token with the API (required for closed-app delivery)
       const { registerDevicePushToken } = await import("@/lib/notifications");
       await registerDevicePushToken();
-    } catch {}
+    } catch (e) {
+      console.warn("[push] register failed:", e);
+    }
   }
 
   async function verifyWhatsApp(

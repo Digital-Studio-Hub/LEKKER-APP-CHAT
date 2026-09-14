@@ -7,8 +7,6 @@ import {
   StyleSheet,
   Platform,
   ActivityIndicator,
-  ScrollView,
-  KeyboardAvoidingView,
   Linking,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
@@ -21,6 +19,7 @@ import * as Haptics from "expo-haptics";
 import { isSmallScreen, fontScale } from "@/lib/responsive";
 import { getApiUrl } from "@/lib/query-client";
 import { COMMUNITY_GUIDELINES_URL, PRIVACY_POLICY_URL } from "@/constants/safety";
+import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
 
 const lekkerLogo = require("../assets/images/lekker-logo.png");
 
@@ -122,16 +121,14 @@ export default function LoginScreen() {
   const webTopInset = Platform.OS === "web" ? 67 : 0;
 
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: Colors.background }}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-    >
-      <ScrollView
+    <View style={{ flex: 1, backgroundColor: Colors.background }}>
+      <KeyboardAwareScrollViewCompat
         contentContainerStyle={[
           styles.scrollContent,
           { paddingTop: insets.top + webTopInset + 40, paddingBottom: insets.bottom + 40 },
         ]}
         keyboardShouldPersistTaps="handled"
+        bottomOffset={24}
       >
         <View style={styles.logoContainer}>
           <Image source={lekkerLogo} style={styles.logo} contentFit="contain" />
@@ -276,8 +273,8 @@ export default function LoginScreen() {
         </View>
 
         <Text style={styles.footer}>Powered by Lekker Network</Text>
-      </ScrollView>
-    </KeyboardAvoidingView>
+      </KeyboardAwareScrollViewCompat>
+    </View>
   );
 }
 

@@ -815,10 +815,19 @@ export default function ChatDetailScreen() {
     if (!text || !id || isBlocked) return;
     if (warnBlockedContent(text)) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setInputText("");
     const replyId = replyToMessage?.id;
+    const result = await sendChatMessage(
+      id,
+      text,
+      "text",
+      replyId ? { replyToMessageId: replyId } : undefined,
+    );
+    if (!result.message) {
+      Alert.alert("Message not sent", result.error || "Please try again.");
+      return;
+    }
+    setInputText("");
     setReplyToMessage(null);
-    await sendChatMessage(id, text, "text", replyId ? { replyToMessageId: replyId } : undefined);
     await loadMessages();
   }
 
@@ -934,7 +943,11 @@ export default function ChatDetailScreen() {
   async function handleSendAttachment(type: string, content: string, extras: Record<string, any>) {
     if (!id || isBlocked) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    await sendChatMessage(id, content, type, extras);
+    const result = await sendChatMessage(id, content, type, extras);
+    if (!result.message) {
+      Alert.alert("Message not sent", result.error || "Please try again.");
+      return;
+    }
     await loadMessages();
   }
 

@@ -6,8 +6,6 @@ import {
   Platform,
   Pressable,
   TextInput,
-  ScrollView,
-  KeyboardAvoidingView,
 } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -20,11 +18,11 @@ import {
   GOOGLE_SAFE_SEARCH_URL,
   GOOGLE_SEARCH_URL,
   LEKKER_SOCIAL_URL,
-  NATIVE_EVENTS_ROUTE,
 } from "@/constants/ecosystem";
 import { useAgeGate } from "@/lib/age-gate-context";
 import { Alert } from "react-native";
 import { getCachedPersonalCare, fetchPersonalCare } from "@/lib/personal-settings";
+import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
 
 export default function BrowseScreen() {
   const insets = useSafeAreaInsets();
@@ -66,11 +64,6 @@ export default function BrowseScreen() {
   }
 
   function openUrl(url: string, title: string) {
-    if (url === NATIVE_EVENTS_ROUTE || url === "/events") {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      router.push("/events");
-      return;
-    }
     if (url === LEKKER_SOCIAL_URL && !socialMediaAllowed) {
       Alert.alert(
         "Social access unavailable",
@@ -82,9 +75,8 @@ export default function BrowseScreen() {
     router.push({ pathname: "/in-app-browser", params: { url, title } });
   }
 
-  const shortcuts = ECOSYSTEM_SHORTCUTS.filter(
-    (s) => s.id !== "social" || socialMediaAllowed,
-  );
+  // Always show Lekker Social in the list; age gate only blocks opening
+  const shortcuts = ECOSYSTEM_SHORTCUTS;
 
   function handleGo() {
     const url = normaliseUrl(urlInput);
@@ -94,11 +86,12 @@ export default function BrowseScreen() {
   }
 
   return (
-    <KeyboardAvoidingView
-      style={[styles.container, { paddingTop: insets.top + webTopInset }]}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-    >
-      <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: bottomPad }]}>
+    <View style={[styles.container, { paddingTop: insets.top + webTopInset }]}>
+      <KeyboardAwareScrollViewCompat
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: bottomPad }]}
+        keyboardShouldPersistTaps="handled"
+        bottomOffset={24}
+      >
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Browse</Text>
           <Text style={styles.headerSubtitle}>
@@ -155,8 +148,8 @@ export default function BrowseScreen() {
             {safeBrowse ? "Safe Search with Google" : "Search the web with Google"}
           </Text>
         </Pressable>
-      </ScrollView>
-    </KeyboardAvoidingView>
+      </KeyboardAwareScrollViewCompat>
+    </View>
   );
 }
 

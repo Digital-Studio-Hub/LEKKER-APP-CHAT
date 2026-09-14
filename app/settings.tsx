@@ -4,7 +4,6 @@ import {
   Text,
   Pressable,
   StyleSheet,
-  ScrollView,
   Platform,
   Alert,
   Switch,
@@ -38,11 +37,11 @@ import {
   COMMUNITY_GUIDELINES_URL,
   PRIVACY_POLICY_URL,
   SUPPORT_PHONE_DISPLAY,
-  SUPPORT_PHONE_E164,
   SUPPORT_WHATSAPP_URL,
 } from "@/constants/safety";
 import { getApiUrl, apiRequest } from "@/lib/query-client";
 import * as FileSystem from "expo-file-system";
+import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
 
 type PresenceStatus = "online" | "away" | "dnd" | "offline";
 
@@ -604,7 +603,7 @@ export default function SettingsScreen() {
         <View style={styles.backButton} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+      <KeyboardAwareScrollViewCompat contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} bottomOffset={24}>
         <View style={styles.profileSection}>
           <Pressable onPress={handleAvatarPress} style={styles.avatarContainer} testID="avatar-press">
             {isUploadingImage ? (
@@ -1211,16 +1210,6 @@ export default function SettingsScreen() {
               <Text style={styles.optionValue}>{SUPPORT_PHONE_DISPLAY}</Text>
               <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
             </Pressable>
-            <Pressable
-              style={styles.optionRow}
-              onPress={() => Linking.openURL(`tel:${SUPPORT_PHONE_E164}`)}
-              testID="support-call"
-            >
-              <Ionicons name="call-outline" size={20} color={Colors.textSecondary} />
-              <Text style={styles.optionLabel}>Call support</Text>
-              <Text style={styles.optionValue}>{SUPPORT_PHONE_DISPLAY}</Text>
-              <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
-            </Pressable>
           </View>
         </View>
 
@@ -1259,7 +1248,7 @@ export default function SettingsScreen() {
         </View>
 
         <Text style={styles.version}>Lekker Chat v1.0.0 · Powered by Lekker Network</Text>
-      </ScrollView>
+      </KeyboardAwareScrollViewCompat>
     </View>
   );
 }

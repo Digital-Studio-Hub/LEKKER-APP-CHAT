@@ -4,7 +4,6 @@ import {
   Text,
   Pressable,
   StyleSheet,
-  ScrollView,
   Platform,
   Alert,
   Switch,
@@ -18,6 +17,7 @@ import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { fontScale } from "@/lib/responsive";
 import { searchUsers, fetchUserProfile, type SearchUser } from "@/lib/chat-api";
+import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
 import {
   CHECK_IN_INTERVAL_PRESETS,
   SILENCE_ALERT_PRESETS,
@@ -404,9 +404,15 @@ export default function PersonalSettingsScreen() {
       </View>
 
       {gate !== "open" || recoveryShown ? (
-        <ScrollView contentContainerStyle={styles.gateWrap}>{renderGate()}</ScrollView>
+        <KeyboardAwareScrollViewCompat contentContainerStyle={styles.gateWrap} bottomOffset={24}>
+          {renderGate()}
+        </KeyboardAwareScrollViewCompat>
       ) : (
-        <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 32 }]}>
+        <KeyboardAwareScrollViewCompat
+          contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 32 }]}
+          keyboardShouldPersistTaps="handled"
+          bottomOffset={24}
+        >
           <Text style={styles.intro}>
             Care options managed by family. Everyday Chat and Cledwyn stay available without this
             PIN.
@@ -542,7 +548,7 @@ export default function PersonalSettingsScreen() {
               </View>
             </>
           )}
-        </ScrollView>
+        </KeyboardAwareScrollViewCompat>
       )}
     </View>
   );

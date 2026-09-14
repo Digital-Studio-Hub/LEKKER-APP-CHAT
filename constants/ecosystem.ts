@@ -18,6 +18,14 @@ export const NATIVE_EVENTS_ROUTE = "/events";
 
 export const ECOSYSTEM_SHORTCUTS = [
   {
+    id: "social",
+    title: "Lekker Social",
+    subtitle: "Discover & connect nearby",
+    url: LEKKER_SOCIAL_URL,
+    icon: "heart-outline" as const,
+    color: "#FF6B6B",
+  },
+  {
     id: "marketplace",
     title: "Lekker Marketplace",
     subtitle: "Shop local products & services",
@@ -56,21 +64,5 @@ export const ECOSYSTEM_SHORTCUTS = [
     url: LEKKER_WEBSITE_URL,
     icon: "globe-outline" as const,
     color: "#A855F7",
-  },
-  {
-    id: "events",
-    title: "Events",
-    subtitle: "Tickets & experiences",
-    url: NATIVE_EVENTS_ROUTE,
-    icon: "ticket-outline" as const,
-    color: "#7C3AED",
-  },
-  {
-    id: "social",
-    title: "Lekker Social",
-    subtitle: "Discover & connect nearby",
-    url: LEKKER_SOCIAL_URL,
-    icon: "heart-outline" as const,
-    color: "#FF6B6B",
   },
 ] as const;

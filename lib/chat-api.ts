@@ -230,16 +230,27 @@ export async function addCledwynToChat(chatId: string): Promise<{ success: boole
   }
 }
 
-export async function sendChatMessage(chatId: string, content: string, type: string = "text", extras?: Record<string, any>): Promise<ServerMessage | null> {
+export async function sendChatMessage(
+  chatId: string,
+  content: string,
+  type: string = "text",
+  extras?: Record<string, any>,
+): Promise<{ message: ServerMessage | null; error?: string }> {
   try {
     const body: any = { content, type, ...extras };
     const res = await apiRequest("POST", `/api/chats/${chatId}/messages`, body);
-    if (!res.ok) return null;
     const data = await res.json();
-    return data.message || null;
-  } catch (e) {
+    return { message: data.message || null };
+  } catch (e: any) {
     console.error("Failed to send message:", e);
-    return null;
+    const msg = String(e?.message || "Failed to send");
+    const offline =
+      /abort|network|failed to fetch|timeout|internet|connection/i.test(msg)
+        ? "Couldn't reach Lekker Chat. Check your internet and try again."
+        : msg.includes("403")
+          ? "Message blocked — verify your phone in Settings, or you may be blocked."
+          : "Message not sent. Please try again.";
+    return { message: null, error: offline };
   }
 }
 
