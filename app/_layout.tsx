@@ -2,6 +2,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect } from "react";
+import { I18nManager, Platform } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -20,6 +21,24 @@ import {
 
 SplashScreen.preventAutoHideAsync();
 
+// Force LTR app-wide (Cledwyn + chat rows mirror under device RTL otherwise).
+// Android may need one app restart after first install of this change.
+if (I18nManager.isRTL) {
+  I18nManager.allowRTL(false);
+  I18nManager.forceRTL(false);
+}
+
+const iosFormSheet = (detents: number[]) => ({
+  presentation: "formSheet" as const,
+  sheetAllowedDetents: detents,
+  sheetGrabberVisible: true,
+});
+
+const androidModal = {
+  presentation: "modal" as const,
+  animation: "slide_from_bottom" as const,
+};
+
 function RootLayoutNav() {
   return (
     <Stack screenOptions={{ headerShown: false }}>
@@ -35,10 +54,22 @@ function RootLayoutNav() {
       <Stack.Screen name="open-business/[workspaceId]" options={{ animation: "slide_from_right" }} />
       <Stack.Screen name="schedule" options={{ animation: "slide_from_right" }} />
       <Stack.Screen name="profile" options={{ animation: "slide_from_right" }} />
-      <Stack.Screen name="new-chat" options={{ presentation: "formSheet", sheetAllowedDetents: [0.85], sheetGrabberVisible: true }} />
-      <Stack.Screen name="new-group" options={{ presentation: "formSheet", sheetAllowedDetents: [0.85], sheetGrabberVisible: true }} />
-      <Stack.Screen name="new-post" options={{ presentation: "formSheet", sheetAllowedDetents: [0.5], sheetGrabberVisible: true }} />
-      <Stack.Screen name="post-comments" options={{ presentation: "formSheet", sheetAllowedDetents: [0.75, 1], sheetGrabberVisible: true }} />
+      <Stack.Screen
+        name="new-chat"
+        options={Platform.OS === "ios" ? iosFormSheet([0.85]) : androidModal}
+      />
+      <Stack.Screen
+        name="new-group"
+        options={Platform.OS === "ios" ? iosFormSheet([0.85]) : androidModal}
+      />
+      <Stack.Screen
+        name="new-post"
+        options={Platform.OS === "ios" ? iosFormSheet([0.5]) : androidModal}
+      />
+      <Stack.Screen
+        name="post-comments"
+        options={Platform.OS === "ios" ? iosFormSheet([0.75, 1]) : androidModal}
+      />
       <Stack.Screen name="in-app-browser" options={{ animation: "slide_from_bottom" }} />
     </Stack>
   );
