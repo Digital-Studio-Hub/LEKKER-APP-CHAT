@@ -679,7 +679,7 @@ export default function ChatDetailScreen() {
     checkBlocked();
     refreshIntervalRef.current = setInterval(() => {
       loadMessages();
-    }, 4000);
+    }, 3000);
     return () => {
       if (refreshIntervalRef.current) clearInterval(refreshIntervalRef.current);
       if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
@@ -690,6 +690,7 @@ export default function ChatDetailScreen() {
   useFocusEffect(
     useCallback(() => {
       if (id) {
+        loadMessages();
         markChatRead(id);
         checkBlocked();
       }

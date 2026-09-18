@@ -13,7 +13,8 @@ export async function registerPushToken(
   const authToken = getAuthToken();
   if (!authToken || !token) return false;
   try {
-    const res = await fetch(`${baseUrl}api/push/register`, {
+    const url = new URL("/api/push/register", baseUrl).toString();
+    const res = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -46,7 +47,8 @@ export async function unregisterPushToken(token?: string): Promise<boolean> {
   const authToken = getAuthToken();
   if (!authToken) return false;
   try {
-    const res = await fetch(`${baseUrl}api/push/register`, {
+    const url = new URL("/api/push/register", baseUrl).toString();
+    const res = await fetch(url, {
       method: "DELETE",
       headers: {
         "Content-Type": "application/json",

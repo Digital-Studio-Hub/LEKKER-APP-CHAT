@@ -97,8 +97,14 @@ export async function areNotificationsEnabled(): Promise<boolean> {
     return false;
   }
 
+  // OS permission is the source of truth. Older builds required a local flag that
+  // was only set after Settings → Notifications, so login/foreground re-register
+  // never saved Expo tokens → zero push_tokens in prod → no instant DMs.
   const stored = await AsyncStorage.getItem(NOTIF_KEY);
-  return stored === "true";
+  if (stored !== "true") {
+    await AsyncStorage.setItem(NOTIF_KEY, "true");
+  }
+  return true;
 }
 
 export async function disableNotifications(): Promise<void> {
@@ -136,8 +142,20 @@ export async function getDevicePushToken(): Promise<string | null> {
 }
 
 export async function registerDevicePushToken(): Promise<boolean> {
-  const granted = await areNotificationsEnabled();
-  if (!granted) return false;
+  if (Platform.OS === "web") return false;
+
+  const N = await getNotifications();
+  if (!N) return false;
+
+  let { status, canAskAgain } = await N.getPermissionsAsync();
+  if (status !== "granted") {
+    // Prompt once when we can — closed-app DMs depend on this.
+    if (canAskAgain === false) return false;
+    const req = await N.requestPermissionsAsync();
+    status = req.status;
+  }
+  if (status !== "granted") return false;
+  await AsyncStorage.setItem(NOTIF_KEY, "true");
 
   const token = await getDevicePushToken();
   if (!token) return false;
@@ -145,6 +163,8 @@ export async function registerDevicePushToken(): Promise<boolean> {
   const ok = await registerPushTokenOnServer(token, Platform.OS);
   if (ok) {
     await AsyncStorage.setItem(PUSH_TOKEN_KEY, token);
+  } else {
+    console.warn("[Push] server rejected token registration");
   }
   return ok;
 }

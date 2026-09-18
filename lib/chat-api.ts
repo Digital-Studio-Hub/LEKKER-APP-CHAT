@@ -239,8 +239,19 @@ export async function sendChatMessage(
   try {
     const body: any = { content, type, ...extras };
     const res = await apiRequest("POST", `/api/chats/${chatId}/messages`, body);
-    const data = await res.json();
-    return { message: data.message || null };
+    const data = await res.json().catch(() => ({}));
+    // apiRequest already throws on !ok; still guard malformed success bodies.
+    const message = data?.message;
+    if (!message || typeof message !== "object" || !message.id) {
+      return {
+        message: null,
+        error:
+          typeof data?.message === "string"
+            ? data.message
+            : "Message not sent. Please try again.",
+      };
+    }
+    return { message };
   } catch (e: any) {
     console.error("Failed to send message:", e);
     const msg = String(e?.message || "Failed to send");
