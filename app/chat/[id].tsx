@@ -704,12 +704,14 @@ export default function ChatDetailScreen() {
       setChat(detail.chat);
     }
     const msgs = await fetchChatMessages(id);
-    setMessages(msgs);
+    if (msgs) setMessages(msgs);
   }
 
   async function loadMessages() {
     if (!id) return;
     const msgs = await fetchChatMessages(id);
+    // Keep existing bubbles on poll/network failure — do not wipe the thread.
+    if (!msgs) return;
     setMessages(msgs);
     setSelectedMessageIds((prev) => {
       if (prev.size === 0) return prev;

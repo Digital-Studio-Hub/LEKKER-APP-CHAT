@@ -74,29 +74,41 @@ export interface SearchUser {
   presence: string | null;
 }
 
-export async function fetchChats(): Promise<ServerChat[]> {
+/**
+ * null = request failed / unchanged (304) — callers must keep previous UI state.
+ * Never return [] on transport errors: that wiped in-chat history every flaky poll.
+ */
+export async function fetchChats(): Promise<ServerChat[] | null> {
   try {
     const res = await apiRequest("GET", "/api/chats");
-    if (!res.ok) return [];
-    const data = await res.json();
-    return data.chats || [];
+    if (res.status === 304) return null;
+    if (!res.ok) return null;
+    const data = await res.json().catch(() => null);
+    if (!data || !Array.isArray(data.chats)) return null;
+    return data.chats;
   } catch (e) {
     console.error("Failed to fetch chats:", e);
-    return [];
+    return null;
   }
 }
 
-export async function fetchChatMessages(chatId: string, limit: number = 50, before?: string): Promise<ServerMessage[]> {
+export async function fetchChatMessages(
+  chatId: string,
+  limit: number = 50,
+  before?: string,
+): Promise<ServerMessage[] | null> {
   try {
     let url = `/api/chats/${chatId}/messages?limit=${limit}`;
     if (before) url += `&before=${before}`;
     const res = await apiRequest("GET", url);
-    if (!res.ok) return [];
-    const data = await res.json();
-    return data.messages || [];
+    if (res.status === 304) return null;
+    if (!res.ok) return null;
+    const data = await res.json().catch(() => null);
+    if (!data || !Array.isArray(data.messages)) return null;
+    return data.messages;
   } catch (e) {
     console.error("Failed to fetch messages:", e);
-    return [];
+    return null;
   }
 }
 

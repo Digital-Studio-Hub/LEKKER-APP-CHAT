@@ -219,7 +219,8 @@ export default function ChatsScreen() {
 
   async function loadChats() {
     const serverChats = await fetchChats();
-    setChats(serverChats);
+    // Keep inbox on poll failure — empty array from errors used to erase all threads.
+    if (serverChats) setChats(serverChats);
   }
 
   async function loadEnquiries() {

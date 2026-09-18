@@ -2,8 +2,8 @@
   "expo": {
     "name": "Lekker Chat",
     "slug": "lekker-chat",
-    "version": "1.1.7",
-    "runtimeVersion": "1.1.7",
+    "version": "1.1.8",
+    "runtimeVersion": "1.1.8",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "lekkerchat",
@@ -18,7 +18,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.lekker.chat",
-      "buildNumber": "18",
+      "buildNumber": "19",
       "infoPlist": {
         "UIRequiresFullScreen": false,
         "NSCameraUsageDescription": "Lekker Chat uses your camera to take photos and share them in conversations.",
@@ -39,7 +39,7 @@
     },
     "android": {
       "package": "com.lekker.chat",
-      "versionCode": 40,
+      "versionCode": 41,
       "compileSdkVersion": 35,
       "targetSdkVersion": 35,
       "minSdkVersion": 23,

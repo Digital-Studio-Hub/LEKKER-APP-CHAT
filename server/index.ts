@@ -16,6 +16,14 @@ process.on("unhandledRejection", (reason) => {
 const app = express();
 const log = console.log;
 
+// Chat payloads must never be cached — 304/empty bodies made the app wipe message threads.
+app.set("etag", false);
+app.use("/api", (_req, res, next) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+  res.setHeader("Pragma", "no-cache");
+  next();
+});
+
 declare module "http" {
   interface IncomingMessage {
     rawBody: unknown;
@@ -342,6 +350,32 @@ function setupErrorHandler(app: express.Application) {
     },
     () => {
       log(`express server serving on port ${port}`);
+      // Companion check-ins + family silence alerts. Cloud Scheduler is preferred;
+      // this in-process loop covers prod when Scheduler is missing/unconfigured.
+      if (process.env.NODE_ENV === "production" || process.env.COMPANION_CRON_INLINE === "1") {
+        const intervalMs = Math.max(
+          5 * 60 * 1000,
+          Number(process.env.COMPANION_CRON_INTERVAL_MS || 15 * 60 * 1000),
+        );
+        const tick = async () => {
+          try {
+            const { runCompanionCron } = await import("./personal-care");
+            const result = await runCompanionCron();
+            if (result.checkIns || result.familyAlerts) {
+              log(`[CompanionCron] inline checked=${result.checked} checkIns=${result.checkIns} familyAlerts=${result.familyAlerts}`);
+            }
+          } catch (e: any) {
+            console.error("[CompanionCron] inline tick failed:", e?.message || e);
+          }
+        };
+        setTimeout(() => {
+          void tick();
+        }, 30_000);
+        setInterval(() => {
+          void tick();
+        }, intervalMs);
+        log(`[CompanionCron] inline scheduler every ${Math.round(intervalMs / 60000)}m`);
+      }
     },
   );
 })();

@@ -73,9 +73,15 @@ export async function apiRequest(
 
   const init: RequestInit = {
     method,
-    headers,
+    headers: {
+      ...headers,
+      // Prevent intermediaries / RN HTTP cache from serving stale chat payloads (304 → empty UI).
+      "Cache-Control": "no-cache",
+      Pragma: "no-cache",
+    },
     body: data ? JSON.stringify(data) : undefined,
     credentials: "include",
+    cache: "no-store",
   };
 
   let lastErr: unknown;
