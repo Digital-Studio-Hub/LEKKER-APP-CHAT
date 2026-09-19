@@ -254,26 +254,48 @@ export default function CledwynScreen() {
         } catch {
           /* keep cache */
         }
-        // Pull server companion check-ins / family-alert notices into this window.
-        if (enabled) {
-          try {
-            const { fetchCompanionMessages, mergeCompanionIntoCledwyn } = await import(
-              "@/lib/companion-api"
-            );
-            const remoteMsgs = await fetchCompanionMessages({ limit: 100 });
-            if (cancelled || !remoteMsgs.length) return;
+        // Always pull companion lines for this user (patient OR family recipient).
+        try {
+          const {
+            fetchCompanionMessages,
+            mergeCompanionIntoCledwyn,
+            markCompanionMessagesRead,
+          } = await import("@/lib/companion-api");
+          const remoteMsgs = await fetchCompanionMessages({ limit: 100 });
+          if (!cancelled && remoteMsgs.length) {
             setMessages((prev) => {
               const merged = mergeCompanionIntoCledwyn(prev, remoteMsgs);
               storage.saveCledwynMessages(merged);
               return merged;
             });
-          } catch {
-            /* offline — keep local */
+            await markCompanionMessagesRead();
           }
+        } catch {
+          /* offline — keep local */
         }
       })();
+
+      // Keep companion thread fresh while this tab is focused (push tokens may be missing).
+      const poll = setInterval(async () => {
+        try {
+          const { fetchCompanionMessages, mergeCompanionIntoCledwyn, markCompanionMessagesRead } =
+            await import("@/lib/companion-api");
+          const remoteMsgs = await fetchCompanionMessages({ limit: 100 });
+          if (cancelled || !remoteMsgs.length) return;
+          setMessages((prev) => {
+            const merged = mergeCompanionIntoCledwyn(prev, remoteMsgs);
+            storage.saveCledwynMessages(merged);
+            return merged;
+          });
+          await markCompanionMessagesRead();
+        } catch {
+          /* ignore */
+        }
+      }, 15000);
+
       return () => {
         cancelled = true;
+        clearInterval(poll);
       };
     }, []),
   );

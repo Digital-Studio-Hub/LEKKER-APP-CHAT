@@ -25,6 +25,20 @@ export async function fetchCompanionMessages(opts?: {
   return Array.isArray(data.messages) ? data.messages : [];
 }
 
+export async function markCompanionMessagesRead(): Promise<void> {
+  try {
+    await apiRequest("POST", "/api/cledwyn/companion-read", {});
+  } catch (e) {
+    console.warn("[Companion] mark read failed", e);
+  }
+}
+
+export const CLEDWYN_COMPANION_CHAT_ID = "__cledwyn_companion__";
+
+export function isCompanionChat(chat: { id?: string; type?: string } | null | undefined): boolean {
+  return chat?.id === CLEDWYN_COMPANION_CHAT_ID || chat?.type === "companion";
+}
+
 /** Merge server companion lines into local Cledwyn transcript (dedupe by id). */
 export function mergeCompanionIntoCledwyn(
   local: CledwynMessage[],

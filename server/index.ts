@@ -362,14 +362,18 @@ function setupErrorHandler(app: express.Application) {
           Number(process.env.COMPANION_CRON_INTERVAL_MS || 15 * 60 * 1000),
         );
         const tick = async () => {
-          try {
-            const { runCompanionCron } = await import("./personal-care");
-            const result = await runCompanionCron();
-            if (result.checkIns || result.familyAlerts) {
-              log(`[CompanionCron] inline checked=${result.checked} checkIns=${result.checkIns} familyAlerts=${result.familyAlerts}`);
+          for (let attempt = 1; attempt <= 3; attempt++) {
+            try {
+              const { runCompanionCron } = await import("./personal-care");
+              const result = await runCompanionCron();
+              if (result.checkIns || result.familyAlerts) {
+                log(`[CompanionCron] inline checked=${result.checked} checkIns=${result.checkIns} familyAlerts=${result.familyAlerts}`);
+              }
+              return;
+            } catch (e: any) {
+              console.error(`[CompanionCron] inline tick failed (attempt ${attempt}):`, e?.message || e);
+              if (attempt < 3) await new Promise((r) => setTimeout(r, 2000 * attempt));
             }
-          } catch (e: any) {
-            console.error("[CompanionCron] inline tick failed:", e?.message || e);
           }
         };
         setTimeout(() => {

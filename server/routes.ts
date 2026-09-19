@@ -1605,6 +1605,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
+      // Surface companion check-ins / family alerts in Chats inbox (opens Cledwyn).
+      try {
+        const { getCompanionInboxSummary } = await import("./personal-care");
+        const summary = await getCompanionInboxSummary(userId);
+        if (summary?.latest) {
+          const ts = summary.latest.createdAt;
+          enriched.unshift({
+            id: "__cledwyn_companion__",
+            type: "companion",
+            name: "Cledwyn Companion",
+            createdAt: ts,
+            updatedAt: ts,
+            participants: [],
+            lastMessage: {
+              id: summary.latest.id,
+              senderId: "cledwyn",
+              content: summary.latest.content,
+              type: "text",
+              status: "sent",
+              createdAt: ts,
+            },
+            unreadCount: summary.unreadCount,
+          });
+        }
+      } catch (e) {
+        console.warn("[chats] companion inbox summary skipped:", e);
+      }
+
       res.json({ chats: enriched });
     } catch (error) {
       console.error("Get chats error:", error);
@@ -3016,6 +3044,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("patient-activity error:", error);
       res.status(500).json({ success: false, message: "Failed" });
+    }
+  });
+
+  app.post("/api/cledwyn/companion-read", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { markCompanionRead, ensureCompanionMessagesTable } = await import("./personal-care");
+      await ensureCompanionMessagesTable();
+      await markCompanionRead(req.user!.userId);
+      return res.json({ success: true });
+    } catch (error: any) {
+      console.error("companion-read error:", error);
+      res.status(500).json({ success: false, message: error?.message || "Failed" });
     }
   });
 

@@ -271,7 +271,7 @@ export async function notifyUserPush(
       opts?.category ||
       (data?.type === "enquiry_reply"
         ? "enquiries"
-        : data?.type === "companion_checkin" || data?.type === "companion_silence"
+        : typeof data?.type === "string" && data.type.startsWith("companion_")
           ? "companion"
           : data?.type === "schedule" || data?.type === "meet_reminder"
             ? "schedule"

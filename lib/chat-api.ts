@@ -352,7 +352,12 @@ export function isQuickNotesChat(chat: Pick<ServerChat, "type" | "name">): boole
   return chat.type === "notes" || chat.name === "Quick Notes";
 }
 
+export function isCompanionInboxChat(chat: Pick<ServerChat, "type" | "id" | "name">): boolean {
+  return chat.type === "companion" || chat.id === "__cledwyn_companion__";
+}
+
 export function getChatDisplayName(chat: ServerChat, myUserId: string): string {
+  if (isCompanionInboxChat(chat)) return "Cledwyn Companion";
   if (isQuickNotesChat(chat)) return "Quick Notes";
   if (chat.type === "group" && chat.name) return chat.name;
   const other = chat.participants.find(p => p.id !== myUserId);
@@ -361,20 +366,20 @@ export function getChatDisplayName(chat: ServerChat, myUserId: string): string {
 }
 
 export function getChatAvatarColor(chat: ServerChat, myUserId: string): string {
-  if (isQuickNotesChat(chat)) return "#F5B800";
+  if (isCompanionInboxChat(chat) || isQuickNotesChat(chat)) return "#F5B800";
   if (chat.type === "group") return "#F5B800";
   const other = chat.participants.find(p => p.id !== myUserId);
   return other?.avatarColor || "#F5B800";
 }
 
 export function getChatProfilePhoto(chat: ServerChat, myUserId: string): string | null {
-  if (isQuickNotesChat(chat) || chat.type === "group") return null;
+  if (isCompanionInboxChat(chat) || isQuickNotesChat(chat) || chat.type === "group") return null;
   const other = chat.participants.find(p => p.id !== myUserId);
   return other?.profilePhoto || null;
 }
 
 export function getOtherParticipant(chat: ServerChat, myUserId: string): ChatParticipant | undefined {
-  if (isQuickNotesChat(chat)) return undefined;
+  if (isCompanionInboxChat(chat) || isQuickNotesChat(chat)) return undefined;
   return chat.participants.find(p => p.id !== myUserId);
 }
 

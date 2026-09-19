@@ -2,6 +2,7 @@ import { and, desc, eq, gte } from "drizzle-orm";
 import {
   personalCareSettings,
   cledwynCompanionMessages,
+  pushTokens,
   type PersonalCareSettings,
   type UpdatePersonalCareInput,
   type CledwynCompanionMessage,
@@ -33,6 +34,8 @@ CREATE INDEX IF NOT EXISTS idx_cledwyn_companion_about
   ON cledwyn_companion_messages (about_user_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_cledwyn_companion_event
   ON cledwyn_companion_messages (event_type, created_at);
+ALTER TABLE personal_care_settings
+  ADD COLUMN IF NOT EXISTS companion_last_read_at timestamp;
   `);
   companionTableReady = true;
 }
@@ -217,6 +220,109 @@ export async function listCompanionMessages(
   return rows.reverse();
 }
 
+export async function getCompanionInboxSummary(userId: string): Promise<{
+  latest: CledwynCompanionMessage | null;
+  unreadCount: number;
+} | null> {
+  await ensureCompanionMessagesTable();
+  const [latest] = await db
+    .select()
+    .from(cledwynCompanionMessages)
+    .where(eq(cledwynCompanionMessages.userId, userId))
+    .orderBy(desc(cledwynCompanionMessages.createdAt))
+    .limit(1);
+  if (!latest) return null;
+
+  let care = await getPersonalCare(userId);
+  if (!care) {
+    try {
+      care = await getOrCreatePersonalCare(userId);
+    } catch {
+      care = undefined;
+    }
+  }
+  const lastRead = care?.companionLastReadAt;
+  let unreadCount = 0;
+  if (!lastRead) {
+    const all = await db
+      .select({ id: cledwynCompanionMessages.id })
+      .from(cledwynCompanionMessages)
+      .where(eq(cledwynCompanionMessages.userId, userId));
+    unreadCount = all.length;
+  } else {
+    const result = await pool.query(
+      `SELECT count(*)::int AS n FROM cledwyn_companion_messages
+       WHERE user_id = $1 AND created_at > $2`,
+      [userId, lastRead],
+    );
+    unreadCount = Number(result.rows[0]?.n || 0);
+  }
+
+  return { latest, unreadCount: Math.min(99, unreadCount) };
+}
+
+export async function markCompanionRead(userId: string): Promise<void> {
+  await ensureCompanionMessagesTable();
+  await getOrCreatePersonalCare(userId);
+  await db
+    .update(personalCareSettings)
+    .set({ companionLastReadAt: new Date(), updatedAt: new Date() })
+    .where(eq(personalCareSettings.userId, userId));
+}
+
+/** Notify via push + SSE; never fail the cron if push has no tokens. */
+export async function deliverCompanionNotice(
+  userId: string,
+  title: string,
+  body: string,
+  data: Record<string, string>,
+  opts?: { urgent?: boolean; messageId?: string },
+): Promise<{ pushed: boolean; tokenCount: number }> {
+  const tokens = await db
+    .select({ expoPushToken: pushTokens.expoPushToken })
+    .from(pushTokens)
+    .where(eq(pushTokens.userId, userId));
+  const tokenCount = tokens.length;
+
+  if (tokenCount === 0) {
+    console.warn(
+      `[Companion] no push tokens for user=${userId} type=${data.type || "?"} — surface via Chats inbox + Cledwyn sync`,
+    );
+  }
+
+  await notifyUserPush(userId, title, body, data, {
+    category: "companion",
+    urgent: opts?.urgent ?? true,
+  });
+
+  const messageId = opts?.messageId || data.messageId || `companion-${Date.now()}`;
+  try {
+    const { publishRealtimeEvent } = await import("./realtime");
+    await publishRealtimeEvent({
+      type: "message.created",
+      chatId: "__cledwyn_companion__",
+      messageId,
+      senderId: "cledwyn",
+      targetUserId: userId,
+      createdAt: new Date().toISOString(),
+      preview: body.slice(0, 120),
+      message: {
+        id: messageId,
+        chatId: "__cledwyn_companion__",
+        senderId: "cledwyn",
+        content: body,
+        type: "text",
+        status: "sent",
+        createdAt: new Date() as any,
+      },
+    });
+  } catch (e) {
+    console.warn("[Companion] realtime fanout failed:", e);
+  }
+
+  return { pushed: tokenCount > 0, tokenCount };
+}
+
 /**
  * Cloud Scheduler / inline entry — companion check-ins + family silence alerts.
  * All conversational lines go into Cledwyn companion threads (not patient↔family DMs).
@@ -259,7 +365,7 @@ export async function runCompanionCron(): Promise<{
           `Hi ${patientFirst} — it's Cledwyn checking in. How are you feeling right now?\n\n` +
           `Please reply here when you can. I'm here with you.`;
 
-        await appendCompanionMessage({
+        const checkMsg = await appendCompanionMessage({
           userId: row.userId,
           aboutUserId: row.userId,
           role: "assistant",
@@ -271,12 +377,12 @@ export async function runCompanionCron(): Promise<{
           },
         });
 
-        await notifyUserPush(
+        await deliverCompanionNotice(
           row.userId,
           "Cledwyn",
           `Hi ${patientFirst} — just checking in. Open Cledwyn to reply.`,
-          { type: "companion_checkin", href: "/cledwyn" },
-          { category: "companion" },
+          { type: "companion_checkin", href: "/(tabs)/cledwyn", messageId: checkMsg.id },
+          { urgent: true, messageId: checkMsg.id },
         );
 
         await db
@@ -305,7 +411,7 @@ export async function runCompanionCron(): Promise<{
       });
 
       // Patient Cledwyn: transparent notice that family was contacted
-      await appendCompanionMessage({
+      const patientNotice = await appendCompanionMessage({
         userId: row.userId,
         aboutUserId: row.userId,
         role: "assistant",
@@ -321,7 +427,7 @@ export async function runCompanionCron(): Promise<{
       });
 
       // Family Cledwyn: alert in their AI chat (not the DM with the patient)
-      await appendCompanionMessage({
+      const familyNotice = await appendCompanionMessage({
         userId: row.familyContactUserId,
         aboutUserId: row.userId,
         role: "assistant",
@@ -330,7 +436,7 @@ export async function runCompanionCron(): Promise<{
           `Cledwyn Companion: ${patientName} hasn't replied for ${duration}.\n` +
           `Last reply was ${lastReplyLabel}.\n\n` +
           `This is an automated check from Personal Settings — not a medical emergency notice. ` +
-          `Open Cledwyn on their side when you can; their check-ins live in our chat for habit review later.`,
+          `Open Cledwyn for details — check-ins live there for habit review later.`,
         metadata: {
           patientUserId: row.userId,
           sinceReplyMs: sinceReply,
@@ -338,19 +444,24 @@ export async function runCompanionCron(): Promise<{
         },
       });
 
-      await notifyUserPush(
+      await deliverCompanionNotice(
         row.userId,
         "Cledwyn",
         `I haven't heard from you, so I let ${familyName} know.`,
-        { type: "companion_silence_patient", href: "/cledwyn" },
-        { category: "companion" },
+        { type: "companion_silence_patient", href: "/(tabs)/cledwyn", messageId: patientNotice.id },
+        { urgent: true, messageId: patientNotice.id },
       );
-      await notifyUserPush(
+      await deliverCompanionNotice(
         row.familyContactUserId,
         "Cledwyn Companion",
         `${patientName} hasn't replied for ${duration}. Open Cledwyn for details.`,
-        { type: "companion_silence", href: "/cledwyn", aboutUserId: row.userId },
-        { category: "companion", urgent: true },
+        {
+          type: "companion_silence",
+          href: "/(tabs)/cledwyn",
+          aboutUserId: row.userId,
+          messageId: familyNotice.id,
+        },
+        { urgent: true, messageId: familyNotice.id },
       );
 
       await db

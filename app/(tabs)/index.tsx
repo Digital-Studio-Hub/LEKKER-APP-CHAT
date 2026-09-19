@@ -27,9 +27,11 @@ import {
   getPresenceColor,
   getPresenceLabel,
   isQuickNotesChat,
+  isCompanionInboxChat,
   type ServerChat,
 } from "@/lib/chat-api";
 import { ensureRealtimeStarted, subscribeRealtime, isRealtimeConnected } from "@/lib/realtime";
+import { registerDevicePushToken } from "@/lib/notifications";
 import { isSmallScreen, fontScale, responsivePadding, responsiveAvatarSize } from "@/lib/responsive";
 import { syncMeetAutoPresence } from "@/lib/meet-presence";
 
@@ -179,6 +181,8 @@ export default function ChatsScreen() {
   useEffect(() => {
     if (!user?.id) return;
     ensureRealtimeStarted();
+    // Companion alerts require a device push token — refresh on inbox open.
+    void registerDevicePushToken();
     const unsub = subscribeRealtime((event) => {
       if (event.type !== "message.created" || !event.chatId) return;
       // Soft refresh inbox so last message / unread update without waiting for poll.
@@ -523,24 +527,37 @@ export default function ChatsScreen() {
           const isBlocked = other ? blockedIds.has(other.id) : false;
           const isVerified = other?.isVerifiedLekkerpreneur || false;
           const notes = isQuickNotesChat(item);
+          const companion = isCompanionInboxChat(item);
 
           return (
             <Pressable
               style={({ pressed }) => [
                 styles.chatItem,
-                notes && styles.notesChatItem,
+                (notes || companion) && styles.notesChatItem,
                 pressed && styles.chatItemPressed,
               ]}
-              onPress={() => router.push({ pathname: "/chat/[id]", params: { id: item.id } })}
+              onPress={() => {
+                if (companion) {
+                  router.push("/(tabs)/cledwyn");
+                  return;
+                }
+                router.push({ pathname: "/chat/[id]", params: { id: item.id } });
+              }}
               onLongPress={() => handleChatActions(item)}
-              testID={notes ? "chat-item-quick-notes" : `chat-item-${item.id}`}
+              testID={
+                companion
+                  ? "chat-item-cledwyn-companion"
+                  : notes
+                    ? "chat-item-quick-notes"
+                    : `chat-item-${item.id}`
+              }
             >
               <Avatar
                 name={chatName}
                 color={avatarColor}
                 photo={photo}
                 isGroup={item.type === "group"}
-                isNotes={notes}
+                isNotes={notes || companion}
                 presence={other?.presence}
               />
               <View style={styles.chatInfo}>
@@ -549,6 +566,9 @@ export default function ChatsScreen() {
                     <Text style={styles.chatName} numberOfLines={1}>
                       {chatName}
                     </Text>
+                    {companion && (
+                      <Ionicons name="sparkles" size={14} color={Colors.primary} />
+                    )}
                     {notes && (
                       <Ionicons name="pin" size={14} color={Colors.primary} />
                     )}

@@ -29,6 +29,8 @@ export type RealtimeEvent = {
   createdAt?: string;
   preview?: string | null;
   message?: Partial<ChatMessage> | null;
+  /** When set (e.g. companion inbox), only this user's SSE subscribers receive it. */
+  targetUserId?: string;
 };
 
 type Subscriber = {
@@ -189,10 +191,12 @@ export async function publishRealtimeEvent(event: RealtimeEvent): Promise<void> 
 
 function fanOutLocal(event: RealtimeEvent) {
   if (!event.chatId) return;
-  for (const [, set] of subscribers) {
+  const isCompanion = event.chatId === "__cledwyn_companion__";
+  for (const [userId, set] of subscribers) {
+    if (event.targetUserId && event.targetUserId !== userId) continue;
     for (const sub of set) {
       if (sub.chatId && sub.chatId !== event.chatId) continue;
-      if (!sub.chatId && !sub.chatIds.has(event.chatId)) continue;
+      if (!sub.chatId && !isCompanion && !sub.chatIds.has(event.chatId)) continue;
       sseWrite(sub.res, event);
     }
   }

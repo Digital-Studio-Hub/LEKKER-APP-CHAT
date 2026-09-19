@@ -291,6 +291,8 @@ export const personalCareSettings = pgTable("personal_care_settings", {
   lastPatientReplyAt: timestamp("last_patient_reply_at"),
   lastCheckInSentAt: timestamp("last_check_in_sent_at"),
   lastFamilyAlertSentAt: timestamp("last_family_alert_sent_at"),
+  /** Watermark for Cledwyn Companion inbox unread (patient or family). */
+  companionLastReadAt: timestamp("companion_last_read_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => [
