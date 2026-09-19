@@ -350,6 +350,10 @@ function setupErrorHandler(app: express.Application) {
     },
     () => {
       log(`express server serving on port ${port}`);
+      // Chat SSE bus — LISTEN lekker_chat (direct Neon URL; not the pooler).
+      void import("./realtime")
+        .then(({ startRealtimeListener }) => startRealtimeListener())
+        .catch((e) => console.error("[Realtime] boot LISTEN failed:", e?.message || e));
       // Companion check-ins + family silence alerts. Cloud Scheduler is preferred;
       // this in-process loop covers prod when Scheduler is missing/unconfigured.
       if (process.env.NODE_ENV === "production" || process.env.COMPANION_CRON_INLINE === "1") {

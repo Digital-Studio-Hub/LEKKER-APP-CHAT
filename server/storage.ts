@@ -12,7 +12,7 @@ if (!process.env.DATABASE_URL) {
   throw new Error("DATABASE_URL is required");
 }
 
-const pool = new Pool({
+export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   max: 10,
   idleTimeoutMillis: 30000,
@@ -435,6 +435,13 @@ class PgStorage implements IStorage {
     const [message] = await db.insert(chatMessages).values(values).returning();
 
     await db.update(chats).set({ updatedAt: new Date() }).where(eq(chats.id, chatId));
+
+    try {
+      const { publishRealtimeEvent, messageToRealtimeEvent } = await import("./realtime");
+      void publishRealtimeEvent(messageToRealtimeEvent("message.created", message));
+    } catch (e) {
+      console.warn("[Realtime] publish after sendMessage failed:", e);
+    }
 
     return message;
   }

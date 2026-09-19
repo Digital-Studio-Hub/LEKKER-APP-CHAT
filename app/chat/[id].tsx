@@ -22,6 +22,11 @@ import { Audio } from "expo-av";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/lib/auth-context";
 import {
+  subscribeRealtime,
+  realtimeMessageToServer,
+  ensureRealtimeStarted,
+} from "@/lib/realtime";
+import {
   blockUserServer,
   unblockUserServer,
   isUserBlockedServer,
@@ -677,14 +682,45 @@ export default function ChatDetailScreen() {
   useEffect(() => {
     loadChatData();
     checkBlocked();
+    // Slow fallback poll — primary delivery is SSE (lib/realtime).
     refreshIntervalRef.current = setInterval(() => {
       loadMessages();
-    }, 3000);
+    }, 30000);
     return () => {
       if (refreshIntervalRef.current) clearInterval(refreshIntervalRef.current);
       if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
       if (meteringIntervalRef.current) clearInterval(meteringIntervalRef.current);
     };
+  }, [id]);
+
+  useEffect(() => {
+    if (!id) return;
+    ensureRealtimeStarted();
+    const unsub = subscribeRealtime((event) => {
+      if (!event.chatId || event.chatId !== id) return;
+      if (event.type === "message.created") {
+        const msg = realtimeMessageToServer(event);
+        if (msg) {
+          setMessages((prev) => {
+            if (prev.some((m) => m.id === msg.id)) return prev;
+            return [...prev, msg];
+          });
+          markChatRead(id);
+          return;
+        }
+        void loadMessages();
+        return;
+      }
+      if (event.type === "message.updated" || event.type === "message.deleted") {
+        const msg = realtimeMessageToServer(event);
+        if (msg) {
+          setMessages((prev) => prev.map((m) => (m.id === msg.id ? { ...m, ...msg } : m)));
+          return;
+        }
+        void loadMessages();
+      }
+    });
+    return unsub;
   }, [id]);
 
   useFocusEffect(

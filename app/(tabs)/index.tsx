@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from "react";
+import React, { useState, useCallback, useMemo, useEffect } from "react";
 import {
   View,
   Text,
@@ -29,6 +29,7 @@ import {
   isQuickNotesChat,
   type ServerChat,
 } from "@/lib/chat-api";
+import { ensureRealtimeStarted, subscribeRealtime, isRealtimeConnected } from "@/lib/realtime";
 import { isSmallScreen, fontScale, responsivePadding, responsiveAvatarSize } from "@/lib/responsive";
 import { syncMeetAutoPresence } from "@/lib/meet-presence";
 
@@ -175,6 +176,17 @@ export default function ChatsScreen() {
     });
   }, [chats, searchQuery, user?.id]);
 
+  useEffect(() => {
+    if (!user?.id) return;
+    ensureRealtimeStarted();
+    const unsub = subscribeRealtime((event) => {
+      if (event.type !== "message.created" || !event.chatId) return;
+      // Soft refresh inbox so last message / unread update without waiting for poll.
+      void loadChats();
+    });
+    return unsub;
+  }, [user?.id]);
+
   useFocusEffect(
     useCallback(() => {
       loadChats();
@@ -190,10 +202,12 @@ export default function ChatsScreen() {
           },
         });
       }
+      // Fallback poll — slower when SSE is connected.
+      const intervalMs = isRealtimeConnected() ? 30000 : 5000;
       const interval = setInterval(() => {
         loadChats();
         loadEnquiries();
-      }, 5000);
+      }, intervalMs);
       return () => clearInterval(interval);
     }, [user?.id, user?.presence, user?.isVerifiedLekkerpreneur, user?.lekkerWorkspaceId]),
   );

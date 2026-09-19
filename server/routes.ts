@@ -1888,6 +1888,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .where(eq(chatMessages.id, messageId))
         .returning();
 
+      try {
+        const { publishRealtimeEvent, messageToRealtimeEvent } = await import("./realtime");
+        void publishRealtimeEvent(messageToRealtimeEvent("message.updated", updated));
+      } catch { /* non-fatal */ }
+
       res.json({ message: updated });
     } catch (error) {
       console.error("Edit message error:", error);
@@ -1920,6 +1925,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .set({ isDeleted: true, content: null, imageUri: null, fileUri: null, audioUri: null })
         .where(eq(chatMessages.id, messageId))
         .returning();
+
+      try {
+        const { publishRealtimeEvent, messageToRealtimeEvent } = await import("./realtime");
+        void publishRealtimeEvent(messageToRealtimeEvent("message.deleted", updated));
+      } catch { /* non-fatal */ }
 
       res.json({ message: updated });
     } catch (error) {
@@ -4108,6 +4118,93 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e) {
       console.error("[workspace-notify]", e);
       return res.status(500).json({ success: false, message: "Failed" });
+    }
+  });
+
+  /**
+   * Foreground realtime stream (SSE).
+   * Clients keep this open while the app is active; Expo push covers background.
+   * Query: optional ?chatId= to scope; omit for all of the user's chats.
+   */
+  const realtimeLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 30,
+    standardHeaders: true,
+    legacyHeaders: false,
+    validate: { xForwardedForHeader: false },
+  });
+
+  app.get(
+    "/api/realtime/stream",
+    authMiddleware,
+    realtimeLimiter,
+    async (req: AuthenticatedRequest, res: Response) => {
+      const userId = req.user!.userId;
+      const chatId =
+        typeof req.query.chatId === "string" && req.query.chatId.length > 0
+          ? req.query.chatId
+          : null;
+
+      const {
+        initSseResponse,
+        addRealtimeSubscriber,
+        removeRealtimeSubscriber,
+        startRealtimeListener,
+        realtimeSubscriberCount,
+      } = await import("./realtime");
+
+      try {
+        await startRealtimeListener();
+        initSseResponse(res);
+        const sub = await addRealtimeSubscriber({ userId, res, chatId });
+        res.write(
+          `data: ${JSON.stringify({
+            type: "ready",
+            subscribers: realtimeSubscriberCount(),
+            chatId: chatId || null,
+          })}\n\n`,
+        );
+
+        const cleanup = () => {
+          removeRealtimeSubscriber(sub);
+        };
+        req.on("close", cleanup);
+        req.on("aborted", cleanup);
+        res.on("error", cleanup);
+      } catch (e: any) {
+        const status = e?.status || 500;
+        if (!res.headersSent) {
+          return res.status(status).json({
+            message: e?.message || "Failed to open realtime stream",
+          });
+        }
+        try {
+          res.end();
+        } catch {
+          /* ignore */
+        }
+      }
+    },
+  );
+
+  app.get("/api/realtime/health", async (_req: Request, res: Response) => {
+    try {
+      const { startRealtimeListener, realtimeSubscriberCount, getRealtimeListenUrl } =
+        await import("./realtime");
+      await startRealtimeListener();
+      let host = "?";
+      try {
+        host = new URL(getRealtimeListenUrl()).hostname;
+      } catch { /* ignore */ }
+      res.json({
+        ok: true,
+        channel: "lekker_chat",
+        subscribers: realtimeSubscriberCount(),
+        listenHost: host,
+        pooler: host.includes("-pooler"),
+      });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, message: e?.message || "realtime unhealthy" });
     }
   });
 
