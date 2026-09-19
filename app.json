@@ -39,7 +39,7 @@
     },
     "android": {
       "package": "com.lekker.chat",
-      "versionCode": 43,
+      "versionCode": 44,
       "compileSdkVersion": 35,
       "targetSdkVersion": 35,
       "minSdkVersion": 23,
