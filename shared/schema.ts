@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, boolean, timestamp, integer, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, boolean, timestamp, integer, index, uniqueIndex, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -298,6 +298,27 @@ export const personalCareSettings = pgTable("personal_care_settings", {
   index("idx_personal_care_family").on(table.familyContactUserId),
 ]);
 
+/**
+ * Server-backed Cledwyn companion thread (dementia check-ins, family alerts).
+ * Keeps patient↔family DMs clean; feeds habit analysis later.
+ */
+export const cledwynCompanionMessages = pgTable("cledwyn_companion_messages", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  /** Whose Cledwyn thread this line appears in */
+  userId: varchar("user_id", { length: 36 }).notNull(),
+  /** Patient the event is about (same as userId for patient-facing lines) */
+  aboutUserId: varchar("about_user_id", { length: 36 }).notNull(),
+  role: varchar("role", { length: 20 }).notNull(), // assistant | system | user
+  eventType: varchar("event_type", { length: 40 }).notNull(), // check_in | family_alert_patient | family_alert_family | patient_reply
+  content: text("content").notNull(),
+  metadata: jsonb("metadata"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("idx_cledwyn_companion_user_created").on(table.userId, table.createdAt),
+  index("idx_cledwyn_companion_about").on(table.aboutUserId, table.createdAt),
+  index("idx_cledwyn_companion_event").on(table.eventType, table.createdAt),
+]);
+
 export const CHECK_IN_INTERVAL_PRESETS = [2, 4, 6, 8, 12] as const;
 export const SILENCE_ALERT_PRESETS = [1, 2, 4, 8, 12, 24] as const;
 export const COMPANION_PROFILES = ["dementia"] as const;
@@ -390,3 +411,4 @@ export type FeedShare = typeof feedShares.$inferSelect;
 export type PushToken = typeof pushTokens.$inferSelect;
 export type PersonalCareSettings = typeof personalCareSettings.$inferSelect;
 export type UpdatePersonalCareInput = z.infer<typeof updatePersonalCareSchema>;
+export type CledwynCompanionMessage = typeof cledwynCompanionMessages.$inferSelect;

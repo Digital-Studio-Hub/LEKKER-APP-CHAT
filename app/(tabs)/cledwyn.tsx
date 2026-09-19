@@ -246,11 +246,30 @@ export default function CledwynScreen() {
       (async () => {
         const cached = await getCachedPersonalCare();
         if (!cancelled) setCompanionMode(!!cached.companionEnabled);
+        let enabled = !!cached.companionEnabled;
         try {
           const remote = await fetchPersonalCare();
-          if (!cancelled) setCompanionMode(!!remote.companionEnabled);
+          enabled = !!remote.companionEnabled;
+          if (!cancelled) setCompanionMode(enabled);
         } catch {
           /* keep cache */
+        }
+        // Pull server companion check-ins / family-alert notices into this window.
+        if (enabled) {
+          try {
+            const { fetchCompanionMessages, mergeCompanionIntoCledwyn } = await import(
+              "@/lib/companion-api"
+            );
+            const remoteMsgs = await fetchCompanionMessages({ limit: 100 });
+            if (cancelled || !remoteMsgs.length) return;
+            setMessages((prev) => {
+              const merged = mergeCompanionIntoCledwyn(prev, remoteMsgs);
+              storage.saveCledwynMessages(merged);
+              return merged;
+            });
+          } catch {
+            /* offline — keep local */
+          }
         }
       })();
       return () => {

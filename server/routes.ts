@@ -3007,11 +3007,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/personal/patient-activity", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      await bumpPatientReply(req.user!.userId);
+      const content = typeof req.body?.content === "string" ? req.body.content : undefined;
+      await bumpPatientReply(req.user!.userId, {
+        content,
+        recordMessage: !!content?.trim(),
+      });
       return res.json({ success: true });
     } catch (error) {
       console.error("patient-activity error:", error);
       res.status(500).json({ success: false, message: "Failed" });
+    }
+  });
+
+  /** Server-backed companion thread lines (check-ins + family alerts) for Cledwyn tab. */
+  app.get("/api/cledwyn/companion-messages", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { listCompanionMessages, ensureCompanionMessagesTable } = await import("./personal-care");
+      await ensureCompanionMessagesTable();
+      const limit = Math.min(200, Math.max(1, parseInt(String(req.query.limit || "80"), 10) || 80));
+      const sinceRaw = typeof req.query.since === "string" ? req.query.since : null;
+      const since = sinceRaw ? new Date(sinceRaw) : undefined;
+      const rows = await listCompanionMessages(req.user!.userId, {
+        limit,
+        since: since && !Number.isNaN(since.getTime()) ? since : undefined,
+      });
+      return res.json({
+        success: true,
+        messages: rows.map((r) => ({
+          id: r.id,
+          role: r.role === "user" ? "user" : "assistant",
+          content: r.content,
+          eventType: r.eventType,
+          aboutUserId: r.aboutUserId,
+          metadata: r.metadata,
+          timestamp: r.createdAt instanceof Date ? r.createdAt.toISOString() : String(r.createdAt),
+        })),
+      });
+    } catch (error: any) {
+      console.error("companion-messages get error:", error);
+      res.status(500).json({ success: false, message: error?.message || "Failed" });
     }
   });
 
@@ -3185,7 +3219,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (useCompanion) {
         try {
-          await bumpPatientReply(userId);
+          await bumpPatientReply(userId, { content: latestText, recordMessage: true });
           res.write(
             `data: ${JSON.stringify({
               meta: {
