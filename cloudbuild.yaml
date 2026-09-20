@@ -35,6 +35,9 @@ steps:
       - --update-env-vars=OBJECT_STORAGE_BACKEND=gcs,PRIVATE_OBJECT_DIR=/lekkernetworkbucket/lekker-chat/private,PUBLIC_OBJECT_SEARCH_PATHS=/lekkernetworkbucket/lekker-chat/public,SYSTEM_FROM_EMAIL=noreply@lekker.network,SYSTEM_FROM_NAME=Lekker Chat,SYSTEM_EMAIL_PROVIDER=auto,LEKKER_API_BASE_URL=https://lekker.network,CHAT_WHATSAPP_ONLY=true,LEKKER_WORKSPACE_ID=ebb114a2-c994-4d46-9274-bdd97ac23dde
       # Long-lived SSE for chat realtime (client reconnects on drop)
       - --timeout=3600
+      # Avoid cold-start "can't connect" / SSE drops on scale-to-zero
+      - --min-instances=1
+      - --cpu-boost
       # LEKKER_TOKEN must stay on Cloud Run (set via gcloud); do not commit the Connect token
       - --quiet
 

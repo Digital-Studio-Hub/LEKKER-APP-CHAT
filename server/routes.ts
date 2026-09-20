@@ -215,13 +215,19 @@ const DIRECTORY_DATA: DirectoryEntry[] = [
 const SERVICE_TYPES = [...new Set(DIRECTORY_DATA.map((d) => d.serviceType))].sort();
 const PROVINCES = [...new Set(DIRECTORY_DATA.map((d) => d.province))].sort();
 
+/** Cloud Run sets Forwarded; disable both related validators or OTP/auth can 500. */
+const RATE_LIMIT_VALIDATE = {
+  xForwardedForHeader: false,
+  forwardedHeader: false,
+} as const;
+
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
   message: { message: "Too many login attempts. Please try again in 15 minutes." },
-  validate: { xForwardedForHeader: false },
+  validate: RATE_LIMIT_VALIDATE,
 });
 
 const registerLimiter = rateLimit({
@@ -230,7 +236,7 @@ const registerLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { message: "Too many registration attempts. Please try again later." },
-  validate: { xForwardedForHeader: false },
+  validate: RATE_LIMIT_VALIDATE,
 });
 
 function sanitizeUser(user: any) {
@@ -305,7 +311,7 @@ const phoneVerifyLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { message: "Too many verification attempts. Please try again in an hour." },
-  validate: { xForwardedForHeader: false },
+  validate: RATE_LIMIT_VALIDATE,
   skip: (req) => {
     const raw = req.body?.phone;
     return raw ? isAppleReviewPhone(String(raw)) : false;
@@ -910,7 +916,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     standardHeaders: true,
     legacyHeaders: false,
     message: { message: "Too many reset requests. Please try again later." },
-    validate: { xForwardedForHeader: false },
+    validate: RATE_LIMIT_VALIDATE,
   });
 
   app.post("/api/auth/forgot-password", resetRequestLimiter, async (req: Request, res: Response) => {
@@ -1103,7 +1109,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/auth/add-email", authMiddleware, rateLimit({ windowMs: 15 * 60 * 1000, max: 5 } as Options), async (req: AuthenticatedRequest, res: Response) => {
+  app.post("/api/auth/add-email", authMiddleware, rateLimit({ windowMs: 15 * 60 * 1000, max: 5, validate: RATE_LIMIT_VALIDATE } as Options), async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { email } = req.body;
       if (!email || typeof email !== "string" || !email.includes("@")) {
@@ -1135,7 +1141,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/auth/verify-linked-email", authMiddleware, rateLimit({ windowMs: 15 * 60 * 1000, max: 10 } as Options), async (req: AuthenticatedRequest, res: Response) => {
+  app.post("/api/auth/verify-linked-email", authMiddleware, rateLimit({ windowMs: 15 * 60 * 1000, max: 10, validate: RATE_LIMIT_VALIDATE } as Options), async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { emailId, code } = req.body;
       if (!emailId || !code) return res.status(400).json({ message: "emailId and code are required" });
@@ -1190,7 +1196,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/auth/resend-linked-email-code", authMiddleware, rateLimit({ windowMs: 5 * 60 * 1000, max: 3 } as Options), async (req: AuthenticatedRequest, res: Response) => {
+  app.post("/api/auth/resend-linked-email-code", authMiddleware, rateLimit({ windowMs: 5 * 60 * 1000, max: 3, validate: RATE_LIMIT_VALIDATE } as Options), async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { emailId } = req.body;
       if (!emailId) return res.status(400).json({ message: "emailId is required" });
@@ -2088,7 +2094,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     standardHeaders: true,
     legacyHeaders: false,
     message: { message: "Too many upload attempts. Please try again later." },
-    validate: { xForwardedForHeader: false },
+    validate: RATE_LIMIT_VALIDATE,
   });
 
   app.post("/api/objects/upload", authMiddleware, uploadLimiter, async (req: AuthenticatedRequest, res: Response) => {
@@ -2866,7 +2872,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     standardHeaders: true,
     legacyHeaders: false,
     message: { success: false, message: "Too many requests. Please try again later." },
-    validate: { xForwardedForHeader: false } as Partial<Options>,
+    validate: RATE_LIMIT_VALIDATE as Partial<Options>,
   });
 
   app.get("/api/v1/network", authMiddleware, networkLimiter, async (req: AuthenticatedRequest, res: Response) => {
@@ -4222,7 +4228,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     max: 30,
     standardHeaders: true,
     legacyHeaders: false,
-    validate: { xForwardedForHeader: false },
+    validate: RATE_LIMIT_VALIDATE,
   });
 
   app.get(
