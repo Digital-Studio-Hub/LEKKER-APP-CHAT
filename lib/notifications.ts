@@ -112,31 +112,56 @@ export async function disableNotifications(): Promise<void> {
   await unregisterDevicePushToken();
 }
 
+/** Hardcoded fallback — Constants sometimes omit extra.eas in release builds. */
+const EAS_PROJECT_ID_FALLBACK = "385aa478-8c87-4480-b7b6-2ecb4addc68c";
+
 async function getExpoProjectId(): Promise<string | undefined> {
   const projectId =
     Constants.expoConfig?.extra?.eas?.projectId ??
-    Constants.easConfig?.projectId;
+    Constants.easConfig?.projectId ??
+    EAS_PROJECT_ID_FALLBACK;
   if (!projectId || projectId === "lekker-chat") return undefined;
   return projectId;
+}
+
+async function reportPushDiag(payload: Record<string, unknown>): Promise<void> {
+  try {
+    const { apiRequest } = await import("@/lib/query-client");
+    await apiRequest("POST", "/api/push/diag", payload);
+  } catch {
+    /* best-effort */
+  }
 }
 
 export async function getDevicePushToken(): Promise<string | null> {
   if (Platform.OS === "web") return null;
 
   const N = await getNotifications();
-  if (!N) return null;
+  if (!N) {
+    await reportPushDiag({ stage: "import", ok: false, error: "expo-notifications unavailable" });
+    return null;
+  }
 
   const projectId = await getExpoProjectId();
   if (!projectId) {
     console.warn("[Push] EAS projectId not configured — run eas init");
+    await reportPushDiag({ stage: "projectId", ok: false, error: "missing projectId" });
     return null;
   }
 
   try {
     const tokenData = await N.getExpoPushTokenAsync({ projectId });
     return tokenData.data;
-  } catch (e) {
-    console.error("[Push] getExpoPushTokenAsync failed:", e);
+  } catch (e: any) {
+    const msg = String(e?.message || e);
+    console.error("[Push] getExpoPushTokenAsync failed:", msg);
+    await reportPushDiag({
+      stage: "getExpoPushTokenAsync",
+      ok: false,
+      projectId,
+      error: msg.slice(0, 500),
+      platform: Platform.OS,
+    });
     return null;
   }
 }
@@ -150,11 +175,17 @@ export async function registerDevicePushToken(): Promise<boolean> {
   let { status, canAskAgain } = await N.getPermissionsAsync();
   if (status !== "granted") {
     // Prompt once when we can — closed-app DMs depend on this.
-    if (canAskAgain === false) return false;
+    if (canAskAgain === false) {
+      await reportPushDiag({ stage: "permission", ok: false, error: "denied_permanent", status });
+      return false;
+    }
     const req = await N.requestPermissionsAsync();
     status = req.status;
   }
-  if (status !== "granted") return false;
+  if (status !== "granted") {
+    await reportPushDiag({ stage: "permission", ok: false, error: "not_granted", status });
+    return false;
+  }
   await AsyncStorage.setItem(NOTIF_KEY, "true");
 
   const token = await getDevicePushToken();
@@ -163,8 +194,15 @@ export async function registerDevicePushToken(): Promise<boolean> {
   const ok = await registerPushTokenOnServer(token, Platform.OS);
   if (ok) {
     await AsyncStorage.setItem(PUSH_TOKEN_KEY, token);
+    await reportPushDiag({
+      stage: "register",
+      ok: true,
+      platform: Platform.OS,
+      tokenPrefix: token.slice(0, 24),
+    });
   } else {
     console.warn("[Push] server rejected token registration");
+    await reportPushDiag({ stage: "register", ok: false, error: "server_rejected" });
   }
   return ok;
 }

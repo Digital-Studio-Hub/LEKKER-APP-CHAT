@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "360304488862",
+    "project_id": "lekker-staging-496016",
+    "storage_bucket": "lekker-staging-496016.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:360304488862:android:23d7eccbfb61806374a68f",
+        "android_client_info": {
+          "package_name": "com.lekker.chat"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCgdFrqk7ikr-83W2_lqU1-DqD8nWNfnbo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -3646,10 +3646,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
         token,
         typeof platform === "string" ? platform : typeof deviceId === "string" ? deviceId : undefined,
       );
+      console.log(
+        `[Push] registered user=${req.user!.userId} platform=${platform || deviceId || "?"} token=${token.slice(0, 24)}…`,
+      );
       res.json({ ok: true });
     } catch (e) {
       console.error("Push register error:", e);
       res.status(500).json({ message: "Failed to register push token" });
+    }
+  });
+
+  /** Client push diagnostics — why tokens never reach /register */
+  app.post("/api/push/diag", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      console.warn(
+        `[PushDiag] user=${req.user!.userId}`,
+        JSON.stringify(body).slice(0, 800),
+      );
+      res.json({ ok: true });
+    } catch {
+      res.json({ ok: true });
     }
   });
 

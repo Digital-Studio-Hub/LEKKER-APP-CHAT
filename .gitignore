@@ -64,3 +64,7 @@ expo-token
 /settings.tsx
 /storage.ts
 /user-profile/
+
+# FCM service account (never commit)
+lekker-chat-fcm-sa.json
+*-fcm-sa.json
