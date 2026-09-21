@@ -383,6 +383,17 @@ class PgStorage implements IStorage {
     return results;
   }
 
+  /** Most recent message from a specific user in a chat (for auto-reply cooldown). */
+  async getLastMessageFromUser(chatId: string, userId: string): Promise<ChatMessage | undefined> {
+    const [msg] = await db
+      .select()
+      .from(chatMessages)
+      .where(and(eq(chatMessages.chatId, chatId), eq(chatMessages.senderId, userId)))
+      .orderBy(desc(chatMessages.createdAt))
+      .limit(1);
+    return msg;
+  }
+
   async getChatMessages(chatId: string, limit: number = 50, before?: string): Promise<ChatMessage[]> {
     let whereClause;
     if (before) {

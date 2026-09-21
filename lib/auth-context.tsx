@@ -62,6 +62,8 @@ export interface AuthUser {
   workspaceEmailActive?: boolean;
   autoReplyEnabled: boolean;
   autoReplyMessage: string | null;
+  /** Minutes between auto-replies in the same chat (0 = every message). */
+  autoReplyCooldownMinutes?: number | null;
   notificationsEnabled: boolean;
   locationEnabled: boolean;
   lastLatitude: string | null;
@@ -314,7 +316,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       "firstName", "lastName", "username", "bio", "businessName", "tradingName",
       "businessCategory", "businessWebsite", "businessLogoUrl", "businessProvince",
       "businessCountry", "status", "presence", "avatarColor", "profilePhoto",
-      "autoReplyEnabled", "autoReplyMessage", "notificationsEnabled", "locationEnabled",
+      "autoReplyEnabled", "autoReplyMessage", "autoReplyCooldownMinutes", "notificationsEnabled", "locationEnabled",
       "lastLatitude", "lastLongitude", "locationCity", "locationRegion",
     ]);
 

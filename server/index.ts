@@ -354,6 +354,18 @@ function setupErrorHandler(app: express.Application) {
       void import("./realtime")
         .then(({ startRealtimeListener }) => startRealtimeListener())
         .catch((e) => console.error("[Realtime] boot LISTEN failed:", e?.message || e));
+      // Additive schema (Publish ≠ migrate)
+      void import("./storage").then(async ({ pool }) => {
+        try {
+          await pool.query(`
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS auto_reply_cooldown_minutes integer DEFAULT 5;
+          `);
+          log("[BootMigration] OK: users.auto_reply_cooldown_minutes");
+        } catch (e: any) {
+          console.error("[BootMigration] auto_reply_cooldown_minutes failed:", e?.message || e);
+        }
+      });
       // Companion check-ins + family silence alerts. Cloud Scheduler is preferred;
       // this in-process loop covers prod when Scheduler is missing/unconfigured.
       if (process.env.NODE_ENV === "production" || process.env.COMPANION_CRON_INLINE === "1") {

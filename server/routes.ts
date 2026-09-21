@@ -1758,6 +1758,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const { isCledwynBotUser } = await import("./cledwyn-group");
           if (otherUser && isCledwynBotUser(otherUser)) continue; // bots don't auto-reply as humans
           if (otherUser?.autoReplyEnabled && otherUser.autoReplyMessage) {
+            const cooldownMin =
+              typeof (otherUser as any).autoReplyCooldownMinutes === "number"
+                ? Math.max(0, (otherUser as any).autoReplyCooldownMinutes)
+                : 5;
+            // Skip if this user already sent a message in this chat within the cooldown window
+            // (covers prior auto-replies and manual replies — avoids spam on rapid follow-ups).
+            if (cooldownMin > 0) {
+              const recent = await storage.getLastMessageFromUser(chatId, p.userId);
+              if (recent?.createdAt) {
+                const ageMs = Date.now() - new Date(recent.createdAt).getTime();
+                if (ageMs < cooldownMin * 60 * 1000) continue;
+              }
+            }
             const autoReply = await storage.sendMessage(chatId, p.userId, otherUser.autoReplyMessage, "text");
             void notifyChatMessage(chatId, p.userId, autoReply);
           }

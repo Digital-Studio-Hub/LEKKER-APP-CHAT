@@ -79,7 +79,19 @@ export default function SettingsScreen() {
   const [autoReplyMessage, setAutoReplyMessage] = useState(
     user?.autoReplyMessage || AUTO_REPLY_PRESETS[0],
   );
+  const [autoReplyCooldownMinutes, setAutoReplyCooldownMinutes] = useState(
+    typeof user?.autoReplyCooldownMinutes === "number" ? user.autoReplyCooldownMinutes : 5,
+  );
   const [isEditingAutoReply, setIsEditingAutoReply] = useState(false);
+
+  const AUTO_REPLY_COOLDOWN_PRESETS: Array<{ label: string; minutes: number }> = [
+    { label: "Every message", minutes: 0 },
+    { label: "1 minute", minutes: 1 },
+    { label: "5 minutes", minutes: 5 },
+    { label: "15 minutes", minutes: 15 },
+    { label: "30 minutes", minutes: 30 },
+    { label: "1 hour", minutes: 60 },
+  ];
   const [notificationsOn, setNotificationsOn] = useState(false);
   const [notifPrefs, setNotifPrefs] = useState<NotificationPreferences>({
     ...DEFAULT_NOTIFICATION_PREFERENCES,
@@ -294,12 +306,22 @@ export default function SettingsScreen() {
   async function handleAutoReplyToggle(val: boolean) {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setAutoReplyEnabled(val);
-    await updateProfile({ autoReplyEnabled: val, autoReplyMessage });
+    await updateProfile({
+      autoReplyEnabled: val,
+      autoReplyMessage,
+      autoReplyCooldownMinutes,
+    });
   }
 
   async function handleAutoReplyMessageUpdate(msg: string) {
     setAutoReplyMessage(msg);
     await updateProfile({ autoReplyMessage: msg });
+  }
+
+  async function handleAutoReplyCooldownUpdate(minutes: number) {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setAutoReplyCooldownMinutes(minutes);
+    await updateProfile({ autoReplyCooldownMinutes: minutes });
   }
 
   async function saveField(field: string) {
@@ -957,6 +979,26 @@ export default function SettingsScreen() {
                 >
                   <Text style={styles.presetText} numberOfLines={2}>{preset}</Text>
                   {autoReplyMessage === preset && <Ionicons name="checkmark-circle" size={18} color={Colors.primary} />}
+                </Pressable>
+              ))}
+              <Text style={[styles.presetLabel, { marginTop: 12 }]}>Cooldown between auto-replies</Text>
+              <Text style={styles.toggleHint}>
+                After an auto-reply in a chat, wait this long before sending another to the same person (stops spam when they send a few messages quickly).
+              </Text>
+              {AUTO_REPLY_COOLDOWN_PRESETS.map((preset) => (
+                <Pressable
+                  key={preset.minutes}
+                  style={({ pressed }) => [
+                    styles.presetRow,
+                    pressed && { backgroundColor: Colors.cardElevated },
+                    autoReplyCooldownMinutes === preset.minutes && styles.presetRowActive,
+                  ]}
+                  onPress={() => handleAutoReplyCooldownUpdate(preset.minutes)}
+                >
+                  <Text style={styles.presetText}>{preset.label}</Text>
+                  {autoReplyCooldownMinutes === preset.minutes && (
+                    <Ionicons name="checkmark-circle" size={18} color={Colors.primary} />
+                  )}
                 </Pressable>
               ))}
             </View>

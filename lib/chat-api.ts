@@ -280,8 +280,32 @@ export async function sendChatMessage(
 export async function markChatRead(chatId: string): Promise<void> {
   try {
     await apiRequest("POST", `/api/chats/${chatId}/read`);
+    // Refresh app icon badge from remaining unread across all chats.
+    try {
+      const chats = await fetchChats();
+      if (chats) {
+        const total = chats.reduce((sum, c) => sum + (c.unreadCount || 0), 0);
+        const { setBadgeCount } = await import("@/lib/notifications");
+        await setBadgeCount(total);
+      }
+    } catch {
+      /* non-fatal */
+    }
   } catch (e) {
     console.error("Failed to mark read:", e);
+  }
+}
+
+/** Sync home-screen badge with server unread totals (call from inbox). */
+export async function syncAppBadgeFromChats(
+  chats: Array<{ unreadCount?: number }>,
+): Promise<void> {
+  try {
+    const total = chats.reduce((sum, c) => sum + (c.unreadCount || 0), 0);
+    const { setBadgeCount } = await import("@/lib/notifications");
+    await setBadgeCount(total);
+  } catch {
+    /* non-fatal */
   }
 }
 

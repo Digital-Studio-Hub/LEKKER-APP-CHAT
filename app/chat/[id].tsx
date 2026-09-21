@@ -649,6 +649,7 @@ export default function ChatDetailScreen() {
   const [chat, setChat] = useState<ServerChat | null>(null);
   const [messages, setMessages] = useState<ServerMessage[]>([]);
   const [inputText, setInputText] = useState("");
+  const [isSending, setIsSending] = useState(false);
   const [isBlocked, setIsBlocked] = useState(false);
   const [showAttachMenu, setShowAttachMenu] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -839,6 +840,7 @@ export default function ChatDetailScreen() {
   }
 
   async function handleSend() {
+    if (isSending) return;
     if (editingMessage) {
       const text = inputText.trim();
       if (!text || !id) return;
@@ -846,28 +848,50 @@ export default function ChatDetailScreen() {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       setInputText("");
       setEditingMessage(null);
-      await editMessage(id, editingMessage.id, text);
-      await loadMessages();
+      setIsSending(true);
+      try {
+        await editMessage(id, editingMessage.id, text);
+        await loadMessages();
+      } finally {
+        setIsSending(false);
+      }
       return;
     }
     const text = inputText.trim();
     if (!text || !id || isBlocked) return;
     if (warnBlockedContent(text)) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    // Clear composer immediately so the mic doesn't flash while the network request runs
+    // (users were double-tapping and hitting record by accident during the 3–5s wait).
     const replyId = replyToMessage?.id;
-    const result = await sendChatMessage(
-      id,
-      text,
-      "text",
-      replyId ? { replyToMessageId: replyId } : undefined,
-    );
-    if (!result.message) {
-      Alert.alert("Message not sent", result.error || "Please try again.");
-      return;
-    }
     setInputText("");
     setReplyToMessage(null);
-    await loadMessages();
+    setIsSending(true);
+    try {
+      const result = await sendChatMessage(
+        id,
+        text,
+        "text",
+        replyId ? { replyToMessageId: replyId } : undefined,
+      );
+      if (!result.message) {
+        setInputText(text);
+        if (replyId) {
+          /* reply banner already cleared — acceptable */
+        }
+        Alert.alert("Message not sent", result.error || "Please try again.");
+        return;
+      }
+      if (result.message) {
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === result.message!.id)) return prev;
+          return [...prev, result.message!];
+        });
+      }
+      void loadMessages();
+    } finally {
+      setIsSending(false);
+    }
   }
 
   function handleEditMessage(msg: ServerMessage) {
@@ -1432,13 +1456,15 @@ export default function ChatDetailScreen() {
             maxLength={2000}
             blurOnSubmit={false}
           />
-          {inputText.trim() ? (
+          {inputText.trim() || isSending ? (
             <Pressable
               onPress={() => {
+                if (isSending) return;
                 handleSend();
                 inputRef.current?.focus();
               }}
-              style={styles.sendButton}
+              style={[styles.sendButton, isSending && { opacity: 0.6 }]}
+              disabled={isSending}
               testID="send-button"
             >
               <Ionicons name="send" size={18} color={Colors.background} />

@@ -28,6 +28,14 @@ export async function fetchCompanionMessages(opts?: {
 export async function markCompanionMessagesRead(): Promise<void> {
   try {
     await apiRequest("POST", "/api/cledwyn/companion-read", {});
+    // Clear companion unread from app badge
+    try {
+      const { fetchChats, syncAppBadgeFromChats } = await import("@/lib/chat-api");
+      const chats = await fetchChats();
+      if (chats) await syncAppBadgeFromChats(chats);
+    } catch {
+      /* non-fatal */
+    }
   } catch (e) {
     console.warn("[Companion] mark read failed", e);
   }

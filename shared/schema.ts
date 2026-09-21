@@ -39,6 +39,8 @@ export const users = pgTable("users", {
   lekkerNetworkAccess: boolean("lekker_network_access").default(false),
   autoReplyEnabled: boolean("auto_reply_enabled").default(false),
   autoReplyMessage: text("auto_reply_message"),
+  /** Minutes to wait before another auto-reply in the same chat (0 = every message). Default 5. */
+  autoReplyCooldownMinutes: integer("auto_reply_cooldown_minutes").default(5),
   notificationsEnabled: boolean("notifications_enabled").default(true),
   /** JSON map of NotificationCategory → boolean (see shared/notification-prefs.ts) */
   notificationPreferences: text("notification_preferences"),
@@ -382,6 +384,7 @@ export const updateProfileSchema = z.object({
   profilePhoto: z.string().nullable().optional(),
   autoReplyEnabled: z.boolean().optional(),
   autoReplyMessage: z.string().max(500).nullable().optional(),
+  autoReplyCooldownMinutes: z.number().int().min(0).max(1440).optional(),
   notificationsEnabled: z.boolean().optional(),
   locationEnabled: z.boolean().optional(),
   lastLatitude: z.string().nullable().optional(),

@@ -28,6 +28,7 @@ import {
   getPresenceLabel,
   isQuickNotesChat,
   isCompanionInboxChat,
+  syncAppBadgeFromChats,
   type ServerChat,
 } from "@/lib/chat-api";
 import { ensureRealtimeStarted, subscribeRealtime, isRealtimeConnected } from "@/lib/realtime";
@@ -238,7 +239,10 @@ export default function ChatsScreen() {
   async function loadChats() {
     const serverChats = await fetchChats();
     // Keep inbox on poll failure — empty array from errors used to erase all threads.
-    if (serverChats) setChats(serverChats);
+    if (serverChats) {
+      setChats(serverChats);
+      void syncAppBadgeFromChats(serverChats);
+    }
   }
 
   async function loadEnquiries() {
