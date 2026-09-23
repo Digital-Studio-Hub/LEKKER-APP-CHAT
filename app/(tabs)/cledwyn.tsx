@@ -655,7 +655,7 @@ export default function CledwynScreen() {
         <Pressable style={styles.banner} onPress={() => openWorkspaceCledwyn()}>
           <Ionicons name="sparkles" size={14} color={Colors.primary} />
           <Text style={styles.bannerText}>
-            Full website & workspace tools → Software Cledwyn. Alerts land here as Cledwyn.
+            Workspace Cledwyn — same memory as Software. Ask me to edit your website, or open Software for the full dashboard.
           </Text>
           <Ionicons name="chevron-forward" size={14} color={Colors.textMuted} />
         </Pressable>
@@ -683,7 +683,7 @@ export default function CledwynScreen() {
               {companionMode
                 ? "I’m here for a chat whenever you like — about your day, how you’re feeling, or just to say hello."
                 : workspaceMode
-                  ? "Ask about your business — or wait for workspace alerts from lekker.network"
+                  ? "Ask about your business, or say “change my homepage hero…” to edit your website"
                   : "Ask Cledwyn about business strategy, quotes, marketing, or anything else"}
             </Text>
           </View>

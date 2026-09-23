@@ -29,9 +29,11 @@ export async function fetchLekkerSoftwareUrl(next?: string): Promise<string> {
 
 export const SOFTWARE_SHORTCUTS = [
   { id: "home", label: "Home", next: "/app", icon: "home-outline" as const },
-  /** Native Chat screen — not WebView */
-  { id: "leads", label: "Leads", next: "/app/marketplace-leads", native: "/leads" as const, icon: "briefcase-outline" as const },
-  { id: "bookings", label: "Events", next: "/app/bookings/events", icon: "ticket-outline" as const },
-  { id: "cledwyn", label: "Cledwyn", next: "/app/cledwyn", icon: "sparkles-outline" as const },
+  { id: "website", label: "Website", next: "/app/website-manager", icon: "globe-outline" as const },
   { id: "mail", label: "Mail", next: "/app/mail", icon: "mail-outline" as const },
+  { id: "tasks", label: "Tasks", next: "/app/tasks", icon: "checkbox-outline" as const },
+  { id: "leads", label: "Leads", next: "/app/marketplace-leads", icon: "briefcase-outline" as const },
+  { id: "bookings", label: "Bookings", next: "/app/bookings", icon: "calendar-outline" as const },
+  { id: "invoices", label: "Invoices", next: "/app/invoices", icon: "document-text-outline" as const },
+  { id: "cledwyn", label: "Cledwyn", next: "/app/cledwyn", icon: "sparkles-outline" as const },
 ] as const;

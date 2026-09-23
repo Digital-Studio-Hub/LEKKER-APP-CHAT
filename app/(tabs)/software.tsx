@@ -34,31 +34,69 @@ export default function SoftwareScreen() {
   const [loadError, setLoadError] = useState(false);
   const [activeShortcut, setActiveShortcut] = useState("home");
   const [gateMessage, setGateMessage] = useState<string | null>(null);
+  /** After first SSO cookie is set, navigate in-WebView (shortcuts were reminting SSO and appearing broken). */
+  const [sessionReady, setSessionReady] = useState(false);
   const bottomPad = Platform.OS === "web" ? 84 : 49 + insets.bottom + 8;
 
-  const loadUrl = useCallback(async (next?: string, shortcutId = "home") => {
-    setIsLoading(true);
-    setLoadError(false);
-    setGateMessage(null);
-    setActiveShortcut(shortcutId);
-    if (!user?.lekkerNetworkAccess || !user?.lekkerNetworkId) {
-      setStartUrl(null);
-      setIsLoading(false);
-      setGateMessage(
-        !user?.phoneVerified
-          ? "Confirm your mobile number first, then turn on Lekkerpreneur access in Settings."
-          : "Turn on Lekkerpreneur access in Settings to open your workspace dashboard signed in.",
-      );
+  const navigateInWebView = useCallback((next: string) => {
+    const target = next.startsWith("http")
+      ? next
+      : `${LEKKER_NETWORK_URL}${next.startsWith("/") ? next : `/${next}`}`;
+    if (Platform.OS === "web") {
+      setStartUrl(target);
       return;
     }
+    const js = `window.location.assign(${JSON.stringify(target)}); true;`;
     try {
-      const url = await fetchLekkerSoftwareUrl(next);
-      setStartUrl(url);
+      webViewRef.current?.injectJavaScript(js);
     } catch {
-      setStartUrl(next ? `${LEKKER_NETWORK_URL}${next}` : LEKKER_NETWORK_URL);
-      setLoadError(true);
+      setStartUrl(target);
     }
-  }, [user?.lekkerNetworkAccess, user?.lekkerNetworkId, user?.phoneVerified]);
+  }, []);
+
+  const loadUrl = useCallback(
+    async (next?: string, shortcutId = "home", forceSso = false) => {
+      setIsLoading(true);
+      setLoadError(false);
+      setGateMessage(null);
+      setActiveShortcut(shortcutId);
+      if (!user?.lekkerNetworkAccess || !user?.lekkerNetworkId) {
+        setStartUrl(null);
+        setSessionReady(false);
+        setIsLoading(false);
+        setGateMessage(
+          !user?.phoneVerified
+            ? "Confirm your mobile number first, then turn on Lekkerpreneur access in Settings."
+            : "Turn on Lekkerpreneur access in Settings to open your workspace dashboard signed in.",
+        );
+        return;
+      }
+
+      const path = next && next.startsWith("/app") ? next : "/app";
+
+      // Already signed in — navigate inside the WebView (do not remint SSO).
+      if (sessionReady && !forceSso && webViewRef.current) {
+        navigateInWebView(path);
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        const url = await fetchLekkerSoftwareUrl(path);
+        setStartUrl(url);
+      } catch {
+        setStartUrl(`${LEKKER_NETWORK_URL}${path}`);
+        setLoadError(true);
+      }
+    },
+    [
+      user?.lekkerNetworkAccess,
+      user?.lekkerNetworkId,
+      user?.phoneVerified,
+      sessionReady,
+      navigateInWebView,
+    ],
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -69,7 +107,8 @@ export default function SoftwareScreen() {
       const shortcut =
         SOFTWARE_SHORTCUTS.find((s) => next === s.next || next.startsWith(s.next + "/"))?.id ||
         "home";
-      loadUrl(next, shortcut);
+      // Deep links from notifications always SSO with next=
+      loadUrl(next, shortcut, !!params.next);
     }, [loadUrl, params.next]),
   );
 
@@ -79,8 +118,16 @@ export default function SoftwareScreen() {
       router.push(native as any);
       return;
     }
-    await loadUrl(next, id);
+    await loadUrl(next, id, false);
   }
+
+  const onNavChange = useCallback((navState: { url?: string }) => {
+    const u = navState?.url || "";
+    if (u.includes("lekker.network") && (u.includes("/app") || u.includes("establish-session"))) {
+      // Cookie session established once we land on /app*
+      if (u.includes("/app")) setSessionReady(true);
+    }
+  }, []);
 
   const shortcutBar = (
     <ScrollView
@@ -96,6 +143,7 @@ export default function SoftwareScreen() {
             key={s.id}
             onPress={() => openShortcut(s.id, s.next, native)}
             style={[styles.chip, active && styles.chipActive]}
+            testID={`software-shortcut-${s.id}`}
           >
             <Ionicons
               name={s.icon}
@@ -148,7 +196,10 @@ export default function SoftwareScreen() {
         <Pressable onPress={() => webViewRef.current?.goForward()} style={styles.navButton}>
           <Ionicons name="chevron-forward" size={22} color={Colors.text} />
         </Pressable>
-        <Pressable onPress={() => webViewRef.current?.reload()} style={styles.navButton}>
+        <Pressable
+          onPress={() => loadUrl("/app", "home", true)}
+          style={styles.navButton}
+        >
           <Ionicons name="refresh" size={20} color={Colors.text} />
         </Pressable>
       </View>
@@ -159,9 +210,17 @@ export default function SoftwareScreen() {
           <Text style={styles.loadingText}>{gateMessage}</Text>
           <Pressable
             onPress={() => router.push("/settings")}
-            style={{ marginTop: 16, paddingHorizontal: 16, paddingVertical: 10, backgroundColor: Colors.primary, borderRadius: 8 }}
+            style={{
+              marginTop: 16,
+              paddingHorizontal: 16,
+              paddingVertical: 10,
+              backgroundColor: Colors.primary,
+              borderRadius: 8,
+            }}
           >
-            <Text style={{ fontFamily: "Poppins_600SemiBold", color: Colors.background }}>Open Settings</Text>
+            <Text style={{ fontFamily: "Poppins_600SemiBold", color: Colors.background }}>
+              Open Settings
+            </Text>
           </Pressable>
         </View>
       ) : !startUrl ? (
@@ -178,15 +237,18 @@ export default function SoftwareScreen() {
           )}
           <WebView
             ref={webViewRef}
+            key={sessionReady ? "session" : `sso-${startUrl}`}
             source={{ uri: startUrl }}
             style={{ flex: 1, backgroundColor: Colors.background }}
             onLoadStart={() => setIsLoading(true)}
             onLoadEnd={() => setIsLoading(false)}
+            onNavigationStateChange={onNavChange}
             sharedCookiesEnabled
             thirdPartyCookiesEnabled
             domStorageEnabled
             javaScriptEnabled
             allowsBackForwardNavigationGestures
+            setSupportMultipleWindows={false}
           />
         </View>
       )}
@@ -233,8 +295,13 @@ const styles = StyleSheet.create({
     borderBottomColor: Colors.border,
   },
   navButton: { width: 36, height: 36, alignItems: "center", justifyContent: "center" },
-  centered: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
-  loadingText: { fontFamily: "Poppins_400Regular", fontSize: 14, color: Colors.textSecondary },
+  centered: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12, paddingHorizontal: 24 },
+  loadingText: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 14,
+    color: Colors.textSecondary,
+    textAlign: "center",
+  },
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 10,
