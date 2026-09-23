@@ -2,7 +2,7 @@
   "expo": {
     "name": "Lekker Chat",
     "slug": "lekker-chat",
-    "version": "1.2.5",
+    "version": "1.2.6",
     "runtimeVersion": "1.2.5",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -39,7 +39,7 @@
     },
     "android": {
       "package": "com.lekker.chat",
-      "versionCode": 55,
+      "versionCode": 57,
       "compileSdkVersion": 35,
       "targetSdkVersion": 35,
       "minSdkVersion": 23,
