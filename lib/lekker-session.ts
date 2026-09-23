@@ -35,5 +35,12 @@ export const SOFTWARE_SHORTCUTS = [
   { id: "leads", label: "Leads", next: "/app/marketplace-leads", icon: "briefcase-outline" as const },
   { id: "bookings", label: "Bookings", next: "/app/bookings", icon: "calendar-outline" as const },
   { id: "invoices", label: "Invoices", next: "/app/invoices", icon: "document-text-outline" as const },
-  { id: "cledwyn", label: "Cledwyn", next: "/app/cledwyn", icon: "sparkles-outline" as const },
+  // Open Chat's own Cledwyn tab — not Network /app/cledwyn inside the WebView
+  {
+    id: "cledwyn",
+    label: "Cledwyn",
+    next: "/app/cledwyn",
+    icon: "sparkles-outline" as const,
+    native: "/(tabs)/cledwyn",
+  },
 ] as const;
