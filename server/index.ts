@@ -381,6 +381,15 @@ ALTER TABLE users
               if (result.checkIns || result.familyAlerts) {
                 log(`[CompanionCron] inline checked=${result.checked} checkIns=${result.checkIns} familyAlerts=${result.familyAlerts}`);
               }
+              try {
+                const { pushUnreadNetworkNotifications } = await import("./lekkerNetwork");
+                const n = await pushUnreadNetworkNotifications();
+                if (n.pushed) {
+                  log(`[NetworkNotifPush] users=${n.users} pushed=${n.pushed}`);
+                }
+              } catch (e: any) {
+                console.warn("[NetworkNotifPush] tick failed:", e?.message || e);
+              }
               return;
             } catch (e: any) {
               console.error(`[CompanionCron] inline tick failed (attempt ${attempt}):`, e?.message || e);

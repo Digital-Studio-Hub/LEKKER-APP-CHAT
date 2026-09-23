@@ -10,6 +10,7 @@ import { queryClient } from "@/lib/query-client";
 import { AuthProvider } from "@/lib/auth-context";
 import { AgeGateProvider } from "@/lib/age-gate-context";
 import { SocialAgeGateModal } from "@/components/SocialAgeGateModal";
+import { NotificationRouter } from "@/components/NotificationRouter";
 import { StatusBar } from "expo-status-bar";
 import {
   useFonts,
@@ -97,6 +98,7 @@ export default function RootLayout() {
         <GestureHandlerRootView>
           <KeyboardProvider>
             <AuthProvider>
+              <NotificationRouter />
               <AgeGateProvider>
                 <StatusBar style="light" />
                 <RootLayoutNav />

@@ -72,6 +72,7 @@ function getProfileImageUrl(profilePhoto: string | null | undefined): string | n
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const { user, updateProfile, applyServerUser, refreshUser, logout } = useAuth();
+  // applyServerUser used when toggling Lekkerpreneur access after sync-lekker
   const [selectedPresence, setSelectedPresence] = useState<PresenceStatus>(
     (user?.presence as PresenceStatus) || "online",
   );
@@ -1174,12 +1175,39 @@ export default function SettingsScreen() {
                 value={!!user?.lekkerNetworkAccess}
                 onValueChange={async (val) => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  if (val && !user?.isVerifiedLekkerpreneur) {
-                    Alert.alert(
-                      "Sync required",
-                      "Verify with Lekker Network first so Cledwyn can open your workspace.",
-                    );
-                    return;
+                  if (val) {
+                    // Turn on → sync (or re-sync) so workspace SSO + Software dashboard work.
+                    if (!user?.phoneVerified) {
+                      Alert.alert(
+                        "Confirm your mobile first",
+                        "Verify your WhatsApp number, then turn on Lekkerpreneur access.",
+                      );
+                      return;
+                    }
+                    try {
+                      const res = await apiRequest("POST", "/api/auth/sync-lekker");
+                      const data = await res.json();
+                      if (data?.matched && data.user) {
+                        await applyServerUser(data.user);
+                        await updateProfile({ lekkerNetworkAccess: true });
+                        Alert.alert(
+                          "Workspace linked",
+                          "Your lekker.network workspace is ready in Software — you're signed in automatically.",
+                        );
+                        return;
+                      }
+                      if (!user?.isVerifiedLekkerpreneur) {
+                        Alert.alert(
+                          "No workspace found",
+                          data?.message ||
+                            "We couldn't match your phone/email to a lekker.network Lekkerpreneur account.",
+                        );
+                        return;
+                      }
+                    } catch (e: any) {
+                      Alert.alert("Sync failed", e?.message || "Try again in a moment.");
+                      return;
+                    }
                   }
                   await updateProfile({ lekkerNetworkAccess: val });
                 }}
@@ -1189,8 +1217,8 @@ export default function SettingsScreen() {
             </View>
           </View>
           <Text style={styles.toggleHint}>
-            When on, Cledwyn AI uses your lekker.network workspace (alerts + guidance). Heavy edits open
-            full Cledwyn in Software. When off, Cledwyn stays a general assistant.
+            When on, Cledwyn uses your lekker.network workspace, Software opens your dashboard already
+            logged in, and workspace alerts (mail, tasks, leads) land in Cledwyn with deep links.
           </Text>
         </View>
 

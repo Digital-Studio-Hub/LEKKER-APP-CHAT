@@ -264,6 +264,9 @@ async function applyLekkerSync(user: User, req: Request): Promise<User> {
       const patch: Record<string, unknown> = {
         ...profileData,
         workspaceEmailActive,
+        // Matched Lekkerpreneur → workspace mode on so Software SSO + notifs work immediately.
+        lekkerNetworkAccess: true,
+        isVerifiedLekkerpreneur: true,
       };
       if (!profileData.email && user.email) delete patch.email;
       // Chat messaging is phone/WhatsApp-based — do not overwrite emailVerified from Network.

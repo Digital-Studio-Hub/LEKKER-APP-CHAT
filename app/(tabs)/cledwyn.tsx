@@ -357,12 +357,8 @@ export default function CledwynScreen() {
   async function openNotif(msg: CledwynMessage) {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     const next = msg.href?.startsWith("/app") ? msg.href : "/app";
-    try {
-      const url = await fetchLekkerSoftwareUrl(next);
-      router.push({ pathname: "/in-app-browser", params: { url, title: msg.title || "lekker.network" } });
-    } catch {
-      router.push("/(tabs)/software");
-    }
+    // Open Software tab WebView already SSO'd to the right workspace page
+    router.push({ pathname: "/(tabs)/software", params: { next } });
   }
 
   async function handleSend(overrideText?: string, fromVoice = false) {

@@ -15,7 +15,8 @@ import Colors from "@/constants/colors";
 import { fontScale } from "@/lib/responsive";
 import { fetchLekkerSoftwareUrl, SOFTWARE_SHORTCUTS } from "@/lib/lekker-session";
 import { LEKKER_NETWORK_URL } from "@/constants/ecosystem";
-import { router, useFocusEffect } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import { useAuth } from "@/lib/auth-context";
 
 let WebView: any = null;
 if (Platform.OS !== "web") {
@@ -26,16 +27,30 @@ export default function SoftwareScreen() {
   const insets = useSafeAreaInsets();
   const webTopInset = Platform.OS === "web" ? 67 : 0;
   const webViewRef = useRef<any>(null);
+  const { user } = useAuth();
+  const params = useLocalSearchParams<{ next?: string }>();
   const [startUrl, setStartUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [activeShortcut, setActiveShortcut] = useState("home");
+  const [gateMessage, setGateMessage] = useState<string | null>(null);
   const bottomPad = Platform.OS === "web" ? 84 : 49 + insets.bottom + 8;
 
   const loadUrl = useCallback(async (next?: string, shortcutId = "home") => {
     setIsLoading(true);
     setLoadError(false);
+    setGateMessage(null);
     setActiveShortcut(shortcutId);
+    if (!user?.lekkerNetworkAccess || !user?.lekkerNetworkId) {
+      setStartUrl(null);
+      setIsLoading(false);
+      setGateMessage(
+        !user?.phoneVerified
+          ? "Confirm your mobile number first, then turn on Lekkerpreneur access in Settings."
+          : "Turn on Lekkerpreneur access in Settings to open your workspace dashboard signed in.",
+      );
+      return;
+    }
     try {
       const url = await fetchLekkerSoftwareUrl(next);
       setStartUrl(url);
@@ -43,12 +58,19 @@ export default function SoftwareScreen() {
       setStartUrl(next ? `${LEKKER_NETWORK_URL}${next}` : LEKKER_NETWORK_URL);
       setLoadError(true);
     }
-  }, []);
+  }, [user?.lekkerNetworkAccess, user?.lekkerNetworkId, user?.phoneVerified]);
 
   useFocusEffect(
     useCallback(() => {
-      loadUrl("/app", "home");
-    }, [loadUrl]),
+      const next =
+        typeof params.next === "string" && params.next.startsWith("/app")
+          ? params.next
+          : "/app";
+      const shortcut =
+        SOFTWARE_SHORTCUTS.find((s) => next === s.next || next.startsWith(s.next + "/"))?.id ||
+        "home";
+      loadUrl(next, shortcut);
+    }, [loadUrl, params.next]),
   );
 
   async function openShortcut(id: string, next: string, native?: string) {
@@ -131,7 +153,18 @@ export default function SoftwareScreen() {
         </Pressable>
       </View>
 
-      {!startUrl ? (
+      {gateMessage ? (
+        <View style={styles.centered}>
+          <Ionicons name="business-outline" size={40} color={Colors.primary} />
+          <Text style={styles.loadingText}>{gateMessage}</Text>
+          <Pressable
+            onPress={() => router.push("/settings")}
+            style={{ marginTop: 16, paddingHorizontal: 16, paddingVertical: 10, backgroundColor: Colors.primary, borderRadius: 8 }}
+          >
+            <Text style={{ fontFamily: "Poppins_600SemiBold", color: Colors.background }}>Open Settings</Text>
+          </Pressable>
+        </View>
+      ) : !startUrl ? (
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={Colors.primary} />
           <Text style={styles.loadingText}>Signing in to lekker.network...</Text>

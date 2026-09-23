@@ -701,6 +701,88 @@ export async function fetchMobileNotifications(input: {
   }>(`/api/v1/mobile/notifications?${qs}`);
 }
 
+/**
+ * For each Chat user with Lekkerpreneur access, pull unread Network notifications
+ * and Expo-push ones not yet delivered. Deep-link href opens Software WebView.
+ */
+export async function pushUnreadNetworkNotifications(): Promise<{
+  users: number;
+  pushed: number;
+}> {
+  const { db, pool } = await import("./storage");
+  const { users } = await import("@shared/schema");
+  const { eq, and } = await import("drizzle-orm");
+  const { notifyUserPush } = await import("./push");
+
+  await pool.query(`
+CREATE TABLE IF NOT EXISTS network_notif_push_log (
+  user_id varchar(36) NOT NULL,
+  notification_id varchar(120) NOT NULL,
+  pushed_at timestamp NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, notification_id)
+);
+  `);
+
+  const rows = await db
+    .select({
+      id: users.id,
+      lekkerNetworkId: users.lekkerNetworkId,
+      lekkerWorkspaceId: users.lekkerWorkspaceId,
+    })
+    .from(users)
+    .where(
+      and(
+        eq(users.lekkerNetworkAccess, true),
+        eq(users.isVerifiedLekkerpreneur, true),
+      ),
+    );
+
+  let pushed = 0;
+  for (const u of rows) {
+    if (!u.lekkerNetworkId || !u.lekkerWorkspaceId) continue;
+    try {
+      const data = await fetchMobileNotifications({
+        userId: u.lekkerNetworkId,
+        workspaceId: u.lekkerWorkspaceId,
+        limit: 15,
+      });
+      const items = (data?.items || []).filter((i) => !i.isRead);
+      for (const item of items) {
+        const nid = String(item.id || "");
+        if (!nid) continue;
+        const exists = await pool.query(
+          `SELECT 1 FROM network_notif_push_log WHERE user_id = $1 AND notification_id = $2`,
+          [u.id, nid],
+        );
+        if (exists.rowCount && exists.rowCount > 0) continue;
+
+        const href = item.href?.startsWith("/app") ? item.href : "/app";
+        await notifyUserPush(
+          u.id,
+          item.title || "Cledwyn",
+          item.message || "Workspace update — tap to open",
+          {
+            type: "network_notification",
+            href,
+            source: item.source || "network",
+            notificationId: nid,
+          },
+          { category: "workspace", urgent: true },
+        );
+        await pool.query(
+          `INSERT INTO network_notif_push_log (user_id, notification_id) VALUES ($1, $2)
+           ON CONFLICT DO NOTHING`,
+          [u.id, nid],
+        );
+        pushed++;
+      }
+    } catch (e: any) {
+      console.warn("[NetworkNotifPush] user failed", u.id, e?.message || e);
+    }
+  }
+  return { users: rows.length, pushed };
+}
+
 export type MobileScheduleItem = {
   id: string;
   title: string;
