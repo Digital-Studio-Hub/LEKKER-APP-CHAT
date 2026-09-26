@@ -9,6 +9,7 @@ import {
   Platform,
   ActivityIndicator,
   Alert,
+  ScrollView,
 } from "react-native";
 import { Audio } from "expo-av";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
@@ -207,6 +208,7 @@ export default function CledwynScreen() {
   const [recordingSecs, setRecordingSecs] = useState(0);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [speakReplies, setSpeakReplies] = useState(true);
+  const [toolStatus, setToolStatus] = useState<string | null>(null);
   const inputRef = useRef<TextInput>(null);
   const listRef = useRef<FlatList>(null);
   const initializedRef = useRef(false);
@@ -239,6 +241,21 @@ export default function CledwynScreen() {
     !!user?.lekkerNetworkAccess &&
     !!user?.isVerifiedLekkerpreneur &&
     !!user?.lekkerWorkspaceId;
+
+  const WEB_CHIPS = [
+    {
+      label: "Cledwyn Web — change my headline",
+      text: "Cledwyn Web, change my headline to something stronger for my business",
+    },
+    {
+      label: "Build my site",
+      text: "Cledwyn Web, build me a mobile-first website for my business",
+    },
+    {
+      label: "Discuss only",
+      text: "Cledwyn Web, discuss only — what should I improve on my site homepage? Do not apply changes yet.",
+    },
+  ];
 
   useFocusEffect(
     useCallback(() => {
@@ -381,6 +398,7 @@ export default function CledwynScreen() {
     setMessages((prev) => [...prev, userMessage]);
     setIsStreaming(true);
     setShowTyping(true);
+    setToolStatus(null);
     if (companionMode) {
       reportPatientActivity();
     }
@@ -456,6 +474,11 @@ export default function CledwynScreen() {
             if (typeof metaSessionId === "string" && metaSessionId.length > 0) {
               await AsyncStorage.setItem(NETWORK_SESSION_KEY, metaSessionId);
             }
+            if (parsed.meta?.tool || parsed.meta?.text) {
+              setToolStatus(
+                String(parsed.meta.text || `Running ${parsed.meta.tool}…`).slice(0, 80),
+              );
+            }
             if (parsed.content) {
               fullContent += parsed.content;
 
@@ -518,6 +541,7 @@ export default function CledwynScreen() {
     } finally {
       setIsStreaming(false);
       setShowTyping(false);
+      setToolStatus(null);
       voiceSendRef.current = false;
     }
   }
@@ -683,12 +707,34 @@ export default function CledwynScreen() {
               {companionMode
                 ? "I’m here for a chat whenever you like — about your day, how you’re feeling, or just to say hello."
                 : workspaceMode
-                  ? "Ask about your business, or say “change my homepage hero…” to edit your website"
+                  ? "Say “Cledwyn Web” to edit your site — or tap a chip below"
                   : "Ask Cledwyn about business strategy, quotes, marketing, or anything else"}
             </Text>
           </View>
         }
       />
+
+      {toolStatus ? <Text style={styles.toolStatus}>{toolStatus}</Text> : null}
+
+      {workspaceMode && !isRecording ? (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={styles.chipRow}
+        >
+          {WEB_CHIPS.map((chip) => (
+            <Pressable
+              key={chip.label}
+              style={[styles.chip, (isStreaming || isTranscribing) && styles.chipDisabled]}
+              disabled={isStreaming || isTranscribing}
+              onPress={() => handleSend(chip.text)}
+            >
+              <Text style={styles.chipText}>{chip.label}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+      ) : null}
 
       {isRecording ? (
         <View style={[styles.inputContainer, { paddingBottom: bottomPadding }]}>
@@ -947,5 +993,37 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     textAlign: "center",
     lineHeight: 22,
+  },
+  chipRow: {
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    paddingBottom: 4,
+    alignItems: "center",
+  },
+  chip: {
+    backgroundColor: Colors.card,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: 18,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    minHeight: 44,
+    justifyContent: "center",
+    marginRight: 8,
+  },
+  chipDisabled: {
+    opacity: 0.45,
+  },
+  chipText: {
+    fontFamily: "Poppins_500Medium",
+    fontSize: fontScale(12),
+    color: Colors.text,
+  },
+  toolStatus: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: fontScale(11),
+    color: Colors.textMuted,
+    paddingHorizontal: 16,
+    paddingVertical: 4,
   },
 });
