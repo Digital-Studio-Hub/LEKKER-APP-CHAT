@@ -45,6 +45,12 @@ import {
   stopCledwynSpeech,
 } from "@/lib/cledwyn-speech";
 import { formatDuration } from "@/lib/chat-attachments";
+import * as ImagePicker from "expo-image-picker";
+import {
+  uploadChatImageToWebsiteAssets,
+  websiteAssetsHint,
+  type ChatWebsiteAsset,
+} from "@/lib/website-chat-assets";
 
 const NETWORK_SESSION_KEY = "lekker_cledwyn_network_session";
 
@@ -242,6 +248,9 @@ export default function CledwynScreen() {
     !!user?.isVerifiedLekkerpreneur &&
     !!user?.lekkerWorkspaceId;
 
+  const [pendingSiteAssets, setPendingSiteAssets] = useState<ChatWebsiteAsset[]>([]);
+  const [uploadingSitePhoto, setUploadingSitePhoto] = useState(false);
+
   const WEB_CHIPS = [
     {
       label: "Cledwyn Web — change my headline",
@@ -250,6 +259,18 @@ export default function CledwynScreen() {
     {
       label: "Build my site",
       text: "Cledwyn Web, build me a mobile-first website for my business",
+    },
+    {
+      label: "Go live (lekker.website)",
+      text: "Cledwyn Web, publish my free website on lekker.website — go live now",
+    },
+    {
+      label: "Renew free hosting",
+      text: "Cledwyn Web, renew my free lekker.website hosting for 90 days",
+    },
+    {
+      label: "Use photo on my site",
+      text: "Cledwyn Web, put my attached photo on my website hero (use driveFileIds from WEBSITE ASSETS)",
     },
     {
       label: "Discuss only",
@@ -378,12 +399,57 @@ export default function CledwynScreen() {
     router.push({ pathname: "/(tabs)/software", params: { next } });
   }
 
+  async function handleAttachWebsitePhoto() {
+    if (!workspaceMode || isStreaming || isTranscribing || uploadingSitePhoto) return;
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert("Permission needed", "Allow photo access to attach images for your website.");
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        quality: 0.85,
+        allowsMultipleSelection: false,
+      });
+      if (result.canceled || !result.assets?.[0]) return;
+      const asset = result.assets[0];
+      setUploadingSitePhoto(true);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      const uploaded = await uploadChatImageToWebsiteAssets({
+        uri: asset.uri,
+        fileName: asset.fileName || `site-${Date.now()}.jpg`,
+        mimeType: asset.mimeType || "image/jpeg",
+      });
+      setPendingSiteAssets((prev) => [...prev, uploaded].slice(-5));
+      Alert.alert(
+        "Photo ready for website",
+        "Tap Send with a caption (e.g. “put this on my hero”), or tap the “Use photo on my site” chip.",
+      );
+    } catch (e: any) {
+      Alert.alert("Upload failed", e?.message || "Could not upload photo");
+    } finally {
+      setUploadingSitePhoto(false);
+    }
+  }
+
   async function handleSend(overrideText?: string, fromVoice = false) {
-    const text = (overrideText ?? inputText).trim();
+    let text = (overrideText ?? inputText).trim();
+    const assetsToSend = pendingSiteAssets;
+    if (assetsToSend.length && !text) {
+      text = "Cledwyn Web, put this photo on my website hero";
+    }
     if (!text || isStreaming || isTranscribing) return;
+
+    const hint = websiteAssetsHint(assetsToSend);
+    const apiText = hint ? `${text}\n\n${hint}` : text;
+    const displayText = assetsToSend.length
+      ? `${text}\n📷 ${assetsToSend.length} photo(s) attached for website`
+      : text;
 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setInputText("");
+    setPendingSiteAssets([]);
     voiceSendRef.current = fromVoice;
     await stopCledwynSpeech();
 
@@ -391,7 +457,7 @@ export default function CledwynScreen() {
     const userMessage: CledwynMessage = {
       id: generateUniqueId(),
       role: "user",
-      content: text,
+      content: displayText,
       timestamp: new Date().toISOString(),
     };
 
@@ -409,7 +475,7 @@ export default function CledwynScreen() {
         ...currentMessages
           .filter((m) => m.role === "user" || m.role === "assistant")
           .map((m) => ({ role: m.role, content: m.content })),
-        { role: "user", content: text },
+        { role: "user", content: apiText },
       ];
 
       const sessionId = (await AsyncStorage.getItem(NETWORK_SESSION_KEY)) || undefined;
@@ -752,6 +818,24 @@ export default function CledwynScreen() {
         </View>
       ) : (
         <View style={[styles.inputContainer, { paddingBottom: bottomPadding }]}>
+          {workspaceMode ? (
+            <Pressable
+              onPress={handleAttachWebsitePhoto}
+              style={styles.micButton}
+              disabled={isStreaming || isTranscribing || uploadingSitePhoto}
+              testID="cledwyn-attach-site-photo"
+            >
+              {uploadingSitePhoto ? (
+                <ActivityIndicator size="small" color={Colors.primary} />
+              ) : (
+                <Ionicons
+                  name="image-outline"
+                  size={22}
+                  color={pendingSiteAssets.length ? Colors.primary : Colors.primary}
+                />
+              )}
+            </Pressable>
+          ) : null}
           <Pressable
             onPress={handleStartVoice}
             style={styles.micButton}
@@ -772,7 +856,11 @@ export default function CledwynScreen() {
                 ? "Transcribing…"
                 : companionMode
                   ? "Say hello… or tap the mic"
-                  : "Ask Cledwyn… or tap the mic"
+                  : pendingSiteAssets.length
+                    ? `${pendingSiteAssets.length} photo ready — caption + Send`
+                    : workspaceMode
+                      ? "Ask Cledwyn… or attach a site photo"
+                      : "Ask Cledwyn… or tap the mic"
             }
             placeholderTextColor={Colors.textMuted}
             value={inputText}
@@ -789,9 +877,16 @@ export default function CledwynScreen() {
             }}
             style={[
               styles.sendButton,
-              (!inputText.trim() || isStreaming || isTranscribing) && styles.sendButtonDisabled,
+              ((!inputText.trim() && !pendingSiteAssets.length) ||
+                isStreaming ||
+                isTranscribing) &&
+                styles.sendButtonDisabled,
             ]}
-            disabled={!inputText.trim() || isStreaming || isTranscribing}
+            disabled={
+              (!inputText.trim() && !pendingSiteAssets.length) ||
+              isStreaming ||
+              isTranscribing
+            }
           >
             {isStreaming ? (
               <ActivityIndicator size="small" color={Colors.background} />
