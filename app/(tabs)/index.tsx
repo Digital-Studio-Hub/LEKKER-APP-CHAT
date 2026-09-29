@@ -9,6 +9,7 @@ import {
   Alert,
   Image,
   TextInput,
+  ActionSheetIOS,
 } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -394,24 +395,44 @@ export default function ChatsScreen() {
         {profiles.length > 1 ? (
           <Pressable
             onPress={() => {
-              const other = profiles.find((p) => p.profileId !== user?.id);
-              if (!other) return;
+              const others = profiles.filter((p) => p.profileId !== user?.id);
+              if (others.length === 0) return;
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              const open = (profileId: string) => {
+                void switchProfile(profileId).then((result) => {
+                  if (!result.success) {
+                    Alert.alert("Couldn't switch", result.message || "Try again.");
+                  }
+                });
+              };
+              const labelFor = (p: (typeof others)[number]) =>
+                `${p.label || p.displayName} · ${p.phone}`;
+              // Android alerts only show three buttons. Longer lists use Settings, which switches any profile.
+              if (Platform.OS !== "ios" && others.length > 2) {
+                router.push("/settings");
+                return;
+              }
+              if (Platform.OS === "ios") {
+                ActionSheetIOS.showActionSheetWithOptions(
+                  {
+                    title: "Switch profile",
+                    message: "Chats and Cledwyn reload for the number you open.",
+                    options: [...others.map(labelFor), "Cancel"],
+                    cancelButtonIndex: others.length,
+                  },
+                  (index) => {
+                    const next = others[index];
+                    if (next) open(next.profileId);
+                  },
+                );
+                return;
+              }
               Alert.alert(
                 "Switch profile",
-                `Open ${other.label || other.displayName} (${other.phone})? Chats and Cledwyn will reload for that number.`,
+                "Chats and Cledwyn reload for the number you open.",
                 [
                   { text: "Cancel", style: "cancel" },
-                  {
-                    text: "Switch",
-                    onPress: () => {
-                      void switchProfile(other.profileId).then((result) => {
-                        if (!result.success) {
-                          Alert.alert("Couldn't switch", result.message || "Try again.");
-                        }
-                      });
-                    },
-                  },
+                  ...others.map((p) => ({ text: labelFor(p), onPress: () => open(p.profileId) })),
                 ],
               );
             }}

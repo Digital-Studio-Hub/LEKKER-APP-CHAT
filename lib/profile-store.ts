@@ -101,7 +101,7 @@ export async function deleteProfileToken(profileId: string): Promise<void> {
 
 /**
  * Move unscoped Cledwyn / personal-care blobs onto the original profile once.
- * A second profile must not inherit them.
+ * Later profiles must not inherit them.
  */
 export async function migrateLegacyLocalData(profileId: string): Promise<void> {
   const flag = await AsyncStorage.getItem(PROFILE_LEGACY_MIGRATED_KEY);

@@ -127,7 +127,7 @@ interface AuthContextValue {
   register: (data: RegisterData) => Promise<{ success: boolean; errors?: any[] }>;
   login: (data: LoginData) => Promise<{ success: boolean; message?: string }>;
   verifyWhatsApp: (data: WhatsAppVerifyData) => Promise<{ success: boolean; needsDisplayName?: boolean; message?: string }>;
-  /** Verify a second number with the same WhatsApp OTP and keep the current profile's token. */
+  /** Verify another number with the same WhatsApp OTP and keep every other profile's token. */
   addProfileViaWhatsApp: (data: WhatsAppVerifyData) => Promise<{ success: boolean; message?: string }>;
   switchProfile: (profileId: string) => Promise<{ success: boolean; message?: string }>;
   setProfileLabel: (profileId: string, label: string) => Promise<void>;

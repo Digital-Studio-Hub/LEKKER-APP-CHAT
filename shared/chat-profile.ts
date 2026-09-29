@@ -1,12 +1,16 @@
 /**
  * Multi-profile model for Lekker Chat.
  *
- * One install keeps a primary WhatsApp-number profile and may add a second
- * verified number. Each profile is a separate Chat user with its own JWT.
+ * One install keeps a primary WhatsApp-number profile and can add more verified
+ * numbers. Each profile is a separate Chat user with its own JWT.
  * This module is pure (no I/O) so the vault rules can be tested without React Native.
+ *
+ * Soft device cap (not a two-number product rule): each profile stores its own
+ * session token, and the switch list has to stay usable on a phone. Ten covers
+ * personal, business, and extra lines. Raise this constant if a real install needs more.
  */
 
-export const MAX_CHAT_PROFILES = 2;
+export const MAX_CHAT_PROFILES = 10;
 
 /** Generic labels a person can apply. Not customer or workspace identifiers. */
 export const PROFILE_LABEL_SUGGESTIONS = ["Personal", "Business"] as const;
@@ -180,7 +184,7 @@ export function upsertProfile(
   if (profiles.length >= MAX_CHAT_PROFILES) {
     return {
       profiles,
-      error: `This phone can keep ${MAX_CHAT_PROFILES} profiles. Remove one to add another.`,
+      error: `This phone can keep ${MAX_CHAT_PROFILES} numbers. Remove one in Settings to add another.`,
     };
   }
   const isPrimary = profiles.length === 0 || (incoming.isPrimary && !profiles.some((p) => p.isPrimary));

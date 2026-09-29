@@ -40,16 +40,37 @@ test("single-profile upsert keeps one primary and the phone binding", () => {
   assert.equal(first.profiles[0].phone, "+27111111111");
 });
 
-test("second profile is stored separately and a third is rejected", () => {
+test("a third profile is stored the same way as the second", () => {
   const first = upsertProfile([], user("a", "+27111111111", "ws-personal"));
   const second = upsertProfile(first.profiles, user("b", "+27222222222", "ws-business"));
-  assert.equal(second.profiles.length, MAX_CHAT_PROFILES);
-  assert.equal(second.profiles[0].isPrimary, true);
-  assert.equal(second.profiles[1].isPrimary, false);
-  assert.equal(second.profiles[1].defaultWorkspaceId, "ws-business");
-  const third = upsertProfile(second.profiles, user("c", "+27333333333", "ws-other"));
-  assert.ok(third.error);
-  assert.equal(third.profiles.length, 2);
+  const third = upsertProfile(second.profiles, user("c", "+27333333333", "ws-studio"));
+  assert.equal(third.error, undefined);
+  assert.equal(third.profiles.length, 3);
+  assert.equal(third.profiles.filter((p) => p.isPrimary).length, 1);
+  assert.equal(third.profiles[0].isPrimary, true);
+  assert.equal(third.profiles[1].defaultWorkspaceId, "ws-business");
+  assert.equal(third.profiles[2].phone, "+27333333333");
+  assert.equal(third.profiles[2].defaultWorkspaceId, "ws-studio");
+  assert.notEqual(cledwynMessagesKey("a"), cledwynMessagesKey("c"));
+  assert.notEqual(profileTokenKey("b"), profileTokenKey("c"));
+});
+
+test("device cap is above two and still rejects one past the limit", () => {
+  assert.ok(MAX_CHAT_PROFILES >= 5);
+  let profiles = [] as ReturnType<typeof user>[];
+  for (let i = 0; i < MAX_CHAT_PROFILES; i++) {
+    const added = upsertProfile(profiles, user(`p${i}`, `+27000000${i}`, `ws-${i}`));
+    assert.equal(added.error, undefined);
+    profiles = added.profiles;
+  }
+  assert.equal(profiles.length, MAX_CHAT_PROFILES);
+  assert.equal(profiles.filter((p) => p.isPrimary).length, 1);
+  const overflow = upsertProfile(profiles, user("overflow", "+27999999999", "ws-overflow"));
+  assert.match(overflow.error || "", new RegExp(String(MAX_CHAT_PROFILES)));
+  assert.equal(overflow.profiles.length, MAX_CHAT_PROFILES);
+  const refreshed = upsertProfile(profiles, user("p0", "+270000000", "ws-0"));
+  assert.equal(refreshed.error, undefined);
+  assert.equal(refreshed.profiles.length, MAX_CHAT_PROFILES);
 });
 
 test("re-verifying an existing number refreshes binding without duplicating", () => {

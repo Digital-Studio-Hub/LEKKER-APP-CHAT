@@ -1,6 +1,6 @@
 # Multi-profile (same install)
 
-Lekker Chat keeps today’s WhatsApp OTP login as the **primary profile**. A second verified number can be added on the same install and switched without reinstalling.
+Lekker Chat keeps today’s WhatsApp OTP login as the **primary profile**. More verified numbers can be added on the same install and switched without reinstalling. One number is the default. Two, three, or more use the same add-and-switch path.
 
 Each profile is its own Chat user (unique phone) with its own JWT. Tokens are stored separately on the device (`lekker_pt_<profileId>` in SecureStore, or AsyncStorage on web). The active token is still mirrored to `lekker_auth_token` so the existing single-profile path keeps working.
 
@@ -10,11 +10,15 @@ Each profile is its own Chat user (unique phone) with its own JWT. Tokens are st
 |---|---|
 | Chats, mail, feed API calls | `Authorization` uses the active profile’s JWT. Inboxes clear when `user.id` changes. |
 | Push | The device Expo token is unregistered from the previous user and registered for the active user. `push_tokens.expo_push_token` is unique, so one install receives pushes for the active profile only. |
-| Cledwyn transcript + Network `sessionId` | AsyncStorage keys are suffixed with the Chat profile id. A second profile does not read the first profile’s thread. |
+| Cledwyn transcript + Network `sessionId` | AsyncStorage keys are suffixed with the Chat profile id. Each profile reads only its own thread. |
 | Personal care PIN / companion cache | Scoped the same way. Legacy unscoped keys migrate once onto the primary profile. |
 | Software WebView | Session resets when the active profile or its `lekkerWorkspaceId` changes, then SSO is minted again. |
 
-Workspace switching inside lekker.network stays available. The profile only pins a **default** workspace for Cledwyn and the first Software SSO. Membership in other workspaces is a Network concern.
+Workspace switching inside lekker.network stays available. Each profile pins its own **default** workspace for Cledwyn and the first Software SSO. Membership in other workspaces is a Network concern.
+
+## How many profiles
+
+There is no two-number product rule. The install stores up to **10** profiles (`MAX_CHAT_PROFILES` in `shared/chat-profile.ts`). That cap is a device limit: each profile keeps its own secure session token, and the switch list has to stay usable. Adding the third number uses the same WhatsApp OTP and vault slot as the second. Raise the constant if a real phone needs more than ten.
 
 ## Chat API
 
@@ -92,11 +96,11 @@ When this exists, Chat can set `networkMembershipsAvailable: true` and fill `mem
 
 ## Manual test
 
-1. **Single number (unchanged).** Install or open the app, sign in with one WhatsApp OTP. Chats, Cledwyn, and Settings behave as before. Settings → Profiles shows one primary row and “Add another number”. Sign out returns to the login screen.
-2. **Add a second number.** Settings → Add another number. Request a code for a different WhatsApp number and verify. The app switches to that profile. The first number remains in the list.
-3. **Switch.** From Chats (the “switch” line) or Settings, switch back. The inbox reloads. Messages from the other number are not listed. Repeat on Cledwyn: the previous profile’s transcript and session are not shown.
-4. **Push.** With profile A active, a message to A notifies this device. A message to B does not, until you switch to B (the Expo token moves to the active user).
-5. **Workspace pin.** On the business profile, set Default workspace to that workspace id and save. Cledwyn workspace mode and Software SSO use it. Switch to the personal profile and confirm its own workspace id is unchanged. Inside Software you can still change workspace if Network lets that user do so.
-6. **Remove.** Remove the second profile from the phone. The first profile remains signed in. Sign out of the last profile returns to login.
+1. **Single number (unchanged).** Install or open the app, sign in with one WhatsApp OTP. Chats, Cledwyn, and Settings behave as before. Settings → Profiles shows one primary row and “Add another number”. There is no switch chip on Chats. Sign out returns to the login screen.
+2. **Add more numbers.** Settings → Add another number. Request a code for a different WhatsApp number and verify. Repeat for a third number. Each verify switches to that profile and leaves the earlier numbers in the list. The add button stays until the phone has 10 profiles.
+3. **Switch.** From Chats (the “switch” line) or Settings, open each profile. The inbox reloads. Messages from the other numbers are not listed. Repeat on Cledwyn: another profile’s transcript and session are not shown. With three or more profiles, the iOS sheet lists every other number. On Android, three or more other numbers open Settings, where each row switches.
+4. **Push.** With profile A active, a message to A notifies this device. A message to B or C does not, until you switch to that profile (the Expo token moves to the active user).
+5. **Workspace pin.** On one profile, set Default workspace and save. Cledwyn workspace mode and Software SSO use it. Switch to another profile and confirm its workspace id is unchanged. Inside Software you can still change workspace if Network lets that user do so.
+6. **Remove.** Remove one extra profile from its row. The others stay signed in. Sign out of the last profile returns to login.
 
 Automated checks: `npm run test:profiles`.

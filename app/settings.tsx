@@ -768,34 +768,61 @@ export default function SettingsScreen() {
               const active = profile.profileId === user?.id;
               const title = profile.label || profile.displayName || profile.phone;
               return (
-                <Pressable
-                  key={profile.profileId}
-                  style={styles.optionRow}
-                  disabled={active || switchingProfileId !== null}
-                  onPress={() => void handleSwitchProfile(profile.profileId)}
-                  testID={`profile-switch-${profile.profileId}`}
-                >
-                  <Ionicons
-                    name={active ? "checkmark-circle" : "person-outline"}
-                    size={20}
-                    color={active ? Colors.primary : Colors.textSecondary}
-                  />
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.optionLabel}>{title}</Text>
-                    <Text style={[styles.toggleHint, { marginTop: 2, marginBottom: 0 }]}>
-                      {profile.phone}
-                      {profile.isPrimary ? " · Primary" : ""}
-                      {profile.defaultWorkspaceId ? ` · ${profile.defaultWorkspaceId}` : ""}
-                    </Text>
-                  </View>
-                  {active ? (
-                    <Text style={styles.optionValue}>Active</Text>
-                  ) : switchingProfileId === profile.profileId ? (
-                    <ActivityIndicator size="small" color={Colors.primary} />
-                  ) : (
-                    <Text style={styles.optionValue}>Switch</Text>
-                  )}
-                </Pressable>
+                <View key={profile.profileId} style={styles.optionRow}>
+                  <Pressable
+                    style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 10 }}
+                    disabled={active || switchingProfileId !== null}
+                    onPress={() => void handleSwitchProfile(profile.profileId)}
+                    testID={`profile-switch-${profile.profileId}`}
+                  >
+                    <Ionicons
+                      name={active ? "checkmark-circle" : "person-outline"}
+                      size={20}
+                      color={active ? Colors.primary : Colors.textSecondary}
+                    />
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.optionLabel}>{title}</Text>
+                      <Text style={[styles.toggleHint, { marginTop: 2, marginBottom: 0 }]}>
+                        {profile.phone}
+                        {profile.isPrimary ? " · Primary" : ""}
+                        {profile.defaultWorkspaceId ? ` · ${profile.defaultWorkspaceId}` : ""}
+                      </Text>
+                    </View>
+                    {active ? (
+                      <Text style={styles.optionValue}>Active</Text>
+                    ) : switchingProfileId === profile.profileId ? (
+                      <ActivityIndicator size="small" color={Colors.primary} />
+                    ) : (
+                      <Text style={styles.optionValue}>Switch</Text>
+                    )}
+                  </Pressable>
+                  {profiles.length > 1 ? (
+                    <Pressable
+                      onPress={() => {
+                        Alert.alert(
+                          "Remove profile",
+                          `Remove ${profile.phone} from this phone? The account stays on Lekker Chat. You can add the number again with a WhatsApp code.`,
+                          [
+                            { text: "Cancel", style: "cancel" },
+                            {
+                              text: "Remove",
+                              style: "destructive",
+                              onPress: () => {
+                                void forgetProfile(profile.profileId).then((result) => {
+                                  if (result.signedOutCompletely) router.replace("/");
+                                });
+                              },
+                            },
+                          ],
+                        );
+                      }}
+                      hitSlop={8}
+                      testID={`profile-remove-${profile.profileId}`}
+                    >
+                      <Text style={[styles.optionValue, { color: Colors.dnd }]}>Remove</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
               );
             })}
             {profiles.length < MAX_CHAT_PROFILES ? (
@@ -808,10 +835,14 @@ export default function SettingsScreen() {
                 <Text style={styles.optionLabel}>Add another number</Text>
                 <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
               </Pressable>
-            ) : null}
+            ) : (
+              <Text style={[styles.toggleHint, { paddingHorizontal: 14, paddingBottom: 8 }]}>
+                This phone already has {MAX_CHAT_PROFILES} numbers. Remove one to add another.
+              </Text>
+            )}
           </View>
           <Text style={styles.toggleHint}>
-            Your first WhatsApp number stays the primary profile. A second number keeps its own chats, notifications, and Cledwyn. You can still belong to more than one Lekker Network workspace.
+            Your first WhatsApp number stays the primary profile. Each added number keeps its own chats, notifications, Cledwyn, and default workspace. This phone can hold up to {MAX_CHAT_PROFILES} numbers.
           </Text>
           <View style={[styles.sectionCard, { marginTop: 10 }]}>
             <Text style={styles.editableLabel}>Label for this profile</Text>
@@ -864,27 +895,6 @@ export default function SettingsScreen() {
                 <Text style={styles.autoReplySaveText}>Save workspace</Text>
               )}
             </Pressable>
-            {profiles.length > 1 && activeMeta && !activeMeta.isPrimary ? (
-              <Pressable
-                onPress={() => {
-                  Alert.alert(
-                    "Remove profile",
-                    `Remove ${activeMeta.phone} from this phone? The account stays on Lekker Chat. You can add the number again with a WhatsApp code.`,
-                    [
-                      { text: "Cancel", style: "cancel" },
-                      {
-                        text: "Remove",
-                        style: "destructive",
-                        onPress: () => void forgetProfile(activeMeta.profileId),
-                      },
-                    ],
-                  );
-                }}
-                style={{ marginTop: 12 }}
-              >
-                <Text style={[styles.optionLabel, { color: Colors.dnd }]}>Remove this profile from phone</Text>
-              </Pressable>
-            ) : null}
           </View>
         </View>
 

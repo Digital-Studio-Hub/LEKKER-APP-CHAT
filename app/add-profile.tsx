@@ -15,10 +15,11 @@ import Colors from "@/constants/colors";
 import { fontScale } from "@/lib/responsive";
 import { getApiUrl } from "@/lib/query-client";
 import { useAuth } from "@/lib/auth-context";
+import { MAX_CHAT_PROFILES } from "@shared/chat-profile";
 
 type Step = "phone" | "code";
 
-/** Add a second WhatsApp number without replacing the profile already on this phone. */
+/** Add another WhatsApp number without replacing the profiles already on this phone. */
 export default function AddProfileScreen() {
   const insets = useSafeAreaInsets();
   const { addProfileViaWhatsApp, profiles } = useAuth();
@@ -36,6 +37,10 @@ export default function AddProfileScreen() {
     }
     if (profiles.some((p) => p.phone.replace(/\s/g, "") === trimmed.replace(/\s/g, ""))) {
       setError("That number is already a profile on this phone");
+      return;
+    }
+    if (profiles.length >= MAX_CHAT_PROFILES) {
+      setError(`This phone can keep ${MAX_CHAT_PROFILES} numbers. Remove one in Settings to add another.`);
       return;
     }
     setIsSubmitting(true);
@@ -88,7 +93,7 @@ export default function AddProfileScreen() {
       </Pressable>
       <Text style={styles.title}>Add a profile</Text>
       <Text style={styles.subtitle}>
-        Verify another WhatsApp number. Chats, push alerts, and Cledwyn stay separate from the profile you use now.
+        Verify another WhatsApp number. It is saved next to the profiles already on this phone. Chats, push alerts, and Cledwyn stay on the number you open.
       </Text>
 
       {step === "phone" ? (
