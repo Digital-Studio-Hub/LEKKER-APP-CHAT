@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -25,6 +25,7 @@ import {
   type MailThread,
   type MailMessage,
 } from "@/lib/mail-api";
+import { useAuth } from "@/lib/auth-context";
 
 function formatTimeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -43,6 +44,7 @@ function replySubject(subject: string): string {
 
 export default function MailScreen() {
   const insets = useSafeAreaInsets();
+  const { user } = useAuth();
   const webTopInset = Platform.OS === "web" ? 67 : 0;
   const [threads, setThreads] = useState<MailThread[]>([]);
   const [selectedThread, setSelectedThread] = useState<MailThread | null>(null);
@@ -71,10 +73,20 @@ export default function MailScreen() {
     }
   }
 
+  const mailProfileRef = useRef(user?.id);
+  useEffect(() => {
+    if (mailProfileRef.current === user?.id) return;
+    mailProfileRef.current = user?.id;
+    setThreads([]);
+    setSelectedThread(null);
+    setMessages([]);
+    setComposing(false);
+  }, [user?.id]);
+
   useFocusEffect(
     useCallback(() => {
       if (!selectedThread && !composing) loadThreads();
-    }, [selectedThread, composing]),
+    }, [selectedThread, composing, user?.id]),
   );
 
   async function openThread(thread: MailThread) {

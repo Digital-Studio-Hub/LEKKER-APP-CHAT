@@ -1,3 +1,5 @@
+import { networkSessionTokenBody, networkSessionTokenBodyFallback } from "@shared/chat-profile";
+
 const LEKKER_API_BASE = process.env.LEKKER_API_BASE_URL || "https://lekker.network";
 const LEKKER_API_URL = `${LEKKER_API_BASE}/api/v1/lekkerpreneurs`;
 const LEKKER_SYNC_URL = `${LEKKER_API_BASE}/api/auth/sync-lekker`;
@@ -914,12 +916,30 @@ export async function updateMarketplaceLeadStatus(input: {
   );
 }
 
-export async function fetchMobileSessionToken(lekkerNetworkUserId: string): Promise<string | null> {
+export async function fetchMobileSessionToken(
+  lekkerNetworkUserId: string,
+  opts?: { workspaceId?: string | null; chatProfileId?: string | null; phone?: string | null },
+): Promise<string | null> {
+  const enriched = networkSessionTokenBody({
+    lekkerNetworkId: lekkerNetworkUserId,
+    workspaceId: opts?.workspaceId,
+    profileId: opts?.chatProfileId,
+    phone: opts?.phone,
+  });
   const data = await lekkerMobileFetch<{ token?: string }>("/api/v1/mobile/session-token", {
     method: "POST",
-    body: JSON.stringify({ userId: lekkerNetworkUserId }),
+    body: JSON.stringify(enriched),
   });
-  return data?.token || null;
+  if (data?.token) return data.token;
+  // Current Network builds accept { userId } only. Retry if extra fields were rejected.
+  if (Object.keys(enriched).length > 1) {
+    const fallback = await lekkerMobileFetch<{ token?: string }>("/api/v1/mobile/session-token", {
+      method: "POST",
+      body: JSON.stringify(networkSessionTokenBodyFallback(lekkerNetworkUserId)),
+    });
+    return fallback?.token || null;
+  }
+  return null;
 }
 
 export async function fetchWorkspaceEmailStatus(

@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { sendMessageNotification, setBadgeCount } from "@/lib/notifications";
+import { cledwynMessagesKey } from "@shared/chat-profile";
 
 const KEYS = {
   USER_PROFILE: "lekker_user_profile",
@@ -408,16 +409,15 @@ export const storage = {
     await this.saveConversations(filtered);
   },
 
-  async getCledwynMessages(): Promise<CledwynMessage[]> {
-    const data = await AsyncStorage.getItem(KEYS.CLEDWYN_MESSAGES);
+  async getCledwynMessages(profileId?: string | null): Promise<CledwynMessage[]> {
+    const key = profileId ? cledwynMessagesKey(profileId) : KEYS.CLEDWYN_MESSAGES;
+    const data = await AsyncStorage.getItem(key);
     return data ? JSON.parse(data) : [];
   },
 
-  async saveCledwynMessages(messages: CledwynMessage[]): Promise<void> {
-    await AsyncStorage.setItem(
-      KEYS.CLEDWYN_MESSAGES,
-      JSON.stringify(messages),
-    );
+  async saveCledwynMessages(messages: CledwynMessage[], profileId?: string | null): Promise<void> {
+    const key = profileId ? cledwynMessagesKey(profileId) : KEYS.CLEDWYN_MESSAGES;
+    await AsyncStorage.setItem(key, JSON.stringify(messages));
   },
 
   async getFeedPosts(): Promise<FeedPost[]> {

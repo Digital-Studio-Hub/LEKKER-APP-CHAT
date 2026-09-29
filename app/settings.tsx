@@ -42,6 +42,7 @@ import {
 import { getApiUrl, apiRequest } from "@/lib/query-client";
 import * as FileSystem from "expo-file-system";
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
+import { MAX_CHAT_PROFILES, PROFILE_LABEL_SUGGESTIONS } from "@shared/chat-profile";
 
 type PresenceStatus = "online" | "away" | "dnd" | "offline";
 
@@ -71,7 +72,24 @@ function getProfileImageUrl(profilePhoto: string | null | undefined): string | n
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
-  const { user, updateProfile, applyServerUser, refreshUser, logout } = useAuth();
+  const {
+    user,
+    updateProfile,
+    applyServerUser,
+    refreshUser,
+    logout,
+    logoutAll,
+    profiles,
+    switchProfile,
+    setProfileLabel,
+    setProfileWorkspaceBinding,
+    forgetProfile,
+  } = useAuth();
+  const activeMeta = profiles.find((p) => p.profileId === user?.id);
+  const [labelDraft, setLabelDraft] = useState(activeMeta?.label || "");
+  const [workspaceDraft, setWorkspaceDraft] = useState(user?.lekkerWorkspaceId || "");
+  const [savingBinding, setSavingBinding] = useState(false);
+  const [switchingProfileId, setSwitchingProfileId] = useState<string | null>(null);
   // applyServerUser used when toggling Lekkerpreneur access after sync-lekker
   const [selectedPresence, setSelectedPresence] = useState<PresenceStatus>(
     (user?.presence as PresenceStatus) || "online",
@@ -125,6 +143,11 @@ export default function SettingsScreen() {
   const [isSyncingLekker, setIsSyncingLekker] = useState(false);
 
   useEffect(() => {
+    setLabelDraft(activeMeta?.label || "");
+    setWorkspaceDraft(user?.lekkerWorkspaceId || "");
+  }, [user?.id, user?.lekkerWorkspaceId, activeMeta?.label]);
+
+  useEffect(() => {
     async function loadPermissions() {
       const [notif, loc, prefsPayload] = await Promise.all([
         areNotificationsEnabled(),
@@ -142,7 +165,7 @@ export default function SettingsScreen() {
     loadPermissions();
     loadBlockedUsers();
     loadLinkedEmails();
-  }, []);
+  }, [user?.id]);
 
   async function toggleNotifCategory(id: NotificationCategory, value: boolean) {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -514,22 +537,71 @@ export default function SettingsScreen() {
 
   async function handleLogout() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    const multiple = profiles.length > 1;
+    const run = async (all: boolean) => {
+      if (all) {
+        await logoutAll();
+        router.replace("/");
+        return;
+      }
+      const result = await logout();
+      if (result.signedOutCompletely) router.replace("/");
+    };
     if (Platform.OS === "web") {
-      await logout();
-      router.replace("/");
+      await run(false);
       return;
     }
-    Alert.alert("Sign Out", "Are you sure you want to sign out?", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Sign Out",
-        style: "destructive",
-        onPress: async () => {
-          await logout();
-          router.replace("/");
-        },
-      },
-    ]);
+    if (!multiple) {
+      Alert.alert("Sign Out", "Are you sure you want to sign out?", [
+        { text: "Cancel", style: "cancel" },
+        { text: "Sign Out", style: "destructive", onPress: () => void run(false) },
+      ]);
+      return;
+    }
+    Alert.alert(
+      "Sign out",
+      "Sign out of this profile only, or every profile saved on this phone?",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "This profile", onPress: () => void run(false) },
+        { text: "All profiles", style: "destructive", onPress: () => void run(true) },
+      ],
+    );
+  }
+
+  async function handleSwitchProfile(profileId: string) {
+    if (profileId === user?.id) return;
+    setSwitchingProfileId(profileId);
+    try {
+      const result = await switchProfile(profileId);
+      if (!result.success) {
+        Alert.alert("Couldn't switch", result.message || "Try again.");
+      }
+    } finally {
+      setSwitchingProfileId(null);
+    }
+  }
+
+  async function handleSaveLabel() {
+    if (!user?.id) return;
+    await setProfileLabel(user.id, labelDraft);
+  }
+
+  async function handleSaveWorkspace() {
+    setSavingBinding(true);
+    try {
+      const result = await setProfileWorkspaceBinding(workspaceDraft.trim() || null);
+      if (!result.success) {
+        Alert.alert("Workspace", result.message || "Could not save.");
+        return;
+      }
+      Alert.alert(
+        "Workspace saved",
+        "Cledwyn and Software will open this workspace for the active profile.",
+      );
+    } finally {
+      setSavingBinding(false);
+    }
   }
 
   async function handleDeleteAccount() {
@@ -554,8 +626,8 @@ export default function SettingsScreen() {
                   onPress: async () => {
                     try {
                       await apiRequest("DELETE", "/api/auth/account");
-                      await logout();
-                      router.replace("/");
+                      const result = await logout();
+                      if (result.signedOutCompletely) router.replace("/");
                     } catch (err: any) {
                       Alert.alert("Error", err.message || "Failed to delete account. Please try again.");
                     }
@@ -686,6 +758,133 @@ export default function SettingsScreen() {
                   : <Ionicons name="alert-circle-outline" size={14} color={Colors.textMuted} />}
               </View>
             </View>
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Profiles</Text>
+          <View style={styles.sectionCard}>
+            {profiles.map((profile) => {
+              const active = profile.profileId === user?.id;
+              const title = profile.label || profile.displayName || profile.phone;
+              return (
+                <Pressable
+                  key={profile.profileId}
+                  style={styles.optionRow}
+                  disabled={active || switchingProfileId !== null}
+                  onPress={() => void handleSwitchProfile(profile.profileId)}
+                  testID={`profile-switch-${profile.profileId}`}
+                >
+                  <Ionicons
+                    name={active ? "checkmark-circle" : "person-outline"}
+                    size={20}
+                    color={active ? Colors.primary : Colors.textSecondary}
+                  />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.optionLabel}>{title}</Text>
+                    <Text style={[styles.toggleHint, { marginTop: 2, marginBottom: 0 }]}>
+                      {profile.phone}
+                      {profile.isPrimary ? " · Primary" : ""}
+                      {profile.defaultWorkspaceId ? ` · ${profile.defaultWorkspaceId}` : ""}
+                    </Text>
+                  </View>
+                  {active ? (
+                    <Text style={styles.optionValue}>Active</Text>
+                  ) : switchingProfileId === profile.profileId ? (
+                    <ActivityIndicator size="small" color={Colors.primary} />
+                  ) : (
+                    <Text style={styles.optionValue}>Switch</Text>
+                  )}
+                </Pressable>
+              );
+            })}
+            {profiles.length < MAX_CHAT_PROFILES ? (
+              <Pressable
+                style={styles.optionRow}
+                onPress={() => router.push("/add-profile")}
+                testID="add-profile-button"
+              >
+                <Ionicons name="add-circle-outline" size={20} color={Colors.primary} />
+                <Text style={styles.optionLabel}>Add another number</Text>
+                <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
+              </Pressable>
+            ) : null}
+          </View>
+          <Text style={styles.toggleHint}>
+            Your first WhatsApp number stays the primary profile. A second number keeps its own chats, notifications, and Cledwyn. You can still belong to more than one Lekker Network workspace.
+          </Text>
+          <View style={[styles.sectionCard, { marginTop: 10 }]}>
+            <Text style={styles.editableLabel}>Label for this profile</Text>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+              {PROFILE_LABEL_SUGGESTIONS.map((suggestion) => (
+                <Pressable
+                  key={suggestion}
+                  onPress={() => setLabelDraft(suggestion)}
+                  style={[
+                    styles.presetRow,
+                    { paddingVertical: 6, paddingHorizontal: 10 },
+                    labelDraft === suggestion && styles.presetRowActive,
+                  ]}
+                >
+                  <Text style={styles.presetText}>{suggestion}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <TextInput
+              style={[styles.editInput, { marginTop: 8 }]}
+              value={labelDraft}
+              onChangeText={setLabelDraft}
+              placeholder="Personal, Business, or your own label"
+              placeholderTextColor={Colors.textMuted}
+              maxLength={40}
+              testID="profile-label-input"
+            />
+            <Pressable onPress={() => void handleSaveLabel()} style={styles.autoReplySaveButton}>
+              <Text style={styles.autoReplySaveText}>Save label</Text>
+            </Pressable>
+            <Text style={[styles.editableLabel, { marginTop: 14 }]}>Default workspace</Text>
+            <TextInput
+              style={[styles.editInput, { marginTop: 8 }]}
+              value={workspaceDraft}
+              onChangeText={setWorkspaceDraft}
+              placeholder="Workspace id from lekker.network"
+              placeholderTextColor={Colors.textMuted}
+              autoCapitalize="none"
+              autoCorrect={false}
+              testID="profile-workspace-input"
+            />
+            <Pressable
+              onPress={() => void handleSaveWorkspace()}
+              style={styles.autoReplySaveButton}
+              disabled={savingBinding}
+            >
+              {savingBinding ? (
+                <ActivityIndicator size="small" color={Colors.background} />
+              ) : (
+                <Text style={styles.autoReplySaveText}>Save workspace</Text>
+              )}
+            </Pressable>
+            {profiles.length > 1 && activeMeta && !activeMeta.isPrimary ? (
+              <Pressable
+                onPress={() => {
+                  Alert.alert(
+                    "Remove profile",
+                    `Remove ${activeMeta.phone} from this phone? The account stays on Lekker Chat. You can add the number again with a WhatsApp code.`,
+                    [
+                      { text: "Cancel", style: "cancel" },
+                      {
+                        text: "Remove",
+                        style: "destructive",
+                        onPress: () => void forgetProfile(activeMeta.profileId),
+                      },
+                    ],
+                  );
+                }}
+                style={{ marginTop: 12 }}
+              >
+                <Text style={[styles.optionLabel, { color: Colors.dnd }]}>Remove this profile from phone</Text>
+              </Pressable>
+            ) : null}
           </View>
         </View>
 

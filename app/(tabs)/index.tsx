@@ -156,7 +156,7 @@ type EnquiryPreview = {
 
 export default function ChatsScreen() {
   const insets = useSafeAreaInsets();
-  const { user, updateProfile } = useAuth();
+  const { user, updateProfile, profiles, switchProfile } = useAuth();
   const [chats, setChats] = useState<ServerChat[]>([]);
   const [blockedIds, setBlockedIds] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState("");
@@ -178,6 +178,11 @@ export default function ChatsScreen() {
       return false;
     });
   }, [chats, searchQuery, user?.id]);
+
+  useEffect(() => {
+    setChats([]);
+    setEnquiries([]);
+  }, [user?.id]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -368,9 +373,9 @@ export default function ChatsScreen() {
   return (
     <View style={[styles.container, { paddingTop: insets.top + webTopInset }]}>
       <View style={styles.header}>
+        <View style={styles.statusHit}>
         <Pressable
           onPress={handleQuickStatus}
-          style={styles.statusHit}
           hitSlop={8}
           testID="quick-status"
         >
@@ -386,6 +391,39 @@ export default function ChatsScreen() {
             <Ionicons name="chevron-down" size={14} color={Colors.textMuted} />
           </View>
         </Pressable>
+        {profiles.length > 1 ? (
+          <Pressable
+            onPress={() => {
+              const other = profiles.find((p) => p.profileId !== user?.id);
+              if (!other) return;
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              Alert.alert(
+                "Switch profile",
+                `Open ${other.label || other.displayName} (${other.phone})? Chats and Cledwyn will reload for that number.`,
+                [
+                  { text: "Cancel", style: "cancel" },
+                  {
+                    text: "Switch",
+                    onPress: () => {
+                      void switchProfile(other.profileId).then((result) => {
+                        if (!result.success) {
+                          Alert.alert("Couldn't switch", result.message || "Try again.");
+                        }
+                      });
+                    },
+                  },
+                ],
+              );
+            }}
+            testID="switch-profile-chip"
+            style={{ marginTop: 4 }}
+          >
+            <Text style={styles.statusLabel}>
+              {(profiles.find((p) => p.profileId === user?.id)?.label || user?.displayName || "Profile")} · switch
+            </Text>
+          </Pressable>
+        ) : null}
+        </View>
         <View style={styles.headerActions}>
           {user?.isVerifiedLekkerpreneur && user?.lekkerWorkspaceId ? (
             <Pressable

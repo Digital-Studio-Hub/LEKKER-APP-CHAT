@@ -15,6 +15,7 @@
     "db:push": "drizzle-kit push",
     "start": "npx expo start",
     "lint": "npx expo lint",
+    "test:profiles": "tsx --test shared/chat-profile.test.ts",
     "lint:fix": "npx expo lint --fix",
     "android": "expo run:android",
     "ios": "expo run:ios"
