@@ -185,6 +185,16 @@ export function stopRealtime() {
   connected = false;
 }
 
+/** Drop the current SSE stream so the next loop authenticates as the active profile. */
+export function reconnectRealtime() {
+  abort?.abort();
+  abort = null;
+  connected = false;
+  if (wanted && listeners.size > 0 && !loopPromise) {
+    loopPromise = streamLoop();
+  }
+}
+
 /** Map realtime payload message into ServerMessage shape when present. */
 export function realtimeMessageToServer(event: RealtimeEvent): ServerMessage | null {
   const m = event.message;

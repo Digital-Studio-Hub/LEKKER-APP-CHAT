@@ -24,6 +24,7 @@ import Colors from "@/constants/colors";
 import { isSmallScreen, fontScale, responsiveMaxBubbleWidth } from "@/lib/responsive";
 import { getApiUrl } from "@/lib/query-client";
 import { storage, CledwynMessage } from "@/lib/storage";
+import { cledwynSessionKey } from "@shared/chat-profile";
 import { useAuth } from "@/lib/auth-context";
 import { fetchLekkerSoftwareUrl } from "@/lib/lekker-session";
 import { LEKKER_NETWORK_URL } from "@/constants/ecosystem";
@@ -51,8 +52,6 @@ import {
   websiteAssetsHint,
   type ChatWebsiteAsset,
 } from "@/lib/website-chat-assets";
-
-const NETWORK_SESSION_KEY = "lekker_cledwyn_network_session";
 
 let messageCounter = 0;
 function generateUniqueId(): string {
@@ -205,6 +204,8 @@ const bubbleStyles = StyleSheet.create({
 export default function CledwynScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
+  const profileIdRef = useRef<string | null>(user?.id || null);
+  profileIdRef.current = user?.id || null;
   const [messages, setMessages] = useState<CledwynMessage[]>([]);
   const [inputText, setInputText] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
@@ -217,7 +218,6 @@ export default function CledwynScreen() {
   const [toolStatus, setToolStatus] = useState<string | null>(null);
   const inputRef = useRef<TextInput>(null);
   const listRef = useRef<FlatList>(null);
-  const initializedRef = useRef(false);
   const recordingRef = useRef<Audio.Recording | null>(null);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const voiceSendRef = useRef(false);
@@ -232,15 +232,28 @@ export default function CledwynScreen() {
     if (messages.length > 0 || showTyping) scrollToLatest(true);
   }, [messages.length, showTyping]);
 
-  useEffect(() => {
-    if (!initializedRef.current) {
-      storage.getCledwynMessages().then((msgs) => {
-        setMessages(msgs);
-        initializedRef.current = true;
-      });
-      getCledwynSpeakEnabled().then(setSpeakReplies);
-    }
+  const persistThread = useCallback((msgs: CledwynMessage[], profileId?: string | null) => {
+    const pid = profileId === undefined ? profileIdRef.current : profileId;
+    if (!pid) return;
+    void storage.saveCledwynMessages(msgs, pid);
   }, []);
+
+  useEffect(() => {
+    const pid = user?.id;
+    if (!pid) {
+      setMessages([]);
+      return;
+    }
+    let cancelled = false;
+    setMessages([]);
+    storage.getCledwynMessages(pid).then((msgs) => {
+      if (!cancelled && profileIdRef.current === pid) setMessages(msgs);
+    });
+    getCledwynSpeakEnabled().then(setSpeakReplies);
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
 
   const workspaceMode =
     !companionMode &&
@@ -280,6 +293,8 @@ export default function CledwynScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      const pid = user?.id;
+      if (!pid) return;
       let cancelled = false;
       (async () => {
         const cached = await getCachedPersonalCare();
@@ -302,8 +317,9 @@ export default function CledwynScreen() {
           const remoteMsgs = await fetchCompanionMessages({ limit: 100 });
           if (!cancelled && remoteMsgs.length) {
             setMessages((prev) => {
+              if (profileIdRef.current !== pid) return prev;
               const merged = mergeCompanionIntoCledwyn(prev, remoteMsgs);
-              storage.saveCledwynMessages(merged);
+              persistThread(merged, pid);
               return merged;
             });
             await markCompanionMessagesRead();
@@ -321,8 +337,9 @@ export default function CledwynScreen() {
           const remoteMsgs = await fetchCompanionMessages({ limit: 100 });
           if (cancelled || !remoteMsgs.length) return;
           setMessages((prev) => {
+            if (profileIdRef.current !== pid) return prev;
             const merged = mergeCompanionIntoCledwyn(prev, remoteMsgs);
-            storage.saveCledwynMessages(merged);
+            persistThread(merged, pid);
             return merged;
           });
           await markCompanionMessagesRead();
@@ -335,7 +352,7 @@ export default function CledwynScreen() {
         cancelled = true;
         clearInterval(poll);
       };
-    }, []),
+    }, [user?.id, persistThread]),
   );
 
   const mergeNotifications = useCallback(async () => {
@@ -375,13 +392,13 @@ export default function CledwynScreen() {
         );
         // Cap stored history
         const trimmed = next.length > 200 ? next.slice(next.length - 200) : next;
-        storage.saveCledwynMessages(trimmed);
+        if (profileIdRef.current) persistThread(trimmed, profileIdRef.current);
         return trimmed;
       });
     } catch {
       /* offline — ignore */
     }
-  }, [workspaceMode]);
+  }, [workspaceMode, user?.id, persistThread]);
 
   useFocusEffect(
     useCallback(() => {
@@ -470,6 +487,7 @@ export default function CledwynScreen() {
     }
 
     try {
+      const sendProfileId = profileIdRef.current;
       const baseUrl = getApiUrl();
       const chatHistory = [
         ...currentMessages
@@ -478,7 +496,8 @@ export default function CledwynScreen() {
         { role: "user", content: apiText },
       ];
 
-      const sessionId = (await AsyncStorage.getItem(NETWORK_SESSION_KEY)) || undefined;
+      const sessionKey = sendProfileId ? cledwynSessionKey(sendProfileId) : null;
+      const sessionId = sessionKey ? (await AsyncStorage.getItem(sessionKey)) || undefined : undefined;
       const token = getAuthToken();
       const response = await fetch(`${baseUrl}api/cledwyn/chat`, {
         method: "POST",
@@ -497,6 +516,7 @@ export default function CledwynScreen() {
 
       if (!response.ok) {
         setShowTyping(false);
+        if (profileIdRef.current !== sendProfileId) return;
         setMessages((prev) => {
           const next = [
             ...prev,
@@ -507,7 +527,7 @@ export default function CledwynScreen() {
               timestamp: new Date().toISOString(),
             },
           ];
-          storage.saveCledwynMessages(next);
+          persistThread(next, sendProfileId);
           return next;
         });
         return;
@@ -537,8 +557,10 @@ export default function CledwynScreen() {
           try {
             const parsed = JSON.parse(data);
             const metaSessionId = parsed.meta?.sessionId;
-            if (typeof metaSessionId === "string" && metaSessionId.length > 0) {
-              await AsyncStorage.setItem(NETWORK_SESSION_KEY, metaSessionId);
+            if (typeof metaSessionId === "string" && metaSessionId.length > 0 && sendProfileId) {
+              if (profileIdRef.current === sendProfileId) {
+                await AsyncStorage.setItem(cledwynSessionKey(sendProfileId), metaSessionId);
+              }
             }
             if (parsed.meta?.tool || parsed.meta?.text) {
               setToolStatus(
@@ -547,6 +569,7 @@ export default function CledwynScreen() {
             }
             if (parsed.content) {
               fullContent += parsed.content;
+              if (profileIdRef.current !== sendProfileId) continue;
 
               if (!assistantAdded) {
                 setShowTyping(false);
@@ -581,10 +604,12 @@ export default function CledwynScreen() {
         }
       }
 
-      setMessages((prev) => {
-        storage.saveCledwynMessages(prev);
-        return prev;
-      });
+      if (profileIdRef.current === sendProfileId) {
+        setMessages((prev) => {
+          persistThread(prev, sendProfileId);
+          return prev;
+        });
+      }
 
       // Speak-back after the full reply (on-device TTS)
       if (fullContent.trim()) {
@@ -595,15 +620,17 @@ export default function CledwynScreen() {
       }
     } catch (error) {
       setShowTyping(false);
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: generateUniqueId(),
-          role: "assistant",
-          content: "Sorry, I encountered an error. Please try again.",
-          timestamp: new Date().toISOString(),
-        },
-      ]);
+      if (profileIdRef.current === sendProfileId) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: generateUniqueId(),
+            role: "assistant",
+            content: "Sorry, I encountered an error. Please try again.",
+            timestamp: new Date().toISOString(),
+          },
+        ]);
+      }
     } finally {
       setIsStreaming(false);
       setShowTyping(false);
@@ -683,7 +710,7 @@ export default function CledwynScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     await stopCledwynSpeech();
     setMessages([]);
-    await storage.saveCledwynMessages([]);
+    await storage.saveCledwynMessages([], profileIdRef.current);
   }
 
   const webTopInset = Platform.OS === "web" ? 67 : 0;

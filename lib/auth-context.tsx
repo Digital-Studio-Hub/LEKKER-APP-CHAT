@@ -3,10 +3,29 @@ import { AppState, type AppStateStatus } from "react-native";
 import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as SecureStore from "expo-secure-store";
-import { getApiUrl } from "@/lib/query-client";
+import { getApiUrl, queryClient } from "@/lib/query-client";
 import { getAuthToken, setAuthToken } from "@/lib/auth-token";
 import { clearStoredPushToken } from "@/lib/notifications";
 import { unregisterPushToken } from "@/lib/push-api";
+import {
+  clearVault,
+  deleteProfileToken,
+  getActiveProfileId,
+  loadVault,
+  migrateLegacyLocalData,
+  readProfileToken,
+  saveProfileToken,
+  saveVault,
+  setActiveProfileId,
+} from "@/lib/profile-store";
+import {
+  normalizeProfileLabel,
+  planProfileSwitch,
+  profileMetaFromAuthUser,
+  removeProfile,
+  upsertProfile,
+  type ChatProfileMeta,
+} from "@shared/chat-profile";
 
 const TOKEN_KEY = "lekker_auth_token";
 const USER_KEY = "lekker_auth_user";
@@ -102,14 +121,26 @@ interface AuthContextValue {
   user: AuthUser | null;
   isLoading: boolean;
   isLoggedIn: boolean;
+  /** Profiles stored on this install. One entry for the usual single-number setup. */
+  profiles: ChatProfileMeta[];
+  activeProfileId: string | null;
   register: (data: RegisterData) => Promise<{ success: boolean; errors?: any[] }>;
   login: (data: LoginData) => Promise<{ success: boolean; message?: string }>;
   verifyWhatsApp: (data: WhatsAppVerifyData) => Promise<{ success: boolean; needsDisplayName?: boolean; message?: string }>;
+  /** Verify another number with the same WhatsApp OTP and keep every other profile's token. */
+  addProfileViaWhatsApp: (data: WhatsAppVerifyData) => Promise<{ success: boolean; message?: string }>;
+  switchProfile: (profileId: string) => Promise<{ success: boolean; message?: string }>;
+  setProfileLabel: (profileId: string, label: string) => Promise<void>;
+  setProfileWorkspaceBinding: (defaultWorkspaceId: string | null) => Promise<{ success: boolean; message?: string }>;
   updateProfile: (updates: Partial<AuthUser>) => Promise<void>;
   /** Apply a full server user payload (e.g. sync-lekker) without stripping verification fields. */
   applyServerUser: (serverUser: Partial<AuthUser> & { id?: string }) => Promise<void>;
   refreshUser: () => Promise<void>;
-  logout: () => Promise<void>;
+  /** Signs out the active profile. If another profile remains, that one becomes active. */
+  logout: () => Promise<{ signedOutCompletely: boolean }>;
+  logoutAll: () => Promise<void>;
+  /** Remove a profile from this phone. Does not delete the Chat account. */
+  forgetProfile: (profileId: string) => Promise<{ signedOutCompletely: boolean }>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -165,6 +196,8 @@ async function loadStoredUser(): Promise<AuthUser | null> {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
+  const [profiles, setProfiles] = useState<ChatProfileMeta[]>([]);
+  const [activeProfileId, setActiveId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -184,37 +217,127 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => sub.remove();
   }, [user?.id, user?.notificationsEnabled]);
 
+  async function syncVaultMeta(
+    serverUser: AuthUser,
+    token: string,
+    opts?: { label?: string | null; activate?: boolean },
+  ) {
+    const vault = await loadVault();
+    const existing = vault.profiles.find((p) => p.profileId === serverUser.id);
+    const meta = profileMetaFromAuthUser(serverUser, {
+      isPrimary: vault.profiles.length === 0 || !!existing?.isPrimary,
+      label: opts?.label === undefined ? existing?.label ?? null : opts.label,
+      addedAt: existing?.addedAt || new Date().toISOString(),
+    });
+    const upserted = upsertProfile(vault.profiles, meta);
+    if (upserted.error) {
+      return { ok: false as const, message: upserted.error, profiles: vault.profiles };
+    }
+    await saveProfileToken(serverUser.id, token);
+    const primary = upserted.profiles.find((p) => p.isPrimary) || upserted.profiles[0];
+    if (primary) await migrateLegacyLocalData(primary.profileId);
+    const activate = opts?.activate !== false;
+    const next = {
+      profiles: upserted.profiles,
+      activeProfileId: activate ? serverUser.id : vault.activeProfileId,
+    };
+    await saveVault(next);
+    setProfiles(next.profiles);
+    setActiveId(next.activeProfileId);
+    return { ok: true as const, profiles: next.profiles };
+  }
+
+  async function refreshActiveFromServer(token: string) {
+    const baseUrl = getApiUrl();
+    const res = await fetch(`${baseUrl}api/auth/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data?.user) return null;
+    const enriched = enrichUser(data.user);
+    await syncVaultMeta(enriched, token);
+    setUser(enriched);
+    await storeUser(enriched);
+    return enriched;
+  }
+
   async function loadUser() {
     try {
-      const token = await loadStoredToken();
+      let vault = await loadVault();
+      const legacyToken = await secureGetItem(TOKEN_KEY);
+      const storedUser = await loadStoredUser();
+      if (vault.profiles.length === 0 && legacyToken && storedUser?.id && storedUser.phone) {
+        const meta = profileMetaFromAuthUser(storedUser, {
+          isPrimary: true,
+          addedAt: storedUser.createdAt || new Date().toISOString(),
+        });
+        const upserted = upsertProfile([], meta);
+        vault = { profiles: upserted.profiles, activeProfileId: storedUser.id };
+        await saveProfileToken(storedUser.id, legacyToken);
+        await saveVault(vault);
+        await migrateLegacyLocalData(storedUser.id);
+      }
+
+      setProfiles(vault.profiles);
+      setActiveId(vault.activeProfileId);
+
+      const activeId = vault.activeProfileId;
+      const token = (activeId && (await readProfileToken(activeId))) || legacyToken;
       if (!token) {
         setIsLoading(false);
         return;
       }
+      await storeToken(token);
 
-      const storedUser = await loadStoredUser();
-      if (storedUser) {
+      if (storedUser && (!activeId || storedUser.id === activeId)) {
         setUser(enrichUser(storedUser));
       }
 
       try {
-        const baseUrl = getApiUrl();
-        const res = await fetch(`${baseUrl}api/auth/me`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-
-        if (res.ok) {
-          const data = await res.json();
-          const enriched = enrichUser(data.user);
-          setUser(enriched);
-          await storeUser(enriched);
+        const enriched = await refreshActiveFromServer(token);
+        if (enriched) {
           maybeRegisterPush(enriched);
-        } else if (res.status === 401) {
-          await clearStorage();
-          setUser(null);
+        } else {
+          const baseUrl = getApiUrl();
+          const res = await fetch(`${baseUrl}api/auth/me`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (res.status === 401) {
+            if (!activeId || vault.profiles.length <= 1) {
+              await clearStorage();
+              await clearVault();
+              if (activeId) await deleteProfileToken(activeId);
+              setProfiles([]);
+              setActiveId(null);
+              setUser(null);
+            } else {
+              await deleteProfileToken(activeId);
+              const removed = removeProfile(vault, activeId);
+              await saveVault(removed.vault);
+              setProfiles(removed.vault.profiles);
+              const fallback = removed.vault.activeProfileId;
+              const fallbackToken = fallback ? await readProfileToken(fallback) : null;
+              if (!fallback || !fallbackToken) {
+                await clearStorage();
+                await clearVault();
+                setProfiles([]);
+                setUser(null);
+              } else {
+                await storeToken(fallbackToken);
+                setActiveId(fallback);
+                const nextUser = await refreshActiveFromServer(fallbackToken);
+                if (nextUser) maybeRegisterPush(nextUser);
+              }
+            }
+          } else if (storedUser && (!activeId || storedUser.id === activeId)) {
+            const enrichedStored = enrichUser(storedUser);
+            setUser(enrichedStored);
+            maybeRegisterPush(enrichedStored);
+          }
         }
       } catch (e) {
-        if (storedUser) {
+        if (storedUser && (!activeId || storedUser.id === activeId)) {
           const enriched = enrichUser(storedUser);
           setUser(enriched);
           maybeRegisterPush(enriched);
@@ -243,6 +366,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     await storeToken(body.token);
     const enriched = enrichUser(body.user);
+    await syncVaultMeta(enriched, body.token);
     await storeUser(enriched);
     setUser(enriched);
     return { success: true };
@@ -281,10 +405,178 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     await storeToken(body.token);
     const enriched = enrichUser(body.user);
+    await syncVaultMeta(enriched, body.token);
     await storeUser(enriched);
     setUser(enriched);
     maybeRegisterPush(enriched);
     return { success: true };
+  }
+
+  async function addProfileViaWhatsApp(
+    data: WhatsAppVerifyData,
+  ): Promise<{ success: boolean; message?: string }> {
+    const baseUrl = getApiUrl();
+    const res = await fetch(`${baseUrl}api/auth/whatsapp/verify`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    const body = await res.json();
+    if (body.needsDisplayName) {
+      return { success: false, message: body.message || "Please update the app and try again." };
+    }
+    if (!res.ok) {
+      return { success: false, message: body.message || "Verification failed" };
+    }
+    const enriched = enrichUser(body.user);
+    // Store the new JWT beside the current one, then switch. Do not drop the previous token.
+    const saved = await syncVaultMeta(enriched, body.token, { activate: false });
+    if (!saved.ok) {
+      return { success: false, message: saved.message };
+    }
+    if (getActiveProfileId() === enriched.id) {
+      await storeToken(body.token);
+      setUser(enriched);
+      await storeUser(enriched);
+      return { success: true };
+    }
+    return switchProfile(enriched.id);
+  }
+
+  async function switchProfile(profileId: string): Promise<{ success: boolean; message?: string }> {
+    const fromId = getActiveProfileId() || user?.id || null;
+    const plan = planProfileSwitch(fromId, profileId);
+    if (!plan.ok) {
+      return plan.unchanged ? { success: true } : { success: false, message: plan.message };
+    }
+    const token = await readProfileToken(profileId);
+    if (!token) {
+      return {
+        success: false,
+        message: "Sign in to this number again to use it on this phone.",
+      };
+    }
+    if (plan.unregisterPushForPrevious) {
+      try {
+        const { unregisterDevicePushToken } = await import("@/lib/notifications");
+        await unregisterDevicePushToken();
+      } catch (e) {
+        console.warn("[push] unregister before profile switch failed:", e);
+      }
+    }
+    await storeToken(token);
+    setActiveProfileId(profileId);
+    const vault = await loadVault();
+    await saveVault({ profiles: vault.profiles, activeProfileId: profileId });
+    setProfiles(vault.profiles);
+    setActiveId(profileId);
+
+    try {
+      const enriched = await refreshActiveFromServer(token);
+      if (!enriched) {
+        await restoreProfileSession(fromId);
+        return { success: false, message: "Could not open that profile. Try verifying the number again." };
+      }
+      queryClient.clear();
+      try {
+        const { reconnectRealtime } = await import("@/lib/realtime");
+        reconnectRealtime();
+      } catch (e) {
+        console.warn("[realtime] reconnect after profile switch failed:", e);
+      }
+      maybeRegisterPush(enriched);
+      return { success: true };
+    } catch (e) {
+      console.warn("switchProfile failed:", e);
+      await restoreProfileSession(fromId);
+      return { success: false, message: "Could not switch profiles. Check your connection." };
+    }
+  }
+
+  async function restoreProfileSession(profileId: string | null) {
+    if (!profileId) return;
+    const prev = await readProfileToken(profileId);
+    if (!prev) return;
+    await storeToken(prev);
+    setActiveProfileId(profileId);
+    const vault = await loadVault();
+    const next = { profiles: vault.profiles, activeProfileId: profileId };
+    await saveVault(next);
+    setProfiles(next.profiles);
+    setActiveId(profileId);
+    try {
+      const { registerDevicePushToken } = await import("@/lib/notifications");
+      await registerDevicePushToken();
+    } catch {
+      /* push returns to the profile we restored */
+    }
+  }
+
+  async function setProfileLabel(profileId: string, label: string) {
+    const vault = await loadVault();
+    const nextLabel = normalizeProfileLabel(label);
+    const profilesNext = vault.profiles.map((p) =>
+      p.profileId === profileId ? { ...p, label: nextLabel } : p,
+    );
+    const next = { profiles: profilesNext, activeProfileId: vault.activeProfileId };
+    await saveVault(next);
+    setProfiles(profilesNext);
+    setActiveId(next.activeProfileId);
+  }
+
+  async function setProfileWorkspaceBinding(
+    defaultWorkspaceId: string | null,
+  ): Promise<{ success: boolean; message?: string }> {
+    try {
+      const baseUrl = getApiUrl();
+      const token = getAuthToken();
+      if (!token) return { success: false, message: "Sign in first" };
+      const res = await fetch(`${baseUrl}api/profiles/binding`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ defaultWorkspaceId }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        return { success: false, message: body.message || "Could not save workspace" };
+      }
+      const binding = body.binding;
+      if (user && binding?.profileId) {
+        const enriched = enrichUser({
+          ...user,
+          lekkerWorkspaceId: binding.defaultWorkspaceId ?? null,
+          lekkerNetworkId: binding.lekkerNetworkId ?? user.lekkerNetworkId,
+        });
+        setUser(enriched);
+        await storeUser(enriched);
+        const vault = await loadVault();
+        const profilesNext = vault.profiles.map((p) =>
+          p.profileId === binding.profileId
+            ? {
+                ...p,
+                defaultWorkspaceId: binding.defaultWorkspaceId ?? null,
+                lekkerNetworkId: binding.lekkerNetworkId ?? p.lekkerNetworkId,
+              }
+            : p,
+        );
+        await saveVault({ profiles: profilesNext, activeProfileId: vault.activeProfileId });
+        setProfiles(profilesNext);
+      }
+      queryClient.clear();
+      try {
+        const { reconnectRealtime } = await import("@/lib/realtime");
+        reconnectRealtime();
+      } catch {
+        /* inbox stream is profile-scoped; workspace pin still applies on next Software open */
+      }
+      return { success: true };
+    } catch (e) {
+      console.warn("setProfileWorkspaceBinding failed:", e);
+      return { success: false, message: "Could not save workspace" };
+    }
   }
 
   async function login(data: LoginData): Promise<{ success: boolean; message?: string }> {
@@ -303,6 +595,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     await storeToken(body.token);
     const enriched = enrichUser(body.user);
+    await syncVaultMeta(enriched, body.token);
     await storeUser(enriched);
     setUser(enriched);
     maybeRegisterPush(enriched);
@@ -365,6 +658,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const merged = enrichUser({ ...(user || {}), ...serverUser } as AuthUser);
     setUser(merged);
     await storeUser(merged);
+    const token = getAuthToken();
+    if (token && merged.id) {
+      await syncVaultMeta(merged, token);
+    }
   }
 
   async function refreshUser() {
@@ -381,28 +678,159 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const enriched = enrichUser(data.user);
         setUser(enriched);
         await storeUser(enriched);
+        await syncVaultMeta(enriched, token);
       }
     } catch (e) {
       console.warn("refreshUser failed:", e);
     }
   }
 
-  async function logout() {
+  async function logoutServer(token: string | null) {
+    if (!token) return;
+    try {
+      const baseUrl = getApiUrl();
+      await fetch(`${baseUrl}api/auth/logout`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async function logout(): Promise<{ signedOutCompletely: boolean }> {
+    const currentId = getActiveProfileId() || user?.id || null;
     try {
       const pushToken = await clearStoredPushToken();
       if (pushToken) await unregisterPushToken(pushToken).catch(() => {});
+      await logoutServer(getAuthToken());
+    } finally {
+      if (currentId) await deleteProfileToken(currentId);
+      const vault = await loadVault();
+      const removed = currentId
+        ? removeProfile(vault, currentId)
+        : { vault, signedOutCompletely: vault.profiles.length === 0 };
+      if (removed.signedOutCompletely || !removed.vault.activeProfileId) {
+        await clearVault();
+        await clearStorage();
+        setProfiles([]);
+        setActiveId(null);
+        setUser(null);
+        queryClient.clear();
+        return { signedOutCompletely: true };
+      }
+      const nextId = removed.vault.activeProfileId;
+      const nextToken = await readProfileToken(nextId);
+      if (!nextToken) {
+        await clearVault();
+        await clearStorage();
+        setProfiles([]);
+        setActiveId(null);
+        setUser(null);
+        queryClient.clear();
+        return { signedOutCompletely: true };
+      }
+      await saveVault(removed.vault);
+      setProfiles(removed.vault.profiles);
+      await storeToken(nextToken);
+      setActiveProfileId(nextId);
+      setActiveId(nextId);
+      const enriched = await refreshActiveFromServer(nextToken);
+      if (!enriched) {
+        const fallback = removed.vault.profiles.find((p) => p.profileId === nextId);
+        if (fallback) {
+          const shell = enrichUser({
+            id: fallback.profileId,
+            phone: fallback.phone,
+            email: "",
+            username: "",
+            firstName: fallback.displayName,
+            lastName: "",
+            role: "user",
+            avatarColor: null,
+            profilePhoto: null,
+            bio: null,
+            businessName: null,
+            tradingName: null,
+            lekkerNetworkId: fallback.lekkerNetworkId,
+            isVerifiedLekkerpreneur: !!fallback.lekkerNetworkId,
+            businessCategory: null,
+            businessWebsite: null,
+            businessLogoUrl: null,
+            businessProvince: null,
+            businessCountry: null,
+            lekkerVerifiedAt: null,
+            status: null,
+            presence: "online",
+            lekkerNetworkAccess: !!fallback.defaultWorkspaceId,
+            lekkerWorkspaceId: fallback.defaultWorkspaceId,
+            autoReplyEnabled: false,
+            autoReplyMessage: null,
+            notificationsEnabled: true,
+            locationEnabled: false,
+            lastLatitude: null,
+            lastLongitude: null,
+            locationCity: null,
+            locationRegion: null,
+            emailVerified: true,
+            phoneVerified: true,
+            createdAt: fallback.addedAt,
+            updatedAt: fallback.addedAt,
+          });
+          setUser(shell);
+          await storeUser(shell);
+        }
+      }
+      queryClient.clear();
+      try {
+        const { reconnectRealtime } = await import("@/lib/realtime");
+        reconnectRealtime();
+      } catch {
+        /* ignore */
+      }
+      if (enriched) maybeRegisterPush(enriched);
+      return { signedOutCompletely: false };
+    }
+  }
 
-      const baseUrl = getApiUrl();
-      const token = getAuthToken();
-      if (token) {
-        await fetch(`${baseUrl}api/auth/logout`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
-        }).catch(() => {});
+  async function forgetProfile(profileId: string): Promise<{ signedOutCompletely: boolean }> {
+    const currentId = getActiveProfileId() || user?.id || null;
+    if (currentId === profileId) return logout();
+    await deleteProfileToken(profileId);
+    const vault = await loadVault();
+    const removed = removeProfile(vault, profileId);
+    if (removed.signedOutCompletely) {
+      await clearVault();
+      await clearStorage();
+      setProfiles([]);
+      setActiveId(null);
+      setUser(null);
+      queryClient.clear();
+      return { signedOutCompletely: true };
+    }
+    await saveVault(removed.vault);
+    setProfiles(removed.vault.profiles);
+    setActiveId(removed.vault.activeProfileId);
+    return { signedOutCompletely: false };
+  }
+
+  async function logoutAll() {
+    const vault = await loadVault();
+    try {
+      const pushToken = await clearStoredPushToken();
+      if (pushToken) await unregisterPushToken(pushToken).catch(() => {});
+      for (const profile of vault.profiles) {
+        const token = await readProfileToken(profile.profileId);
+        await logoutServer(token);
+        await deleteProfileToken(profile.profileId);
       }
     } finally {
+      await clearVault();
       await clearStorage();
+      setProfiles([]);
+      setActiveId(null);
       setUser(null);
+      queryClient.clear();
     }
   }
 
@@ -411,15 +839,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user,
       isLoading,
       isLoggedIn: !!user,
+      profiles,
+      activeProfileId,
       register,
       login,
       verifyWhatsApp,
+      addProfileViaWhatsApp,
+      switchProfile,
+      setProfileLabel,
+      setProfileWorkspaceBinding,
       updateProfile,
       applyServerUser,
       refreshUser,
       logout,
+      logoutAll,
+      forgetProfile,
     }),
-    [user, isLoading],
+    [user, isLoading, profiles, activeProfileId],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

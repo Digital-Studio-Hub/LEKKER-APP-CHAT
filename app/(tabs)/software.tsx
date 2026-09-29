@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from "react";
+import React, { useState, useRef, useCallback, useEffect } from "react";
 import {
   View,
   Text,
@@ -90,6 +90,8 @@ export default function SoftwareScreen() {
       }
     },
     [
+      user?.id,
+      user?.lekkerWorkspaceId,
       user?.lekkerNetworkAccess,
       user?.lekkerNetworkId,
       user?.phoneVerified,
@@ -97,6 +99,11 @@ export default function SoftwareScreen() {
       navigateInWebView,
     ],
   );
+
+  useEffect(() => {
+    setSessionReady(false);
+    setStartUrl(null);
+  }, [user?.id, user?.lekkerWorkspaceId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -237,7 +244,7 @@ export default function SoftwareScreen() {
           )}
           <WebView
             ref={webViewRef}
-            key={sessionReady ? "session" : `sso-${startUrl}`}
+            key={`${user?.id || "none"}-${user?.lekkerWorkspaceId || "none"}-${sessionReady ? "session" : "sso"}`}
             source={{ uri: startUrl }}
             style={{ flex: 1, backgroundColor: Colors.background }}
             onLoadStart={() => setIsLoading(true)}

@@ -3,6 +3,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as SecureStore from "expo-secure-store";
 import * as Crypto from "expo-crypto";
 import { apiRequest } from "@/lib/query-client";
+import { getActiveProfileId, personalSecretKey } from "@/lib/profile-store";
+import { personalCareCacheKey } from "@shared/chat-profile";
 
 const PIN_HASH_KEY = "lekker_personal_pin_hash";
 const RECOVERY_HASH_KEY = "lekker_personal_recovery_hash";
@@ -15,8 +17,17 @@ const SESSION_TTL_MS = 15 * 60 * 1000;
 export const CHECK_IN_INTERVAL_PRESETS = [2, 4, 6, 8, 12] as const;
 export const SILENCE_ALERT_PRESETS = [1, 2, 4, 8, 12, 24] as const;
 
-let pinAttempts = 0;
-let lockoutUntil = 0;
+const pinAttemptsByProfile = new Map<string, { attempts: number; lockoutUntil: number }>();
+
+function attemptState() {
+  const id = getActiveProfileId() || "default";
+  let row = pinAttemptsByProfile.get(id);
+  if (!row) {
+    row = { attempts: 0, lockoutUntil: 0 };
+    pinAttemptsByProfile.set(id, row);
+  }
+  return row;
+}
 
 export type PersonalCarePrefs = {
   safeBrowseEnabled: boolean;
@@ -73,8 +84,26 @@ function randomRecoveryCode(): string {
   return `${out.slice(0, 4)}-${out.slice(4)}`;
 }
 
+async function pinKey(): Promise<string> {
+  return personalSecretKey(PIN_HASH_KEY, getActiveProfileId());
+}
+
+async function recoveryKey(): Promise<string> {
+  return personalSecretKey(RECOVERY_HASH_KEY, getActiveProfileId());
+}
+
+function careCacheKey(): string {
+  const id = getActiveProfileId();
+  return id ? personalCareCacheKey(id) : LOCAL_CACHE_KEY;
+}
+
+function unlockKey(): string {
+  const id = getActiveProfileId();
+  return id ? `${UNLOCK_SESSION_KEY}__${id}` : UNLOCK_SESSION_KEY;
+}
+
 export async function hasPersonalPin(): Promise<boolean> {
-  const hash = await secureGet(PIN_HASH_KEY);
+  const hash = await secureGet(await pinKey());
   return !!hash;
 }
 
@@ -84,38 +113,40 @@ export async function setPersonalPin(pin: string): Promise<{ recoveryCode: strin
     throw new Error("PIN must be 4–6 digits");
   }
   const recoveryCode = randomRecoveryCode();
-  await secureSet(PIN_HASH_KEY, await hashSecret(cleaned));
-  await secureSet(RECOVERY_HASH_KEY, await hashSecret(recoveryCode.toUpperCase()));
-  pinAttempts = 0;
-  lockoutUntil = 0;
+  await secureSet(await pinKey(), await hashSecret(cleaned));
+  await secureSet(await recoveryKey(), await hashSecret(recoveryCode.toUpperCase()));
+  const state = attemptState();
+  state.attempts = 0;
+  state.lockoutUntil = 0;
   await markPersonalUnlocked();
   return { recoveryCode };
 }
 
 export async function verifyPersonalPin(pin: string): Promise<boolean> {
-  if (Date.now() < lockoutUntil) {
+  const state = attemptState();
+  if (Date.now() < state.lockoutUntil) {
     throw new Error("Too many attempts. Try again in a minute.");
   }
-  const hash = await secureGet(PIN_HASH_KEY);
+  const hash = await secureGet(await pinKey());
   if (!hash) return false;
   const cleaned = pin.replace(/\D/g, "");
   const ok = (await hashSecret(cleaned)) === hash;
   if (!ok) {
-    pinAttempts += 1;
-    if (pinAttempts >= MAX_PIN_ATTEMPTS) {
-      lockoutUntil = Date.now() + LOCKOUT_MS;
-      pinAttempts = 0;
+    state.attempts += 1;
+    if (state.attempts >= MAX_PIN_ATTEMPTS) {
+      state.lockoutUntil = Date.now() + LOCKOUT_MS;
+      state.attempts = 0;
       throw new Error("Too many attempts. Try again in a minute.");
     }
     return false;
   }
-  pinAttempts = 0;
+  state.attempts = 0;
   await markPersonalUnlocked();
   return true;
 }
 
 export async function resetPersonalPinWithRecovery(recoveryCode: string, newPin: string): Promise<void> {
-  const stored = await secureGet(RECOVERY_HASH_KEY);
+  const stored = await secureGet(await recoveryKey());
   if (!stored) throw new Error("No recovery code on this device");
   const ok = (await hashSecret(recoveryCode.trim().toUpperCase())) === stored;
   if (!ok) throw new Error("Recovery code incorrect");
@@ -123,11 +154,11 @@ export async function resetPersonalPinWithRecovery(recoveryCode: string, newPin:
 }
 
 async function markPersonalUnlocked(): Promise<void> {
-  await AsyncStorage.setItem(UNLOCK_SESSION_KEY, String(Date.now()));
+  await AsyncStorage.setItem(unlockKey(), String(Date.now()));
 }
 
 export async function isPersonalUnlocked(): Promise<boolean> {
-  const raw = await AsyncStorage.getItem(UNLOCK_SESSION_KEY);
+  const raw = await AsyncStorage.getItem(unlockKey());
   if (!raw) return false;
   const at = Number(raw);
   if (!Number.isFinite(at)) return false;
@@ -135,16 +166,16 @@ export async function isPersonalUnlocked(): Promise<boolean> {
 }
 
 export async function lockPersonalSettings(): Promise<void> {
-  await AsyncStorage.removeItem(UNLOCK_SESSION_KEY);
+  await AsyncStorage.removeItem(unlockKey());
 }
 
 export async function cachePersonalCare(prefs: PersonalCarePrefs): Promise<void> {
-  await AsyncStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify(prefs));
+  await AsyncStorage.setItem(careCacheKey(), JSON.stringify(prefs));
 }
 
 export async function getCachedPersonalCare(): Promise<PersonalCarePrefs> {
   try {
-    const raw = await AsyncStorage.getItem(LOCAL_CACHE_KEY);
+    const raw = await AsyncStorage.getItem(careCacheKey());
     if (!raw) return { ...DEFAULT_PERSONAL_CARE };
     return { ...DEFAULT_PERSONAL_CARE, ...JSON.parse(raw) };
   } catch {

@@ -51,6 +51,7 @@ function RootLayoutNav() {
       <Stack.Screen name="events/[id]" options={{ animation: "slide_from_right" }} />
       <Stack.Screen name="user-profile/[id]" options={{ animation: "slide_from_right" }} />
       <Stack.Screen name="settings" options={{ animation: "slide_from_right" }} />
+      <Stack.Screen name="add-profile" options={{ animation: "slide_from_right" }} />
       <Stack.Screen name="personal-settings" options={{ animation: "slide_from_right" }} />
       <Stack.Screen name="open-business/[workspaceId]" options={{ animation: "slide_from_right" }} />
       <Stack.Screen name="schedule" options={{ animation: "slide_from_right" }} />

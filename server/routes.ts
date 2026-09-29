@@ -2,6 +2,7 @@ import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "node:http";
 import rateLimit, { type Options } from "express-rate-limit";
 import { registerSchema, loginSchema, updateProfileSchema, updatePersonalCareSchema, users, chatMessages, passwordResetCodes, phoneVerificationCodes, emailVerificationCodes, userEmails } from "@shared/schema";
+import { bindingFromUser, parseDefaultWorkspaceId } from "@shared/chat-profile";
 import { storage, db } from "./storage";
 import { sql, or, and, ne, eq, inArray, desc } from "drizzle-orm";
 import {
@@ -271,6 +272,8 @@ async function applyLekkerSync(user: User, req: Request): Promise<User> {
       if (!profileData.email && user.email) delete patch.email;
       // Chat messaging is phone/WhatsApp-based — do not overwrite emailVerified from Network.
       delete patch.emailVerified;
+      // Keep a workspace pin (PUT /api/profiles/binding or a previous sync). Settings → Sync still refreshes it.
+      if (user.lekkerWorkspaceId) delete patch.lekkerWorkspaceId;
       const updated = await storage.updateUser(user.id, patch as any);
       if (updated) {
         finalUser = updated;
@@ -1099,6 +1102,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Get profile error:", error);
       res.status(500).json({ message: "Failed to fetch profile" });
+    }
+  });
+
+  /**
+   * Active Chat profile ↔ Network workspace binding.
+   * Memberships stay empty until lekker.network exposes them (see docs/MULTI-PROFILE.md).
+   */
+  app.get("/api/profiles/binding", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const user = await storage.getUser(req.user!.userId);
+      if (!user) return res.status(404).json({ message: "User not found" });
+      res.json({ binding: bindingFromUser(user) });
+    } catch (error) {
+      console.error("Get profile binding error:", error);
+      res.status(500).json({ message: "Failed to load profile binding" });
+    }
+  });
+
+  app.put("/api/profiles/binding", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      if (!req.body || !Object.prototype.hasOwnProperty.call(req.body, "defaultWorkspaceId")) {
+        return res.status(400).json({ message: "defaultWorkspaceId is required" });
+      }
+      const parsed = parseDefaultWorkspaceId(req.body.defaultWorkspaceId);
+      if (!parsed.ok) return res.status(400).json({ message: parsed.message });
+      const user = await storage.getUser(req.user!.userId);
+      if (!user) return res.status(404).json({ message: "User not found" });
+      const updated = await storage.updateUser(user.id, { lekkerWorkspaceId: parsed.value });
+      const binding = bindingFromUser(updated || { ...user, lekkerWorkspaceId: parsed.value });
+      res.json({
+        binding,
+        // Network must enforce membership. Chat stores the pin the active profile should open.
+        networkNote:
+          "defaultWorkspaceId is not membership-checked here. lekker.network should reject Cledwyn and session calls when this user is not a member of the workspace.",
+      });
+    } catch (error) {
+      console.error("Update profile binding error:", error);
+      res.status(500).json({ message: "Failed to save profile binding" });
     }
   });
 
@@ -3406,7 +3447,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!user?.lekkerNetworkId) {
         return res.status(403).json({ message: "Lekkerpreneur account required" });
       }
-      const token = await fetchMobileSessionToken(user.lekkerNetworkId);
+      const token = await fetchMobileSessionToken(user.lekkerNetworkId, {
+        workspaceId: user.lekkerWorkspaceId,
+        chatProfileId: user.id,
+        phone: user.phone,
+      });
       if (!token) {
         return res.status(502).json({ message: "Could not create session. Try again later." });
       }
@@ -3421,6 +3466,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({
         token,
         url: `${base}/api/v1/mobile/establish-session?${qs.toString()}`,
+        profileId: user.id,
+        phone: user.phone,
+        defaultWorkspaceId: user.lekkerWorkspaceId || null,
+        lekkerNetworkId: user.lekkerNetworkId,
       });
     } catch (e) {
       res.status(500).json({ message: "Session token failed" });

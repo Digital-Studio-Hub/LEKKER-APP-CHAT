@@ -9,6 +9,7 @@ import {
   Alert,
   Image,
   TextInput,
+  ActionSheetIOS,
 } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -156,7 +157,7 @@ type EnquiryPreview = {
 
 export default function ChatsScreen() {
   const insets = useSafeAreaInsets();
-  const { user, updateProfile } = useAuth();
+  const { user, updateProfile, profiles, switchProfile } = useAuth();
   const [chats, setChats] = useState<ServerChat[]>([]);
   const [blockedIds, setBlockedIds] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState("");
@@ -178,6 +179,11 @@ export default function ChatsScreen() {
       return false;
     });
   }, [chats, searchQuery, user?.id]);
+
+  useEffect(() => {
+    setChats([]);
+    setEnquiries([]);
+  }, [user?.id]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -368,9 +374,9 @@ export default function ChatsScreen() {
   return (
     <View style={[styles.container, { paddingTop: insets.top + webTopInset }]}>
       <View style={styles.header}>
+        <View style={styles.statusHit}>
         <Pressable
           onPress={handleQuickStatus}
-          style={styles.statusHit}
           hitSlop={8}
           testID="quick-status"
         >
@@ -386,6 +392,59 @@ export default function ChatsScreen() {
             <Ionicons name="chevron-down" size={14} color={Colors.textMuted} />
           </View>
         </Pressable>
+        {profiles.length > 1 ? (
+          <Pressable
+            onPress={() => {
+              const others = profiles.filter((p) => p.profileId !== user?.id);
+              if (others.length === 0) return;
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              const open = (profileId: string) => {
+                void switchProfile(profileId).then((result) => {
+                  if (!result.success) {
+                    Alert.alert("Couldn't switch", result.message || "Try again.");
+                  }
+                });
+              };
+              const labelFor = (p: (typeof others)[number]) =>
+                `${p.label || p.displayName} · ${p.phone}`;
+              // Android alerts only show three buttons. Longer lists use Settings, which switches any profile.
+              if (Platform.OS !== "ios" && others.length > 2) {
+                router.push("/settings");
+                return;
+              }
+              if (Platform.OS === "ios") {
+                ActionSheetIOS.showActionSheetWithOptions(
+                  {
+                    title: "Switch profile",
+                    message: "Chats and Cledwyn reload for the number you open.",
+                    options: [...others.map(labelFor), "Cancel"],
+                    cancelButtonIndex: others.length,
+                  },
+                  (index) => {
+                    const next = others[index];
+                    if (next) open(next.profileId);
+                  },
+                );
+                return;
+              }
+              Alert.alert(
+                "Switch profile",
+                "Chats and Cledwyn reload for the number you open.",
+                [
+                  { text: "Cancel", style: "cancel" },
+                  ...others.map((p) => ({ text: labelFor(p), onPress: () => open(p.profileId) })),
+                ],
+              );
+            }}
+            testID="switch-profile-chip"
+            style={{ marginTop: 4 }}
+          >
+            <Text style={styles.statusLabel}>
+              {(profiles.find((p) => p.profileId === user?.id)?.label || user?.displayName || "Profile")} · switch
+            </Text>
+          </Pressable>
+        ) : null}
+        </View>
         <View style={styles.headerActions}>
           {user?.isVerifiedLekkerpreneur && user?.lekkerWorkspaceId ? (
             <Pressable
