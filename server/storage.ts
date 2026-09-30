@@ -38,9 +38,7 @@ export interface IStorage {
   logAuthEvent(event: string, userId?: string, ipAddress?: string, userAgent?: string, details?: string): Promise<void>;
   getUserEmails(userId: string): Promise<UserEmail[]>;
   addUserEmail(userId: string, email: string, isPrimary: boolean, isVerified: boolean): Promise<UserEmail>;
-  removeUserEmail(emailId: string, userId: string): Promise<boolean>;
   verifyUserEmail(emailId: string, userId: string): Promise<void>;
-  emailExistsAnywhere(email: string): Promise<boolean>;
 
   createChat(type: string, createdBy: string, name?: string): Promise<Chat>;
   addChatParticipant(chatId: string, userId: string, role?: string): Promise<ChatParticipant>;
@@ -185,28 +183,10 @@ class PgStorage implements IStorage {
     return record;
   }
 
-  async removeUserEmail(emailId: string, userId: string): Promise<boolean> {
-    const [record] = await db.select().from(userEmails).where(
-      and(eq(userEmails.id, emailId), eq(userEmails.userId, userId))
-    ).limit(1);
-    if (!record) return false;
-    if (record.isPrimary) return false;
-    await db.delete(userEmails).where(and(eq(userEmails.id, emailId), eq(userEmails.userId, userId)));
-    return true;
-  }
-
   async verifyUserEmail(emailId: string, userId: string): Promise<void> {
     await db.update(userEmails).set({ isVerified: true, verifiedAt: new Date() })
       .where(and(eq(userEmails.id, emailId), eq(userEmails.userId, userId)));
     await db.update(users).set({ emailVerified: true, updatedAt: new Date() }).where(eq(users.id, userId));
-  }
-
-  async emailExistsAnywhere(email: string): Promise<boolean> {
-    const normalized = email.toLowerCase();
-    const [record] = await db.select({ id: userEmails.id }).from(userEmails).where(eq(userEmails.email, normalized)).limit(1);
-    if (record) return true;
-    const [user] = await db.select({ id: users.id }).from(users).where(eq(users.email, normalized)).limit(1);
-    return !!user;
   }
 
   async logAuthEvent(
