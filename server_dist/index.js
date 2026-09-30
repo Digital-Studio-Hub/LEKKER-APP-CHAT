@@ -383,25 +383,9 @@ var init_storage = __esm({
         }).returning();
         return record;
       }
-      async removeUserEmail(emailId, userId) {
-        const [record] = await db.select().from(userEmails).where(
-          and(eq(userEmails.id, emailId), eq(userEmails.userId, userId))
-        ).limit(1);
-        if (!record) return false;
-        if (record.isPrimary) return false;
-        await db.delete(userEmails).where(and(eq(userEmails.id, emailId), eq(userEmails.userId, userId)));
-        return true;
-      }
       async verifyUserEmail(emailId, userId) {
         await db.update(userEmails).set({ isVerified: true, verifiedAt: /* @__PURE__ */ new Date() }).where(and(eq(userEmails.id, emailId), eq(userEmails.userId, userId)));
         await db.update(users).set({ emailVerified: true, updatedAt: /* @__PURE__ */ new Date() }).where(eq(users.id, userId));
-      }
-      async emailExistsAnywhere(email) {
-        const normalized = email.toLowerCase();
-        const [record] = await db.select({ id: userEmails.id }).from(userEmails).where(eq(userEmails.email, normalized)).limit(1);
-        if (record) return true;
-        const [user] = await db.select({ id: users.id }).from(users).where(eq(users.email, normalized)).limit(1);
-        return !!user;
       }
       async logAuthEvent(event, userId, ipAddress, userAgent, details) {
         await db.insert(authAuditLogs).values({
@@ -2567,112 +2551,6 @@ async function registerRoutes(app2) {
     } catch (error) {
       console.error("Get profile error:", error);
       res.status(500).json({ message: "Failed to fetch profile" });
-    }
-  });
-  app2.get("/api/auth/emails", authMiddleware, async (req, res) => {
-    try {
-      const emails = await storage.getUserEmails(req.user.userId);
-      res.json({ emails });
-    } catch (error) {
-      console.error("Get emails error:", error);
-      res.status(500).json({ message: "Failed to fetch linked emails" });
-    }
-  });
-  app2.post("/api/auth/add-email", authMiddleware, rateLimit({ windowMs: 15 * 60 * 1e3, max: 5 }), async (req, res) => {
-    try {
-      const { email } = req.body;
-      if (!email || typeof email !== "string" || !email.includes("@")) {
-        return res.status(400).json({ message: "A valid email address is required" });
-      }
-      const normalized = email.trim().toLowerCase();
-      const exists = await storage.emailExistsAnywhere(normalized);
-      if (exists) {
-        return res.status(409).json({ message: "This email is already linked to an account" });
-      }
-      const userId = req.user.userId;
-      const pending = await storage.addUserEmail(userId, normalized, false, false);
-      const code = Math.floor(1e5 + Math.random() * 9e5).toString();
-      const expiresAt = new Date(Date.now() + 15 * 60 * 1e3);
-      await db.insert(emailVerificationCodes).values({ email: normalized, code, expiresAt });
-      try {
-        const userForEmail = await storage.getUser(userId);
-        await sendEmailVerificationEmail(normalized, code, userForEmail?.firstName || "there");
-      } catch (e) {
-        console.error("Failed to send verification email (non-fatal):", e);
-      }
-      res.status(201).json({ emailId: pending.id, message: "Verification code sent to " + normalized });
-    } catch (error) {
-      console.error("Add email error:", error);
-      res.status(500).json({ message: "Failed to add email" });
-    }
-  });
-  app2.post("/api/auth/verify-linked-email", authMiddleware, rateLimit({ windowMs: 15 * 60 * 1e3, max: 10 }), async (req, res) => {
-    try {
-      const { emailId, code } = req.body;
-      if (!emailId || !code) return res.status(400).json({ message: "emailId and code are required" });
-      const userId = req.user.userId;
-      const emails = await storage.getUserEmails(userId);
-      const target = emails.find((e) => e.id === emailId);
-      if (!target) return res.status(404).json({ message: "Email not found" });
-      if (target.isVerified) return res.status(400).json({ message: "Email is already verified" });
-      const [codeRecord] = await db.select().from(emailVerificationCodes).where(eq4(emailVerificationCodes.email, target.email)).orderBy(emailVerificationCodes.createdAt).limit(1);
-      if (!codeRecord || codeRecord.code !== code || codeRecord.used) {
-        return res.status(400).json({ message: "Invalid or expired verification code" });
-      }
-      if (/* @__PURE__ */ new Date() > codeRecord.expiresAt) {
-        return res.status(400).json({ message: "Verification code has expired. Please request a new one." });
-      }
-      await db.update(emailVerificationCodes).set({ used: true, verified: true }).where(eq4(emailVerificationCodes.id, codeRecord.id));
-      await storage.verifyUserEmail(emailId, userId);
-      res.json({ message: "Email verified successfully" });
-    } catch (error) {
-      console.error("Verify linked email error:", error);
-      res.status(500).json({ message: "Failed to verify email" });
-    }
-  });
-  app2.delete("/api/auth/emails/:emailId", authMiddleware, async (req, res) => {
-    try {
-      const { emailId } = req.params;
-      const userId = req.user.userId;
-      const emails = await storage.getUserEmails(userId);
-      const target = emails.find((e) => e.id === emailId);
-      if (!target) return res.status(404).json({ message: "Email not found" });
-      if (target.isPrimary) return res.status(400).json({ message: "Cannot remove your primary email" });
-      if (emails.length === 1) return res.status(400).json({ message: "Cannot remove your only email address" });
-      const removed = await storage.removeUserEmail(emailId, userId);
-      if (!removed) return res.status(400).json({ message: "Could not remove email" });
-      const remaining = await storage.getUserEmails(userId);
-      const anyVerified = remaining.some((e) => e.isVerified);
-      if (!anyVerified) {
-        await storage.updateUser(userId, { emailVerified: false });
-      }
-      res.json({ message: "Email removed" });
-    } catch (error) {
-      console.error("Remove email error:", error);
-      res.status(500).json({ message: "Failed to remove email" });
-    }
-  });
-  app2.post("/api/auth/resend-linked-email-code", authMiddleware, rateLimit({ windowMs: 5 * 60 * 1e3, max: 3 }), async (req, res) => {
-    try {
-      const { emailId } = req.body;
-      if (!emailId) return res.status(400).json({ message: "emailId is required" });
-      const userId = req.user.userId;
-      const emails = await storage.getUserEmails(userId);
-      const target = emails.find((e) => e.id === emailId);
-      if (!target) return res.status(404).json({ message: "Email not found" });
-      if (target.isVerified) return res.status(400).json({ message: "Email is already verified" });
-      const code = Math.floor(1e5 + Math.random() * 9e5).toString();
-      const expiresAt = new Date(Date.now() + 15 * 60 * 1e3);
-      await db.insert(emailVerificationCodes).values({ email: target.email, code, expiresAt });
-      try {
-        const userForEmail = await storage.getUser(userId);
-        await sendEmailVerificationEmail(target.email, code, userForEmail?.firstName || "there");
-      } catch (e) {
-        console.error("Failed to resend verification email:", e);
-      }
-      res.json({ message: "Verification code resent" });
-    } catch (error) {
-      res.status(500).json({ message: "Failed to resend code" });
     }
   });
   app2.put("/api/auth/profile", authMiddleware, async (req, res) => {
