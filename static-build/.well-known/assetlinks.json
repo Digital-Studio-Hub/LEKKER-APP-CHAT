@@ -1,0 +1,15 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls",
+      "delegate_permission/common.get_login_creds"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.lekker.chat",
+      "sha256_cert_fingerprints": [
+        "83:D8:CF:DD:96:96:6A:3C:3B:33:B9:75:EE:48:DD:8F:8F:9D:36:2F:C9:6A:84:1E:45:17:E9:61:A2:19:43:AD"
+      ]
+    }
+  }
+]

@@ -230,8 +230,32 @@ function configureExpoAndLanding(app: express.Application) {
 
   log("Serving static Expo files with dynamic manifest routing");
 
+  // Google Ads / Android App Links — register before landing middleware
+  const assetLinks = [
+    {
+      relation: [
+        "delegate_permission/common.handle_all_urls",
+        "delegate_permission/common.get_login_creds",
+      ],
+      target: {
+        namespace: "android_app",
+        package_name: "com.lekker.chat",
+        sha256_cert_fingerprints: [
+          "83:D8:CF:DD:96:96:6A:3C:3B:33:B9:75:EE:48:DD:8F:8F:9D:36:2F:C9:6A:84:1E:45:17:E9:61:A2:19:43:AD",
+        ],
+      },
+    },
+  ];
+  const sendAssetLinks = (_req: Request, res: Response) => {
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.setHeader("Cache-Control", "public, max-age=300");
+    res.status(200).send(JSON.stringify(assetLinks, null, 2));
+  };
+  app.get("/.well-known/assetlinks.json", sendAssetLinks);
+  app.get("/assetlinks.json", sendAssetLinks);
+
   app.use((req: Request, res: Response, next: NextFunction) => {
-    if (req.path.startsWith("/api")) {
+    if (req.path.startsWith("/api") || req.path.startsWith("/.well-known")) {
       return next();
     }
 
