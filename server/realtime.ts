@@ -276,7 +276,7 @@ async function connectListener(): Promise<void> {
   const url = getRealtimeListenUrl();
   const client = new Client({
     connectionString: url,
-    ssl: { rejectUnauthorized: false },
+    ssl: { rejectUnauthorized: true },
   });
   client.on("error", (err) => {
     console.error("[Realtime] LISTEN client error:", err.message);
