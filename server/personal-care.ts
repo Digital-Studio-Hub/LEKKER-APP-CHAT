@@ -15,8 +15,10 @@ import {
   EMERGENCY_ALERT_RELEASE_SQL,
   companionAlertPrecondition,
   emergencyAlertClaimSql,
+  emergencyAlertClaimToken,
   evaluateEmergencyAlertLimit,
   resolveFamilyContactName,
+  silenceAlertClaimSql,
   type EmergencyAlertLimitResult,
 } from "@shared/companion-history";
 import { db, storage, pool } from "./storage";
@@ -396,11 +398,13 @@ export async function lookupSavedFamilyContactName(userId: string): Promise<stri
  * Write the patient + family Cledwyn notices and push them.
  * Shared by the silence cron and POST /api/personal/emergency-alert.
  */
-export type ManualAlertClaim =
+export type FamilyAlertClaim =
   | {
       ok: true;
-      previousAlertAt: Date | null;
-      claimedAt: Date;
+      /** `timestamp::text` of the value before this claim. Null if there was none. */
+      previousAlertAt: string | null;
+      /** `timestamp::text` of the value this claim wrote. */
+      claimedAt: string;
     }
   | {
       ok: false;
@@ -419,22 +423,28 @@ function asDate(value: unknown): Date | null {
 /**
  * Claim the manual-alert slot on last_family_alert_sent_at.
  * One row lock so every Cloud Run instance shares the 2-minute gap.
- * The hourly cap counts manual family_alert_patient rows already stored.
+ * The hourly cap counts manual family_alert_family rows already stored.
  */
-export async function claimManualFamilyAlert(userId: string): Promise<ManualAlertClaim> {
+export async function claimManualFamilyAlert(userId: string): Promise<FamilyAlertClaim> {
   await ensureCompanionMessagesTable();
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
     const locked = await client.query(
-      `SELECT companion_enabled, last_family_alert_sent_at
+      `SELECT companion_enabled,
+              last_family_alert_sent_at,
+              last_family_alert_sent_at::text AS previous_at
        FROM personal_care_settings
        WHERE user_id = $1
        FOR UPDATE`,
       [userId],
     );
     const row = locked.rows[0] as
-      | { companion_enabled?: boolean; last_family_alert_sent_at?: Date | string | null }
+      | {
+          companion_enabled?: boolean;
+          last_family_alert_sent_at?: Date | string | null;
+          previous_at?: string | null;
+        }
       | undefined;
     if (!row?.companion_enabled) {
       await client.query("ROLLBACK");
@@ -444,18 +454,26 @@ export async function claimManualFamilyAlert(userId: string): Promise<ManualAler
     const hourly = await client.query(
       `SELECT created_at
        FROM cledwyn_companion_messages
-       WHERE user_id = $1
-         AND event_type = 'family_alert_patient'
+       WHERE about_user_id = $1
+         AND event_type = 'family_alert_family'
          AND created_at > now() - interval '1 hour'
          AND COALESCE(metadata->>'manual', 'false') = 'true'
        ORDER BY created_at ASC`,
       [userId],
     );
     const now = Date.now();
-    const previousAlertAt = asDate(row.last_family_alert_sent_at);
+    const previousForDecision = asDate(row.last_family_alert_sent_at);
+    let previousAlertAt: string | null = null;
+    if (row.previous_at != null) {
+      previousAlertAt = emergencyAlertClaimToken(row.previous_at);
+      if (!previousAlertAt) {
+        await client.query("ROLLBACK");
+        throw new Error("Unreadable last_family_alert_sent_at");
+      }
+    }
     const decision: EmergencyAlertLimitResult = evaluateEmergencyAlertLimit({
       now,
-      lastFamilyAlertAt: previousAlertAt ? previousAlertAt.getTime() : null,
+      lastFamilyAlertAt: previousForDecision ? previousForDecision.getTime() : null,
       manualAlertAt: hourly.rows.map((entry: { created_at?: Date | string | null }) => {
         const at = asDate(entry.created_at);
         return at ? at.getTime() : now;
@@ -472,7 +490,7 @@ export async function claimManualFamilyAlert(userId: string): Promise<ManualAler
     }
 
     const claimed = await client.query(emergencyAlertClaimSql(), [userId]);
-    const claimedAt = asDate(claimed.rows[0]?.claimed_at);
+    const claimedAt = emergencyAlertClaimToken(claimed.rows[0]?.claimed_at);
     if (!claimed.rowCount || !claimedAt) {
       await client.query("ROLLBACK");
       return {
@@ -497,12 +515,68 @@ export async function claimManualFamilyAlert(userId: string): Promise<ManualAler
 }
 
 /** Put the previous timestamp back when the family notice never went out. */
-export async function releaseManualFamilyAlertClaim(
+export async function releaseFamilyAlertClaim(
   userId: string,
-  previousAlertAt: Date | null,
-  claimedAt: Date,
+  previousAlertAt: string | null,
+  claimedAt: string,
 ): Promise<void> {
-  await pool.query(EMERGENCY_ALERT_RELEASE_SQL, [userId, previousAlertAt, claimedAt]);
+  const token = emergencyAlertClaimToken(claimedAt);
+  if (!token) return;
+  const previous = previousAlertAt == null ? null : emergencyAlertClaimToken(previousAlertAt);
+  await pool.query(EMERGENCY_ALERT_RELEASE_SQL, [userId, previous, token]);
+}
+
+/**
+ * Claim the silence window before the cron sends. 0 rows means a manual alert
+ * (or another cron) already holds it, or the patient replied.
+ */
+export async function claimSilenceFamilyAlert(
+  userId: string,
+  silenceMs: number,
+): Promise<{ ok: true; previousAlertAt: string | null; claimedAt: string } | { ok: false }> {
+  const windowMs = Math.trunc(silenceMs);
+  if (!Number.isFinite(windowMs) || windowMs < 1) return { ok: false };
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const locked = await client.query(
+      `SELECT last_family_alert_sent_at::text AS previous_at
+       FROM personal_care_settings
+       WHERE user_id = $1
+       FOR UPDATE`,
+      [userId],
+    );
+    if (!locked.rowCount) {
+      await client.query("ROLLBACK");
+      return { ok: false };
+    }
+    const updated = await client.query(silenceAlertClaimSql(), [userId, windowMs]);
+    const claimedAt = emergencyAlertClaimToken(updated.rows[0]?.claimed_at);
+    if (!updated.rowCount || !claimedAt) {
+      await client.query("ROLLBACK");
+      return { ok: false };
+    }
+    const previousRaw = locked.rows[0]?.previous_at;
+    let previousAlertAt: string | null = null;
+    if (previousRaw != null) {
+      previousAlertAt = emergencyAlertClaimToken(previousRaw);
+      if (!previousAlertAt) {
+        await client.query("ROLLBACK");
+        throw new Error("Unreadable last_family_alert_sent_at");
+      }
+    }
+    await client.query("COMMIT");
+    return { ok: true, previousAlertAt, claimedAt };
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch {
+      /* already closed */
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function commitFamilyCompanionAlert(
@@ -511,8 +585,6 @@ export async function commitFamilyCompanionAlert(
     reason: "silence" | "manual";
     sinceReplyMs?: number;
     lastReplyAt?: Date;
-    /** Manual route already stored last_family_alert_sent_at. */
-    timestampAlreadyClaimed?: boolean;
   },
 ): Promise<{ alertSent: true; familyContactName: string | null }> {
   await ensureCompanionMessagesTable();
@@ -620,14 +692,8 @@ export async function commitFamilyCompanionAlert(
       { urgent: true, messageId: patientNotice.id },
     );
   } catch (error) {
+    // Family notice is already stored (manual rows count toward the hourly cap).
     console.error("[Companion] family was alerted but the patient notice failed", error);
-  }
-
-  if (!opts.timestampAlreadyClaimed) {
-    await db
-      .update(personalCareSettings)
-      .set({ lastFamilyAlertSentAt: new Date(), updatedAt: new Date() })
-      .where(eq(personalCareSettings.userId, prepared.patientUserId));
   }
 
   return { alertSent: true, familyContactName: prepared.familyContactName };
@@ -701,22 +767,32 @@ export async function runCompanionCron(): Promise<{
       // --- Family silence alert (Cledwyn threads only — never P2P DM) ---
       if (!row.familyContactUserId) continue;
       const silenceMs = row.silenceAlertAfterHours * 60 * 60 * 1000;
-      const lastAlert = row.lastFamilyAlertSentAt?.getTime() ?? 0;
       if (sinceReply < silenceMs) continue;
-      // Cooldown: don't re-alert more often than the silence interval itself
-      if (now - lastAlert < silenceMs) continue;
 
-      const prepared = await prepareFamilyCompanionAlert(row.userId);
-      if (!("familyContactUserId" in prepared)) {
-        console.warn("[CompanionCron] skip family alert", row.userId, prepared.message);
-        continue;
+      const silenceClaim = await claimSilenceFamilyAlert(row.userId, silenceMs);
+      if (!silenceClaim.ok) continue;
+
+      try {
+        const prepared = await prepareFamilyCompanionAlert(row.userId);
+        if (!("familyContactUserId" in prepared)) {
+          await releaseFamilyAlertClaim(row.userId, silenceClaim.previousAlertAt, silenceClaim.claimedAt);
+          console.warn("[CompanionCron] skip family alert", row.userId, prepared.message);
+          continue;
+        }
+        const sent = await commitFamilyCompanionAlert(prepared, {
+          reason: "silence",
+          sinceReplyMs: sinceReply,
+          lastReplyAt: new Date(lastReply),
+        });
+        if (sent.alertSent) familyAlerts++;
+      } catch (sendError) {
+        try {
+          await releaseFamilyAlertClaim(row.userId, silenceClaim.previousAlertAt, silenceClaim.claimedAt);
+        } catch (releaseError) {
+          console.error("[CompanionCron] release silence claim failed", row.userId, releaseError);
+        }
+        throw sendError;
       }
-      const sent = await commitFamilyCompanionAlert(prepared, {
-        reason: "silence",
-        sinceReplyMs: sinceReply,
-        lastReplyAt: new Date(lastReply),
-      });
-      if (sent.alertSent) familyAlerts++;
     } catch (e) {
       console.error("[CompanionCron] row failed", row.userId, e);
     }

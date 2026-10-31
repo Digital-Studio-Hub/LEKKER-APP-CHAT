@@ -81,7 +81,7 @@ import {
   commitFamilyCompanionAlert,
   lookupSavedFamilyContactName,
   claimManualFamilyAlert,
-  releaseManualFamilyAlertClaim,
+  releaseFamilyAlertClaim,
 } from "./personal-care";
 import { containsBlockedContent, CONTENT_FILTER_MESSAGE } from "./content-filter";
 import { isSocialMediaAllowed, type AgeRangeSource } from "../shared/age-gate";
@@ -3025,36 +3025,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       claim = await claimManualFamilyAlert(userId);
       if (!claim.ok) {
-        if (claim.status !== 429) {
-          return res.status(claim.status).json({
-            success: false,
-            alertSent: false,
-            message: claim.message,
-          });
+        if (claim.status === 429) {
+          res.setHeader("Retry-After", String(claim.retryAfterSeconds ?? 120));
         }
-        const denied = emergencyAlertGate(
-          { ok: true, familyContactUserId: prepared.familyContactUserId },
-          {
-            limited: true,
-            status: 429,
-            message: claim.message,
-            retryAfterSeconds: claim.retryAfterSeconds ?? 120,
-          },
-        );
-        if (!denied.proceed) {
-          res.setHeader("Retry-After", String(denied.retryAfterSeconds ?? 120));
-          return res.status(denied.status).json(denied.body);
-        }
-        return res.status(429).json({
+        return res.status(claim.status).json({
           success: false,
           alertSent: false,
           message: claim.message,
         });
       }
-      const sent = await commitFamilyCompanionAlert(prepared, {
-        reason: "manual",
-        timestampAlreadyClaimed: true,
-      });
+      const sent = await commitFamilyCompanionAlert(prepared, { reason: "manual" });
       return res.json({
         success: true,
         alertSent: sent.alertSent === true,
@@ -3064,7 +3044,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error("emergency-alert error:", error);
       if (claim?.ok) {
         try {
-          await releaseManualFamilyAlertClaim(userId, claim.previousAlertAt, claim.claimedAt);
+          await releaseFamilyAlertClaim(userId, claim.previousAlertAt, claim.claimedAt);
         } catch (releaseError) {
           console.error("emergency-alert release failed:", releaseError);
         }

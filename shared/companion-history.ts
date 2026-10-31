@@ -245,7 +245,7 @@ export function evaluateEmergencyAlertLimit(input: {
   now: number;
   /** personal_care_settings.last_family_alert_sent_at. Covers cron and manual alerts. */
   lastFamilyAlertAt: number | null;
-  /** created_at values of manual family_alert_patient rows. */
+  /** created_at values of manual family_alert_family rows about this patient. */
   manualAlertAt: readonly number[];
 }): EmergencyAlertLimitResult {
   const last = input.lastFamilyAlertAt;
@@ -273,8 +273,11 @@ export function evaluateEmergencyAlertLimit(input: {
 }
 
 /**
- * Atomic claim across Cloud Run instances. Hourly cap counts existing manual
- * family_alert_patient rows (no new column). 0 rows = denied.
+ * Atomic claim across Cloud Run instances. 0 rows = denied.
+ * Hourly cap counts manual family_alert_family rows (about this patient).
+ * Those are written when the family notice succeeds, before the patient note,
+ * and cron rows set metadata.manual to false so they are not counted.
+ * claimed_at is timestamp::text so the release compare does not round microseconds.
  */
 export function emergencyAlertClaimSql(hourlyCap = EMERGENCY_ALERT_HOURLY_CAP): string {
   const cap = Number(hourlyCap);
@@ -293,22 +296,68 @@ WHERE s.user_id = $1
   AND (
     SELECT count(*)::int
     FROM cledwyn_companion_messages m
-    WHERE m.user_id = s.user_id
-      AND m.event_type = 'family_alert_patient'
+    WHERE m.about_user_id = s.user_id
+      AND m.event_type = 'family_alert_family'
       AND m.created_at > now() - interval '1 hour'
       AND COALESCE(m.metadata->>'manual', 'false') = 'true'
   ) < ${cap}
-RETURNING s.last_family_alert_sent_at AS claimed_at
+RETURNING s.last_family_alert_sent_at::text AS claimed_at
 `.trim();
 }
 
-/** Restore the previous timestamp only if this claim is still the current one. */
+/**
+ * Silence-cron claim. $2 is the silence window in milliseconds.
+ * Same recipients and window as before: no reply for that long, and no alert
+ * inside that window. Returns no row when a manual claim already holds it.
+ */
+export function silenceAlertClaimSql(): string {
+  return `
+UPDATE personal_care_settings AS s
+SET last_family_alert_sent_at = now(), updated_at = now()
+WHERE s.user_id = $1
+  AND s.companion_enabled = true
+  AND s.family_contact_user_id IS NOT NULL
+  AND (
+    s.last_family_alert_sent_at IS NULL
+    OR s.last_family_alert_sent_at < now() - ($2::int * interval '1 millisecond')
+  )
+  AND COALESCE(s.last_patient_reply_at, s.created_at) <= now() - ($2::int * interval '1 millisecond')
+RETURNING s.last_family_alert_sent_at::text AS claimed_at
+`.trim();
+}
+
+/** Restore the previous timestamp only if this claim text is still current. */
 export const EMERGENCY_ALERT_RELEASE_SQL = `
 UPDATE personal_care_settings
-SET last_family_alert_sent_at = $2, updated_at = now()
+SET last_family_alert_sent_at = $2::timestamp, updated_at = now()
 WHERE user_id = $1
-  AND last_family_alert_sent_at = $3
+  AND last_family_alert_sent_at = $3::timestamp
 `.trim();
+
+const POSTGRES_TIMESTAMP_TEXT = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(?:\.(\d{1,6}))?$/;
+
+/** Token from `timestamp::text`. Null unless it is that text, never a Date. */
+export function emergencyAlertClaimToken(returned: unknown): string | null {
+  if (typeof returned !== "string") return null;
+  const token = returned.trim();
+  return POSTGRES_TIMESTAMP_TEXT.test(token) ? token : null;
+}
+
+/**
+ * What binding a JS Date would send back: microseconds truncated to milliseconds.
+ * That string does not equal the stored timestamp, so the release UPDATE matches 0 rows.
+ */
+export function timestampTextViaJsDate(pgTimestampText: string): string | null {
+  const match = POSTGRES_TIMESTAMP_TEXT.exec(pgTimestampText.trim());
+  if (!match) return null;
+  const micros = (match[3] || "0").padEnd(6, "0").slice(0, 6);
+  const millis = micros.slice(0, 3);
+  const date = new Date(`${match[1]}T${match[2]}.${millis}Z`);
+  if (Number.isNaN(date.getTime())) return null;
+  const [day, rest] = date.toISOString().slice(0, -1).split("T");
+  const [hms, fraction = "000"] = rest.split(".");
+  return `${day} ${hms}.${fraction.padEnd(6, "0").slice(0, 6)}`;
+}
 
 export type EmergencyAlertGateResult =
   | { proceed: true }

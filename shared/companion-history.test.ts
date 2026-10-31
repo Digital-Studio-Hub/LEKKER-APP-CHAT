@@ -16,8 +16,11 @@ import {
   companionHistoryForModel,
   companionSessionStorageKey,
   emergencyAlertClaimSql,
+  emergencyAlertClaimToken,
   emergencyAlertGate,
   evaluateEmergencyAlertLimit,
+  silenceAlertClaimSql,
+  timestampTextViaJsDate,
   familyContactNameFromCare,
   filterCompanionChatHistory,
   resolveFamilyContactName,
@@ -332,8 +335,34 @@ test("emergency alert limit is one per two minutes and five manual alerts per ho
   assert.match(claimSql, /last_family_alert_sent_at = now\(\)/);
   assert.match(claimSql, /interval '2 minutes'/);
   assert.match(claimSql, /interval '1 hour'/);
-  assert.match(claimSql, /RETURNING s\.last_family_alert_sent_at AS claimed_at/);
+  assert.match(claimSql, /family_alert_family/);
+  assert.match(claimSql, /about_user_id = s\.user_id/);
+  assert.match(claimSql, /metadata->>'manual'/);
+  assert.match(claimSql, /RETURNING s\.last_family_alert_sent_at::text AS claimed_at/);
   assert.match(claimSql, /< 5/);
-  assert.match(EMERGENCY_ALERT_RELEASE_SQL, /last_family_alert_sent_at = \$2/);
-  assert.match(EMERGENCY_ALERT_RELEASE_SQL, /last_family_alert_sent_at = \$3/);
+  assert.match(EMERGENCY_ALERT_RELEASE_SQL, /\$2::timestamp/);
+  assert.match(EMERGENCY_ALERT_RELEASE_SQL, /\$3::timestamp/);
+
+  const silenceSql = silenceAlertClaimSql();
+  assert.match(silenceSql, /last_family_alert_sent_at = now\(\)/);
+  assert.match(silenceSql, /\$2::int \* interval '1 millisecond'/);
+  assert.match(silenceSql, /last_patient_reply_at/);
+  assert.match(silenceSql, /RETURNING s\.last_family_alert_sent_at::text AS claimed_at/);
+  assert.doesNotMatch(silenceSql, /family_alert_patient/);
+});
+
+test("claim timestamp text round-trips and a JS Date does not", () => {
+  const stored = "2026-10-31 12:00:00.123456";
+  const token = emergencyAlertClaimToken(stored);
+  assert.equal(token, stored);
+  assert.equal(emergencyAlertClaimToken(new Date(stored)), null);
+
+  const viaDate = timestampTextViaJsDate(stored);
+  assert.equal(viaDate, "2026-10-31 12:00:00.123000");
+  assert.notEqual(viaDate, stored);
+  assert.equal(token, stored);
+
+  const withoutFraction = "2026-10-31 12:00:00";
+  assert.equal(emergencyAlertClaimToken(withoutFraction), withoutFraction);
+  assert.equal(timestampTextViaJsDate(withoutFraction), "2026-10-31 12:00:00.000000");
 });
