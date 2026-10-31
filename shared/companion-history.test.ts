@@ -3,23 +3,25 @@ import assert from "node:assert/strict";
 import {
   COMPANION_CHAT_SOURCE,
   COMPANION_HISTORY_LIMIT,
+  COMPANION_REQUIRED_MESSAGE,
   EMERGENCY_ALERT_GAP_MESSAGE,
   EMERGENCY_ALERT_HOURLY_CAP,
   EMERGENCY_ALERT_HOURLY_MESSAGE,
   EMERGENCY_ALERT_MIN_GAP_MS,
+  EMERGENCY_ALERT_RELEASE_SQL,
   MISSING_FAMILY_CONTACT_MESSAGE,
   NO_FAMILY_CONTACT_MESSAGE,
-  EmergencyAlertRateGate,
   buildCompanionChatPayload,
-  checkEmergencyAlertRate,
+  companionAlertPrecondition,
   companionHistoryForModel,
+  companionSessionStorageKey,
+  emergencyAlertClaimSql,
   emergencyAlertGate,
-  familyAlertPrecondition,
+  evaluateEmergencyAlertLimit,
   familyContactNameFromCare,
   filterCompanionChatHistory,
-  companionSessionStorageKey,
   resolveFamilyContactName,
-} from "./companion-history.ts";
+} from "./companion-history";
 
 const raymondThread = {
   role: "assistant" as const,
@@ -86,7 +88,11 @@ test("companion history keeps only this conversation and drops other chats and a
 
   assert.deepEqual(
     filtered.map((turn) => turn.content),
-    ["I feel a bit tired today", "I'm here with you. Would a cup of tea help?"],
+    [
+      "I feel a bit tired today",
+      "I'm here with you. Would a cup of tea help?",
+      "I feel a bit tired today",
+    ],
   );
   assert.equal(JSON.stringify(filtered).includes("Raymond"), false);
   assert.ok(filtered.every((turn) => turn.source === COMPANION_CHAT_SOURCE));
@@ -99,7 +105,23 @@ test("companion history keeps only this conversation and drops other chats and a
   assert.deepEqual(wire, [
     { role: "user", content: "I feel a bit tired today" },
     { role: "assistant", content: "I'm here with you. Would a cup of tea help?" },
+    { role: "user", content: "I feel a bit tired today" },
   ]);
+});
+
+test("companion history drops only back-to-back duplicates", () => {
+  const turns = filterCompanionChatHistory([
+    { role: "user", content: "Hello", source: COMPANION_CHAT_SOURCE },
+    { role: "user", content: "Hello", source: COMPANION_CHAT_SOURCE },
+    { role: "assistant", content: "Hello to you too.", source: COMPANION_CHAT_SOURCE },
+    { role: "user", content: "Hello", source: COMPANION_CHAT_SOURCE },
+    { role: "user", content: "I need help", source: COMPANION_CHAT_SOURCE },
+    { role: "user", content: "I need help", source: "companion", eventType: "patient_reply" },
+  ]);
+  assert.deepEqual(
+    turns.map((turn) => `${turn.role}:${turn.content}`),
+    ["user:Hello", "assistant:Hello to you too.", "user:Hello", "user:I need help"],
+  );
 });
 
 test("companion mode uses its own session key", () => {
@@ -189,9 +211,28 @@ test("companion payload always sends familyContactName and never a name from his
   assert.equal(none.stream, undefined);
 });
 
-test("emergency alert route rejects a missing contact before rate limiting", () => {
+test("emergency alert route requires companion mode, then a saved contact", () => {
+  const companionOff = emergencyAlertGate(
+    companionAlertPrecondition({
+      companionEnabled: false,
+      familyContactUserId: "contact-1",
+      contactFound: true,
+    }),
+    { limited: false },
+  );
+  assert.equal(companionOff.proceed, false);
+  if (!companionOff.proceed) {
+    assert.equal(companionOff.status, 403);
+    assert.equal(companionOff.body.alertSent, false);
+    assert.equal(companionOff.body.message, COMPANION_REQUIRED_MESSAGE);
+  }
+
   const noContact = emergencyAlertGate(
-    familyAlertPrecondition({ familyContactUserId: null, contactFound: false }),
+    companionAlertPrecondition({
+      companionEnabled: true,
+      familyContactUserId: null,
+      contactFound: false,
+    }),
     { limited: false },
   );
   assert.equal(noContact.proceed, false);
@@ -203,7 +244,11 @@ test("emergency alert route rejects a missing contact before rate limiting", () 
   }
 
   const missingUser = emergencyAlertGate(
-    familyAlertPrecondition({ familyContactUserId: "gone", contactFound: false }),
+    companionAlertPrecondition({
+      companionEnabled: true,
+      familyContactUserId: "gone",
+      contactFound: false,
+    }),
     { limited: false },
   );
   assert.equal(missingUser.proceed, false);
@@ -213,38 +258,66 @@ test("emergency alert route rejects a missing contact before rate limiting", () 
   }
 
   const ready = emergencyAlertGate(
-    familyAlertPrecondition({ familyContactUserId: "contact-1", contactFound: true }),
+    companionAlertPrecondition({
+      companionEnabled: true,
+      familyContactUserId: "contact-1",
+      contactFound: true,
+    }),
     { limited: false },
   );
   assert.deepEqual(ready, { proceed: true });
 });
 
-test("emergency alert rate limit is one per two minutes and five per hour", () => {
+test("emergency alert limit is one per two minutes and five manual alerts per hour", () => {
   const start = Date.parse("2026-10-31T12:00:00.000Z");
-  const gap = checkEmergencyAlertRate([start], start + 60_000);
+  const gap = evaluateEmergencyAlertLimit({
+    now: start + 60_000,
+    lastFamilyAlertAt: start,
+    manualAlertAt: [start],
+  });
   assert.equal(gap.limited, true);
   if (gap.limited) {
     assert.equal(gap.status, 429);
     assert.equal(gap.message, EMERGENCY_ALERT_GAP_MESSAGE);
     assert.equal(gap.retryAfterSeconds, 60);
   }
-  assert.equal(checkEmergencyAlertRate([start], start + EMERGENCY_ALERT_MIN_GAP_MS).limited, false);
+  assert.equal(
+    evaluateEmergencyAlertLimit({
+      now: start + EMERGENCY_ALERT_MIN_GAP_MS,
+      lastFamilyAlertAt: start,
+      manualAlertAt: [start],
+    }).limited,
+    false,
+  );
 
-  const gate = new EmergencyAlertRateGate();
-  for (let i = 0; i < EMERGENCY_ALERT_HOURLY_CAP; i++) {
-    const at = start + i * EMERGENCY_ALERT_MIN_GAP_MS;
-    assert.equal(gate.tryConsume("user-a", at).limited, false);
-  }
-  const blocked = gate.tryConsume("user-a", start + EMERGENCY_ALERT_HOURLY_CAP * EMERGENCY_ALERT_MIN_GAP_MS);
+  const manualAlertAt = Array.from(
+    { length: EMERGENCY_ALERT_HOURLY_CAP },
+    (_, i) => start + i * EMERGENCY_ALERT_MIN_GAP_MS,
+  );
+  const blocked = evaluateEmergencyAlertLimit({
+    now: start + EMERGENCY_ALERT_HOURLY_CAP * EMERGENCY_ALERT_MIN_GAP_MS,
+    lastFamilyAlertAt: manualAlertAt[manualAlertAt.length - 1],
+    manualAlertAt,
+  });
   assert.equal(blocked.limited, true);
   if (blocked.limited) {
     assert.equal(blocked.status, 429);
     assert.equal(blocked.message, EMERGENCY_ALERT_HOURLY_MESSAGE);
   }
-  assert.equal(gate.tryConsume("user-b", start).limited, false);
+
+  const otherUser = evaluateEmergencyAlertLimit({
+    now: start,
+    lastFamilyAlertAt: null,
+    manualAlertAt: [],
+  });
+  assert.equal(otherUser.limited, false);
 
   const http = emergencyAlertGate(
-    familyAlertPrecondition({ familyContactUserId: "contact-1", contactFound: true }),
+    companionAlertPrecondition({
+      companionEnabled: true,
+      familyContactUserId: "contact-1",
+      contactFound: true,
+    }),
     blocked,
   );
   assert.equal(http.proceed, false);
@@ -254,4 +327,13 @@ test("emergency alert rate limit is one per two minutes and five per hour", () =
     assert.equal(http.body.message, EMERGENCY_ALERT_HOURLY_MESSAGE);
     assert.equal(typeof http.retryAfterSeconds, "number");
   }
+
+  const claimSql = emergencyAlertClaimSql();
+  assert.match(claimSql, /last_family_alert_sent_at = now\(\)/);
+  assert.match(claimSql, /interval '2 minutes'/);
+  assert.match(claimSql, /interval '1 hour'/);
+  assert.match(claimSql, /RETURNING s\.last_family_alert_sent_at AS claimed_at/);
+  assert.match(claimSql, /< 5/);
+  assert.match(EMERGENCY_ALERT_RELEASE_SQL, /last_family_alert_sent_at = \$2/);
+  assert.match(EMERGENCY_ALERT_RELEASE_SQL, /last_family_alert_sent_at = \$3/);
 });

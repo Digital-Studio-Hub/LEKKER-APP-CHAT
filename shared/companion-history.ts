@@ -24,6 +24,8 @@ export const EMERGENCY_ALERT_MIN_GAP_MS = 2 * 60 * 1000;
 export const EMERGENCY_ALERT_HOUR_MS = 60 * 60 * 1000;
 export const EMERGENCY_ALERT_HOURLY_CAP = 5;
 
+export const COMPANION_REQUIRED_MESSAGE =
+  "Companion mode is off. Turn it on in Personal Settings before alerting your family.";
 export const NO_FAMILY_CONTACT_MESSAGE =
   "No family contact is saved. Add one in Personal Settings, then try again.";
 export const MISSING_FAMILY_CONTACT_MESSAGE =
@@ -117,20 +119,21 @@ export function isCompanionConversationTurn(message: CompanionHistoryMessage): b
 
 /**
  * Companion model history: this conversation only.
- * Idempotent — a second pass keeps the same turns (source is rewritten).
+ * Back-to-back copies of the same turn are collapsed (a server echo of the
+ * line just said). The same words later in the chat are kept.
  */
 export function filterCompanionChatHistory(
   messages: readonly CompanionHistoryMessage[],
 ): CompanionModelTurn[] {
   const kept: CompanionModelTurn[] = [];
-  const seen = new Set<string>();
+  let previousKey = "";
   for (const message of messages) {
     if (!isCompanionConversationTurn(message)) continue;
     const role = message.role === "user" ? "user" : "assistant";
     const content = message.content!.trim();
     const key = `${role}\n${content}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
+    if (key === previousKey) continue;
+    previousKey = key;
     kept.push({ role, content, source: COMPANION_CHAT_SOURCE });
   }
   return kept;
@@ -217,35 +220,95 @@ export function familyAlertPrecondition(input: {
   return { ok: true, familyContactUserId: id };
 }
 
+/** Manual alert: companion mode first, then a saved contact who still has an account. */
+export function companionAlertPrecondition(input: {
+  companionEnabled: boolean;
+  familyContactUserId?: string | null;
+  contactFound: boolean;
+}): { ok: true; familyContactUserId: string } | { ok: false; status: number; message: string } {
+  if (!input.companionEnabled) {
+    return { ok: false, status: 403, message: COMPANION_REQUIRED_MESSAGE };
+  }
+  return familyAlertPrecondition(input);
+}
+
 export type EmergencyAlertLimitResult =
   | { limited: false }
   | { limited: true; status: 429; message: string; retryAfterSeconds: number };
 
-export function checkEmergencyAlertRate(
-  timestamps: readonly number[],
-  now: number,
-): EmergencyAlertLimitResult {
-  const recent = timestamps.filter((t) => t <= now && now - t < EMERGENCY_ALERT_HOUR_MS);
-  const last = recent.length ? Math.max(...recent) : null;
-  if (last != null && now - last < EMERGENCY_ALERT_MIN_GAP_MS) {
+/**
+ * Decide a manual family alert from the saved timestamp plus manual alerts
+ * already stored in cledwyn_companion_messages. The server applies this inside
+ * the row lock, then claims the slot with emergencyAlertClaimSql().
+ */
+export function evaluateEmergencyAlertLimit(input: {
+  now: number;
+  /** personal_care_settings.last_family_alert_sent_at. Covers cron and manual alerts. */
+  lastFamilyAlertAt: number | null;
+  /** created_at values of manual family_alert_patient rows. */
+  manualAlertAt: readonly number[];
+}): EmergencyAlertLimitResult {
+  const last = input.lastFamilyAlertAt;
+  if (last != null && input.now - last < EMERGENCY_ALERT_MIN_GAP_MS) {
     return {
       limited: true,
       status: 429,
       message: EMERGENCY_ALERT_GAP_MESSAGE,
-      retryAfterSeconds: Math.max(1, Math.ceil((EMERGENCY_ALERT_MIN_GAP_MS - (now - last)) / 1000)),
+      retryAfterSeconds: Math.max(1, Math.ceil((EMERGENCY_ALERT_MIN_GAP_MS - (input.now - last)) / 1000)),
     };
   }
+  const recent = input.manualAlertAt.filter(
+    (t) => t <= input.now && input.now - t < EMERGENCY_ALERT_HOUR_MS,
+  );
   if (recent.length >= EMERGENCY_ALERT_HOURLY_CAP) {
     const oldest = Math.min(...recent);
     return {
       limited: true,
       status: 429,
       message: EMERGENCY_ALERT_HOURLY_MESSAGE,
-      retryAfterSeconds: Math.max(1, Math.ceil((oldest + EMERGENCY_ALERT_HOUR_MS - now) / 1000)),
+      retryAfterSeconds: Math.max(1, Math.ceil((oldest + EMERGENCY_ALERT_HOUR_MS - input.now) / 1000)),
     };
   }
   return { limited: false };
 }
+
+/**
+ * Atomic claim across Cloud Run instances. Hourly cap counts existing manual
+ * family_alert_patient rows (no new column). 0 rows = denied.
+ */
+export function emergencyAlertClaimSql(hourlyCap = EMERGENCY_ALERT_HOURLY_CAP): string {
+  const cap = Number(hourlyCap);
+  if (!Number.isInteger(cap) || cap < 1) {
+    throw new Error("hourly cap must be a positive integer");
+  }
+  return `
+UPDATE personal_care_settings AS s
+SET last_family_alert_sent_at = now(), updated_at = now()
+WHERE s.user_id = $1
+  AND s.companion_enabled = true
+  AND (
+    s.last_family_alert_sent_at IS NULL
+    OR s.last_family_alert_sent_at < now() - interval '2 minutes'
+  )
+  AND (
+    SELECT count(*)::int
+    FROM cledwyn_companion_messages m
+    WHERE m.user_id = s.user_id
+      AND m.event_type = 'family_alert_patient'
+      AND m.created_at > now() - interval '1 hour'
+      AND COALESCE(m.metadata->>'manual', 'false') = 'true'
+  ) < ${cap}
+RETURNING s.last_family_alert_sent_at AS claimed_at
+`.trim();
+}
+
+/** Restore the previous timestamp only if this claim is still the current one. */
+export const EMERGENCY_ALERT_RELEASE_SQL = `
+UPDATE personal_care_settings
+SET last_family_alert_sent_at = $2, updated_at = now()
+WHERE user_id = $1
+  AND last_family_alert_sent_at = $3
+`.trim();
 
 export type EmergencyAlertGateResult =
   | { proceed: true }
@@ -278,24 +341,3 @@ export function emergencyAlertGate(
   }
   return { proceed: true };
 }
-
-/** Per-user in-memory gate (same process lifetime as the other API limiters). */
-export class EmergencyAlertRateGate {
-  private hits = new Map<string, number[]>();
-
-  tryConsume(userId: string, now = Date.now()): EmergencyAlertLimitResult {
-    const prev = (this.hits.get(userId) || []).filter(
-      (t) => t <= now && now - t < EMERGENCY_ALERT_HOUR_MS,
-    );
-    const decision = checkEmergencyAlertRate(prev, now);
-    if (decision.limited) {
-      this.hits.set(userId, prev);
-      return decision;
-    }
-    prev.push(now);
-    this.hits.set(userId, prev);
-    return { limited: false };
-  }
-}
-
-export const emergencyAlertRateGate = new EmergencyAlertRateGate();
