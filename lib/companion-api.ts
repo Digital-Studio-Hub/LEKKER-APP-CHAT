@@ -1,5 +1,15 @@
-import { apiRequest } from "@/lib/query-client";
+import { fetch } from "expo/fetch";
+import { apiRequest, getApiUrl } from "@/lib/query-client";
+import { getAuthToken } from "@/lib/auth-token";
 import type { CledwynMessage } from "@/lib/storage";
+import {
+  COMPANION_CHAT_SOURCE,
+  COMPANION_HISTORY_LIMIT,
+  filterCompanionChatHistory,
+  type CompanionHistoryMessage,
+} from "@shared/companion-history";
+
+export { COMPANION_CHAT_SOURCE };
 
 export type CompanionServerMessage = {
   id: string;
@@ -62,10 +72,55 @@ export function mergeCompanionIntoCledwyn(
       content: r.content,
       timestamp: r.timestamp,
       source: "companion",
+      eventType: r.eventType,
       title: r.eventType,
     });
   }
   return Array.from(byId.values()).sort(
     (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
   );
+}
+
+/**
+ * History for companion-mode /api/cledwyn/chat.
+ * Keeps this companion conversation only — not other Cledwyn threads,
+ * check-ins, family alerts, or notification lines.
+ */
+export function companionModelHistory(
+  messages: readonly (CompanionHistoryMessage | CledwynMessage)[],
+): ReturnType<typeof filterCompanionChatHistory> {
+  return filterCompanionChatHistory(messages).slice(-COMPANION_HISTORY_LIMIT);
+}
+
+export type EmergencyAlertResult = {
+  alertSent: boolean;
+  status: number;
+  message: string;
+  familyContactName: string | null;
+};
+
+/** POST /api/personal/emergency-alert. Success only when the server set alertSent. */
+export async function sendEmergencyFamilyAlert(): Promise<EmergencyAlertResult> {
+  const token = getAuthToken();
+  const res = await fetch(`${getApiUrl()}api/personal/emergency-alert`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: "{}",
+  });
+  const data = await res.json().catch(() => ({}));
+  const alertSent = res.ok && data?.success === true && data?.alertSent === true;
+  const familyContactName =
+    alertSent && typeof data?.familyContactName === "string" && data.familyContactName.trim()
+      ? data.familyContactName.trim()
+      : null;
+  const message =
+    typeof data?.message === "string" && data.message.trim()
+      ? data.message.trim()
+      : alertSent
+        ? "Your family contact has been alerted."
+        : "Couldn't send the family alert. Please try again.";
+  return { alertSent, status: res.status, message, familyContactName };
 }

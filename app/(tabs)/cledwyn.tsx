@@ -24,7 +24,13 @@ import Colors from "@/constants/colors";
 import { isSmallScreen, fontScale, responsiveMaxBubbleWidth } from "@/lib/responsive";
 import { getApiUrl } from "@/lib/query-client";
 import { storage, CledwynMessage } from "@/lib/storage";
+import {
+  COMPANION_CHAT_SOURCE,
+  companionModelHistory,
+  sendEmergencyFamilyAlert,
+} from "@/lib/companion-api";
 import { cledwynSessionKey } from "@shared/chat-profile";
+import { companionSessionStorageKey } from "@shared/companion-history";
 import { useAuth } from "@/lib/auth-context";
 import { fetchLekkerSoftwareUrl } from "@/lib/lekker-session";
 import { LEKKER_NETWORK_URL } from "@/constants/ecosystem";
@@ -211,6 +217,7 @@ export default function CledwynScreen() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [showTyping, setShowTyping] = useState(false);
   const [companionMode, setCompanionMode] = useState(false);
+  const [alertingFamily, setAlertingFamily] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSecs, setRecordingSecs] = useState(0);
   const [isTranscribing, setIsTranscribing] = useState(false);
@@ -398,7 +405,7 @@ export default function CledwynScreen() {
     } catch {
       /* offline — ignore */
     }
-  }, [workspaceMode, user?.id, persistThread]);
+  }, [workspaceMode, companionMode, user?.id, persistThread]);
 
   useFocusEffect(
     useCallback(() => {
@@ -471,12 +478,22 @@ export default function CledwynScreen() {
     await stopCledwynSpeech();
 
     const currentMessages = [...messages];
+    const sendingCompanion = companionMode;
+    const sendProfileId = profileIdRef.current;
     const userMessage: CledwynMessage = {
       id: generateUniqueId(),
       role: "user",
       content: displayText,
       timestamp: new Date().toISOString(),
+      ...(sendingCompanion ? { source: COMPANION_CHAT_SOURCE } : {}),
     };
+    const assistantDraft = (content: string): CledwynMessage => ({
+      id: generateUniqueId(),
+      role: "assistant",
+      content,
+      timestamp: new Date().toISOString(),
+      ...(sendingCompanion ? { source: COMPANION_CHAT_SOURCE } : {}),
+    });
 
     setMessages((prev) => [...prev, userMessage]);
     setIsStreaming(true);
@@ -487,16 +504,24 @@ export default function CledwynScreen() {
     }
 
     try {
-      const sendProfileId = profileIdRef.current;
       const baseUrl = getApiUrl();
-      const chatHistory = [
-        ...currentMessages
-          .filter((m) => m.role === "user" || m.role === "assistant")
-          .map((m) => ({ role: m.role, content: m.content })),
-        { role: "user", content: apiText },
-      ];
+      const chatHistory = sendingCompanion
+        ? companionModelHistory([
+            ...currentMessages,
+            { ...userMessage, content: apiText },
+          ])
+        : [
+            ...currentMessages
+              .filter((m) => m.role === "user" || m.role === "assistant")
+              .map((m) => ({ role: m.role, content: m.content })),
+            { role: "user" as const, content: apiText },
+          ].slice(-12);
 
-      const sessionKey = sendProfileId ? cledwynSessionKey(sendProfileId) : null;
+      const sessionKey = sendProfileId
+        ? sendingCompanion
+          ? companionSessionStorageKey(cledwynSessionKey(sendProfileId))
+          : cledwynSessionKey(sendProfileId)
+        : null;
       const sessionId = sessionKey ? (await AsyncStorage.getItem(sessionKey)) || undefined : undefined;
       const token = getAuthToken();
       const response = await fetch(`${baseUrl}api/cledwyn/chat`, {
@@ -520,12 +545,7 @@ export default function CledwynScreen() {
         setMessages((prev) => {
           const next = [
             ...prev,
-            {
-              id: generateUniqueId(),
-              role: "assistant" as const,
-              content: "Sorry, I couldn't reach Cledwyn right now. Please try again in a moment.",
-              timestamp: new Date().toISOString(),
-            },
+            assistantDraft("Sorry, I couldn't reach Cledwyn right now. Please try again in a moment."),
           ];
           persistThread(next, sendProfileId);
           return next;
@@ -557,9 +577,9 @@ export default function CledwynScreen() {
           try {
             const parsed = JSON.parse(data);
             const metaSessionId = parsed.meta?.sessionId;
-            if (typeof metaSessionId === "string" && metaSessionId.length > 0 && sendProfileId) {
+            if (typeof metaSessionId === "string" && metaSessionId.length > 0 && sessionKey) {
               if (profileIdRef.current === sendProfileId) {
-                await AsyncStorage.setItem(cledwynSessionKey(sendProfileId), metaSessionId);
+                await AsyncStorage.setItem(sessionKey, metaSessionId);
               }
             }
             if (parsed.meta?.tool || parsed.meta?.text) {
@@ -573,15 +593,7 @@ export default function CledwynScreen() {
 
               if (!assistantAdded) {
                 setShowTyping(false);
-                setMessages((prev) => [
-                  ...prev,
-                  {
-                    id: generateUniqueId(),
-                    role: "assistant",
-                    content: fullContent,
-                    timestamp: new Date().toISOString(),
-                  },
-                ]);
+                setMessages((prev) => [...prev, assistantDraft(fullContent)]);
                 assistantAdded = true;
               } else {
                 setMessages((prev) => {
@@ -618,17 +630,12 @@ export default function CledwynScreen() {
           void speakCledwynReply(fullContent, { force: fromVoice || voiceSendRef.current });
         }
       }
-    } catch (error) {
+    } catch {
       setShowTyping(false);
       if (profileIdRef.current === sendProfileId) {
         setMessages((prev) => [
           ...prev,
-          {
-            id: generateUniqueId(),
-            role: "assistant",
-            content: "Sorry, I encountered an error. Please try again.",
-            timestamp: new Date().toISOString(),
-          },
+          assistantDraft("Sorry, I encountered an error. Please try again."),
         ]);
       }
     } finally {
@@ -706,6 +713,40 @@ export default function CledwynScreen() {
     }
   }
 
+  function confirmFamilyAlert() {
+    if (alertingFamily) return;
+    Alert.alert(
+      "Alert your family?",
+      "This notifies the family contact saved in Personal Settings, in their Cledwyn chat.",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Alert my family now", style: "destructive", onPress: () => void runFamilyAlert() },
+      ],
+    );
+  }
+
+  async function runFamilyAlert() {
+    if (alertingFamily) return;
+    setAlertingFamily(true);
+    try {
+      const result = await sendEmergencyFamilyAlert();
+      if (result.alertSent) {
+        Alert.alert(
+          "Family alerted",
+          result.familyContactName
+            ? `${result.familyContactName} has been notified in their Cledwyn chat.`
+            : "Your saved family contact has been notified in their Cledwyn chat.",
+        );
+        return;
+      }
+      Alert.alert("Couldn't send alert", result.message);
+    } catch (e: any) {
+      Alert.alert("Couldn't send alert", e?.message || "Please try again.");
+    } finally {
+      setAlertingFamily(false);
+    }
+  }
+
   async function handleClearChat() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     await stopCledwynSpeech();
@@ -762,11 +803,26 @@ export default function CledwynScreen() {
       </View>
 
       {companionMode ? (
-        <View style={styles.banner}>
-          <Ionicons name="heart" size={14} color={Colors.primary} />
-          <Text style={styles.bannerText}>
-            Companion mode — a calm friend who checks in. Not a doctor or emergency service.
-          </Text>
+        <View>
+          <View style={styles.banner}>
+            <Ionicons name="heart" size={14} color={Colors.primary} />
+            <Text style={styles.bannerText}>
+              Companion mode — a calm friend who checks in. Not a doctor or emergency service.
+            </Text>
+          </View>
+          <Pressable
+            onPress={confirmFamilyAlert}
+            disabled={alertingFamily}
+            style={[styles.alertFamilyButton, alertingFamily && styles.chipDisabled]}
+            testID="alert-family-now"
+          >
+            {alertingFamily ? (
+              <ActivityIndicator size="small" color={Colors.danger} />
+            ) : (
+              <Ionicons name="alert-circle-outline" size={18} color={Colors.danger} />
+            )}
+            <Text style={styles.alertFamilyText}>Alert my family now</Text>
+          </Pressable>
         </View>
       ) : workspaceMode ? (
         <Pressable style={styles.banner} onPress={() => openWorkspaceCledwyn()}>
@@ -1041,6 +1097,26 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: Colors.textSecondary,
     lineHeight: 15,
+  },
+  alertFamilyButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    marginHorizontal: 12,
+    marginBottom: 8,
+    minHeight: 44,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: "rgba(255,59,48,0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(255,59,48,0.35)",
+  },
+  alertFamilyText: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: fontScale(13),
+    color: Colors.danger,
   },
   messagesList: {
     paddingVertical: 8,
