@@ -1,4 +1,5 @@
 import { networkSessionTokenBody, networkSessionTokenBodyFallback } from "@shared/chat-profile";
+import { buildCompanionChatPayload } from "@shared/companion-history";
 
 const LEKKER_API_BASE = process.env.LEKKER_API_BASE_URL || "https://lekker.network";
 const LEKKER_API_URL = `${LEKKER_API_BASE}/api/v1/lekkerpreneurs`;
@@ -622,23 +623,27 @@ export async function chatWithNetworkCompanionCledwyn(input: {
   message: string;
   userId?: string | null;
   displayName?: string | null;
-  history?: Array<{ role: string; content: string }>;
+  history?: { role: string; content: string }[];
   sessionId?: string | null;
   profile?: string;
   voiceInput?: boolean;
+  /** Saved family contact display name. null when none is saved. Optional for older V3. */
+  familyContactName?: string | null;
 }): Promise<{ reply: string; sessionId?: string | null; mode?: string }> {
   return lekkerMobileFetchStrict("/api/v1/cledwyn/chat", {
     method: "POST",
-    body: JSON.stringify({
-      mode: "companion",
-      profile: input.profile || "dementia",
-      message: input.message,
-      userId: input.userId || undefined,
-      displayName: input.displayName || undefined,
-      history: input.history,
-      sessionId: input.sessionId || undefined,
-      voiceInput: input.voiceInput === true,
-    }),
+    body: JSON.stringify(
+      buildCompanionChatPayload({
+        message: input.message,
+        userId: input.userId,
+        displayName: input.displayName,
+        history: input.history,
+        sessionId: input.sessionId,
+        profile: input.profile,
+        voiceInput: input.voiceInput,
+        familyContactName: input.familyContactName ?? null,
+      }),
+    ),
   });
 }
 
@@ -646,10 +651,12 @@ export async function* streamNetworkCompanionCledwyn(input: {
   message: string;
   userId?: string | null;
   displayName?: string | null;
-  history?: Array<{ role: string; content: string }>;
+  history?: { role: string; content: string }[];
   sessionId?: string | null;
   profile?: string;
   voiceInput?: boolean;
+  /** Saved family contact display name. null when none is saved. Optional for older V3. */
+  familyContactName?: string | null;
 }): AsyncGenerator<{ meta?: any; content?: string; done?: boolean }> {
   if (!LEKKER_API_KEY) {
     throw new LekkerNetworkApiError("Lekker Network API is not configured", 503);
@@ -661,17 +668,19 @@ export async function* streamNetworkCompanionCledwyn(input: {
       "X-API-Key": LEKKER_API_KEY,
       Accept: "text/event-stream",
     },
-    body: JSON.stringify({
-      mode: "companion",
-      profile: input.profile || "dementia",
-      message: input.message,
-      userId: input.userId || undefined,
-      displayName: input.displayName || undefined,
-      history: input.history,
-      sessionId: input.sessionId || undefined,
-      voiceInput: input.voiceInput === true,
-      stream: true,
-    }),
+    body: JSON.stringify(
+      buildCompanionChatPayload({
+        message: input.message,
+        userId: input.userId,
+        displayName: input.displayName,
+        history: input.history,
+        sessionId: input.sessionId,
+        profile: input.profile,
+        voiceInput: input.voiceInput,
+        familyContactName: input.familyContactName ?? null,
+        stream: true,
+      }),
+    ),
   });
   yield* parseNetworkCledwynSse(res);
 }

@@ -111,6 +111,8 @@ export interface CledwynMessage {
   source?: string;
   href?: string;
   title?: string;
+  /** Companion server event (check_in, family_alert_*, patient_reply). Not model history. */
+  eventType?: string;
 }
 
 export interface FeedPost {

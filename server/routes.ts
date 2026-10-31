@@ -3,6 +3,11 @@ import { createServer, type Server } from "node:http";
 import rateLimit, { type Options } from "express-rate-limit";
 import { registerSchema, loginSchema, updateProfileSchema, updatePersonalCareSchema, users, chatMessages, passwordResetCodes, phoneVerificationCodes, emailVerificationCodes, userEmails } from "@shared/schema";
 import { bindingFromUser, parseDefaultWorkspaceId } from "@shared/chat-profile";
+import {
+  companionHistoryForModel,
+  emergencyAlertGate,
+  filterCompanionChatHistory,
+} from "@shared/companion-history";
 import { storage, db } from "./storage";
 import { sql, or, and, ne, eq, inArray } from "drizzle-orm";
 import {
@@ -72,6 +77,11 @@ import {
   updatePersonalCare,
   bumpPatientReply,
   runCompanionCron,
+  prepareFamilyCompanionAlert,
+  commitFamilyCompanionAlert,
+  lookupSavedFamilyContactName,
+  claimManualFamilyAlert,
+  releaseFamilyAlertClaim,
 } from "./personal-care";
 import { containsBlockedContent, CONTENT_FILTER_MESSAGE } from "./content-filter";
 import { isSocialMediaAllowed, type AgeRangeSource } from "../shared/age-gate";
@@ -2989,6 +2999,64 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  /**
+   * Companion mode: alert the saved family contact immediately.
+   * Same Cledwyn-thread + push path as the silence cron.
+   * The 2-minute gap is an atomic update of last_family_alert_sent_at.
+   */
+  app.post("/api/personal/emergency-alert", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    const userId = req.user!.userId;
+    let claim: Awaited<ReturnType<typeof claimManualFamilyAlert>> | null = null;
+    try {
+      const prepared = await prepareFamilyCompanionAlert(userId);
+      if (!("familyContactUserId" in prepared)) {
+        const denied = emergencyAlertGate(
+          { ok: false, status: prepared.status, message: prepared.message },
+          { limited: false },
+        );
+        if (denied.proceed) {
+          return res.status(500).json({
+            success: false,
+            alertSent: false,
+            message: "Couldn't send the family alert. Please try again.",
+          });
+        }
+        return res.status(denied.status).json(denied.body);
+      }
+      claim = await claimManualFamilyAlert(userId);
+      if (!claim.ok) {
+        if (claim.status === 429) {
+          res.setHeader("Retry-After", String(claim.retryAfterSeconds ?? 120));
+        }
+        return res.status(claim.status).json({
+          success: false,
+          alertSent: false,
+          message: claim.message,
+        });
+      }
+      const sent = await commitFamilyCompanionAlert(prepared, { reason: "manual" });
+      return res.json({
+        success: true,
+        alertSent: sent.alertSent === true,
+        familyContactName: sent.familyContactName,
+      });
+    } catch (error) {
+      console.error("emergency-alert error:", error);
+      if (claim?.ok) {
+        try {
+          await releaseFamilyAlertClaim(userId, claim.previousAlertAt, claim.claimedAt);
+        } catch (releaseError) {
+          console.error("emergency-alert release failed:", releaseError);
+        }
+      }
+      res.status(500).json({
+        success: false,
+        alertSent: false,
+        message: "Couldn't send the family alert. Please try again.",
+      });
+    }
+  });
+
   app.post("/api/cledwyn/companion-read", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { markCompanionRead, ensureCompanionMessagesTable } = await import("./personal-care");
@@ -3136,12 +3204,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
           userProfile.businessName ||
           null
         : null;
-      const history = Array.isArray(messages)
-        ? messages
+      const rawMessages = Array.isArray(messages) ? messages : [];
+      // Companion mode must not see other Cledwyn threads or alert/system lines.
+      const history = useCompanion
+        ? companionHistoryForModel(filterCompanionChatHistory(rawMessages).slice(-12))
+        : rawMessages
             .filter((m: any) => m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
             .map((m: any) => ({ role: m.role as string, content: String(m.content) }))
-            .slice(-12)
-        : [];
+            .slice(-12);
+      const familyContactName = useCompanion ? await lookupSavedFamilyContactName(userId) : null;
 
       res.setHeader("Content-Type", "text/event-stream");
       res.setHeader("Cache-Control", "no-cache, no-transform");
@@ -3219,6 +3290,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             sessionId: typeof bodySessionId === "string" ? bodySessionId : null,
             profile: personalCare?.companionProfile || "dementia",
             voiceInput,
+            familyContactName,
           })) {
             if (ev.meta?.sessionId) {
               res.write(
@@ -3240,6 +3312,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               sessionId: typeof bodySessionId === "string" ? bodySessionId : null,
               profile: personalCare?.companionProfile || "dementia",
               voiceInput,
+              familyContactName,
             });
             const reply = result.reply || "I'm here with you. Tell me how you're feeling.";
             res.write(`data: ${JSON.stringify({ content: reply })}\n\n`);

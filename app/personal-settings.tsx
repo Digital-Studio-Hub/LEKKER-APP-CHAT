@@ -481,8 +481,11 @@ export default function PersonalSettingsScreen() {
                   )}
                 </View>
                 <Text style={styles.hint}>
-                  Alerts send a Lekker Chat message to your chosen family contact. Pick longer
-                  intervals overnight if needed.
+                  Cledwyn checks in with you in the Cledwyn chat on the interval you choose, while
+                  you haven’t replied. If you still haven’t replied for the alert interval, Cledwyn
+                  tells your saved family contact in their Cledwyn chat and sends a push. That is
+                  not a private message from this phone. You can also tap Alert my family now in
+                  companion mode to notify them immediately. Longer intervals are quieter overnight.
                 </Text>
               </View>
 
@@ -542,8 +545,10 @@ export default function PersonalSettingsScreen() {
                   })}
                 </View>
                 <Text style={styles.hint}>
-                  They must already have a Lekker Chat account. Silence alerts arrive as a chat
-                  message from this phone’s account, clearly labelled as a Companion alert.
+                  They must already have a Lekker Chat account. They’re alerted automatically after
+                  the no-reply window above, and right away if you tap Alert my family now in
+                  companion mode. Both arrive in their Cledwyn chat, labelled as a Companion alert
+                  — not as a chat from this phone.
                 </Text>
               </View>
             </>

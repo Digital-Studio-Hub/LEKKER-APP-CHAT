@@ -9,6 +9,18 @@ import {
   CHECK_IN_INTERVAL_PRESETS,
   SILENCE_ALERT_PRESETS,
 } from "@shared/schema";
+import {
+  COMPANION_REQUIRED_MESSAGE,
+  EMERGENCY_ALERT_GAP_MESSAGE,
+  EMERGENCY_ALERT_RELEASE_SQL,
+  companionAlertPrecondition,
+  emergencyAlertClaimSql,
+  emergencyAlertClaimToken,
+  evaluateEmergencyAlertLimit,
+  resolveFamilyContactName,
+  silenceAlertClaimSql,
+  type EmergencyAlertLimitResult,
+} from "@shared/companion-history";
 import { db, storage, pool } from "./storage";
 import { notifyUserPush } from "./push";
 
@@ -323,6 +335,370 @@ export async function deliverCompanionNotice(
   return { pushed: tokenCount > 0, tokenCount };
 }
 
+export type PreparedFamilyAlert = {
+  patientUserId: string;
+  familyContactUserId: string;
+  patientName: string;
+  patientFirst: string;
+  /** Null when the saved contact has no display name. Never taken from chat text. */
+  familyContactName: string | null;
+  familyNoticeName: string;
+};
+
+/**
+ * Resolve the saved family_contact_user_id for an immediate or scheduled alert.
+ * Does not read chat history.
+ */
+export async function prepareFamilyCompanionAlert(
+  patientUserId: string,
+): Promise<PreparedFamilyAlert | { ok: false; status: number; message: string }> {
+  const care = await getPersonalCare(patientUserId);
+  const rawId = care?.familyContactUserId?.trim() || "";
+  const contactId = rawId && rawId !== patientUserId ? rawId : "";
+  const family = contactId ? await storage.getUser(contactId) : undefined;
+  const pre = companionAlertPrecondition({
+    companionEnabled: care?.companionEnabled === true,
+    familyContactUserId: contactId || null,
+    contactFound: !!family,
+  });
+  if (!pre.ok) return pre;
+
+  const patient = await storage.getUser(patientUserId);
+  if (!patient) {
+    return { ok: false, status: 404, message: "We couldn't find your account." };
+  }
+  const familyContactName = resolveFamilyContactName(family);
+  const patientName =
+    `${patient.firstName || ""} ${patient.lastName || ""}`.trim() ||
+    patient.username ||
+    "Your loved one";
+  return {
+    patientUserId,
+    familyContactUserId: pre.familyContactUserId,
+    patientName,
+    patientFirst: patient.firstName || "there",
+    familyContactName,
+    familyNoticeName: familyContactName || "your family contact",
+  };
+}
+
+/** Name passed to companion Cledwyn. Null when no contact is saved. */
+export async function lookupSavedFamilyContactName(userId: string): Promise<string | null> {
+  try {
+    const prepared = await prepareFamilyCompanionAlert(userId);
+    if (!("familyContactUserId" in prepared)) return null;
+    return prepared.familyContactName;
+  } catch (e) {
+    console.warn("[Companion] family contact lookup failed:", e);
+    return null;
+  }
+}
+
+/**
+ * Write the patient + family Cledwyn notices and push them.
+ * Shared by the silence cron and POST /api/personal/emergency-alert.
+ */
+export type FamilyAlertClaim =
+  | {
+      ok: true;
+      /** `timestamp::text` of the value before this claim. Null if there was none. */
+      previousAlertAt: string | null;
+      /** `timestamp::text` of the value this claim wrote. */
+      claimedAt: string;
+    }
+  | {
+      ok: false;
+      status: number;
+      message: string;
+      retryAfterSeconds?: number;
+    };
+
+function asDate(value: unknown): Date | null {
+  if (value == null) return null;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+  const parsed = new Date(String(value));
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+/**
+ * Claim the manual-alert slot on last_family_alert_sent_at.
+ * One row lock so every Cloud Run instance shares the 2-minute gap.
+ * The hourly cap counts manual family_alert_family rows already stored.
+ */
+export async function claimManualFamilyAlert(userId: string): Promise<FamilyAlertClaim> {
+  await ensureCompanionMessagesTable();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const locked = await client.query(
+      `SELECT companion_enabled,
+              last_family_alert_sent_at,
+              last_family_alert_sent_at::text AS previous_at
+       FROM personal_care_settings
+       WHERE user_id = $1
+       FOR UPDATE`,
+      [userId],
+    );
+    const row = locked.rows[0] as
+      | {
+          companion_enabled?: boolean;
+          last_family_alert_sent_at?: Date | string | null;
+          previous_at?: string | null;
+        }
+      | undefined;
+    if (!row?.companion_enabled) {
+      await client.query("ROLLBACK");
+      return { ok: false, status: 403, message: COMPANION_REQUIRED_MESSAGE };
+    }
+
+    const hourly = await client.query(
+      `SELECT created_at
+       FROM cledwyn_companion_messages
+       WHERE about_user_id = $1
+         AND event_type = 'family_alert_family'
+         AND created_at > now() - interval '1 hour'
+         AND COALESCE(metadata->>'manual', 'false') = 'true'
+       ORDER BY created_at ASC`,
+      [userId],
+    );
+    const now = Date.now();
+    const previousForDecision = asDate(row.last_family_alert_sent_at);
+    let previousAlertAt: string | null = null;
+    if (row.previous_at != null) {
+      previousAlertAt = emergencyAlertClaimToken(row.previous_at);
+      if (!previousAlertAt) {
+        await client.query("ROLLBACK");
+        throw new Error("Unreadable last_family_alert_sent_at");
+      }
+    }
+    const decision: EmergencyAlertLimitResult = evaluateEmergencyAlertLimit({
+      now,
+      lastFamilyAlertAt: previousForDecision ? previousForDecision.getTime() : null,
+      manualAlertAt: hourly.rows.map((entry: { created_at?: Date | string | null }) => {
+        const at = asDate(entry.created_at);
+        return at ? at.getTime() : now;
+      }),
+    });
+    if (decision.limited) {
+      await client.query("ROLLBACK");
+      return {
+        ok: false,
+        status: decision.status,
+        message: decision.message,
+        retryAfterSeconds: decision.retryAfterSeconds,
+      };
+    }
+
+    const claimed = await client.query(emergencyAlertClaimSql(), [userId]);
+    const claimedAt = emergencyAlertClaimToken(claimed.rows[0]?.claimed_at);
+    if (!claimed.rowCount || !claimedAt) {
+      await client.query("ROLLBACK");
+      return {
+        ok: false,
+        status: 429,
+        message: EMERGENCY_ALERT_GAP_MESSAGE,
+        retryAfterSeconds: 120,
+      };
+    }
+    await client.query("COMMIT");
+    return { ok: true, previousAlertAt, claimedAt };
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch {
+      /* already closed */
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/** Put the previous timestamp back when the family notice never went out. */
+export async function releaseFamilyAlertClaim(
+  userId: string,
+  previousAlertAt: string | null,
+  claimedAt: string,
+): Promise<void> {
+  const token = emergencyAlertClaimToken(claimedAt);
+  if (!token) return;
+  const previous = previousAlertAt == null ? null : emergencyAlertClaimToken(previousAlertAt);
+  await pool.query(EMERGENCY_ALERT_RELEASE_SQL, [userId, previous, token]);
+}
+
+/**
+ * Claim the silence window before the cron sends. 0 rows means a manual alert
+ * (or another cron) already holds it, or the patient replied.
+ */
+export async function claimSilenceFamilyAlert(
+  userId: string,
+  silenceMs: number,
+): Promise<{ ok: true; previousAlertAt: string | null; claimedAt: string } | { ok: false }> {
+  const windowMs = Math.trunc(silenceMs);
+  if (!Number.isFinite(windowMs) || windowMs < 1) return { ok: false };
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const locked = await client.query(
+      `SELECT last_family_alert_sent_at::text AS previous_at
+       FROM personal_care_settings
+       WHERE user_id = $1
+       FOR UPDATE`,
+      [userId],
+    );
+    if (!locked.rowCount) {
+      await client.query("ROLLBACK");
+      return { ok: false };
+    }
+    const updated = await client.query(silenceAlertClaimSql(), [userId, windowMs]);
+    const claimedAt = emergencyAlertClaimToken(updated.rows[0]?.claimed_at);
+    if (!updated.rowCount || !claimedAt) {
+      await client.query("ROLLBACK");
+      return { ok: false };
+    }
+    const previousRaw = locked.rows[0]?.previous_at;
+    let previousAlertAt: string | null = null;
+    if (previousRaw != null) {
+      previousAlertAt = emergencyAlertClaimToken(previousRaw);
+      if (!previousAlertAt) {
+        await client.query("ROLLBACK");
+        throw new Error("Unreadable last_family_alert_sent_at");
+      }
+    }
+    await client.query("COMMIT");
+    return { ok: true, previousAlertAt, claimedAt };
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch {
+      /* already closed */
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function commitFamilyCompanionAlert(
+  prepared: PreparedFamilyAlert,
+  opts: {
+    reason: "silence" | "manual";
+    sinceReplyMs?: number;
+    lastReplyAt?: Date;
+  },
+): Promise<{ alertSent: true; familyContactName: string | null }> {
+  await ensureCompanionMessagesTable();
+  const familyName = prepared.familyNoticeName;
+  const { patientName, patientFirst } = prepared;
+  const manual = opts.reason === "manual";
+
+  let patientContent: string;
+  let familyContent: string;
+  let patientPush: string;
+  let familyPush: string;
+  const patientMeta: Record<string, unknown> = {
+    familyContactUserId: prepared.familyContactUserId,
+    manual,
+  };
+  const familyMeta: Record<string, unknown> = {
+    patientUserId: prepared.patientUserId,
+    manual,
+  };
+
+  if (manual) {
+    patientContent =
+      `You asked me to let ${familyName} know. I’ve sent them a note in their Cledwyn chat.\n\n` +
+      `You can reply here anytime. This stays in our conversation — it isn’t a private message from your phone.`;
+    familyContent =
+      `Cledwyn Companion: ${patientName} asked to alert you now.\n\n` +
+      `This is a check-in from Personal Settings — not a medical emergency notice. Open Cledwyn for details.`;
+    patientPush = `You asked me to let ${familyName} know.`;
+    familyPush = `${patientName} asked Cledwyn to alert you. Open Cledwyn for details.`;
+  } else {
+    const sinceReplyMs = opts.sinceReplyMs ?? 0;
+    const lastReplyAt = opts.lastReplyAt || new Date();
+    const duration = formatDurationHours(sinceReplyMs);
+    const lastReplyLabel = lastReplyAt.toLocaleString("en-ZA", {
+      timeZone: "Africa/Johannesburg",
+    });
+    patientMeta.sinceReplyMs = sinceReplyMs;
+    patientMeta.lastPatientReplyAt = lastReplyAt.toISOString();
+    familyMeta.sinceReplyMs = sinceReplyMs;
+    familyMeta.lastPatientReplyAt = lastReplyAt.toISOString();
+    patientContent =
+      `Hey ${patientFirst} — I haven't heard from you for ${duration}, so I'm letting ${familyName} know you're okay to check on.\n\n` +
+      `You can reply here anytime. This keeps your chats with family clean — I'm holding these check-ins in our conversation.`;
+    familyContent =
+      `Cledwyn Companion: ${patientName} hasn't replied for ${duration}.\n` +
+      `Last reply was ${lastReplyLabel}.\n\n` +
+      `This is an automated check from Personal Settings — not a medical emergency notice. ` +
+      `Open Cledwyn for details — check-ins live there for habit review later.`;
+    patientPush = `I haven't heard from you, so I let ${familyName} know.`;
+    familyPush = `${patientName} hasn't replied for ${duration}. Open Cledwyn for details.`;
+  }
+
+  // Family thread first. The patient's "I've sent them a note" is written only after this succeeds.
+  let familyNotice: CledwynCompanionMessage | null = null;
+  try {
+    familyNotice = await appendCompanionMessage({
+      userId: prepared.familyContactUserId,
+      aboutUserId: prepared.patientUserId,
+      role: "assistant",
+      eventType: "family_alert_family",
+      content: familyContent,
+      metadata: familyMeta,
+    });
+    await deliverCompanionNotice(
+      prepared.familyContactUserId,
+      "Cledwyn Companion",
+      familyPush,
+      {
+        type: manual ? "companion_manual_alert" : "companion_silence",
+        href: "/(tabs)/cledwyn",
+        aboutUserId: prepared.patientUserId,
+        messageId: familyNotice.id,
+      },
+      { urgent: true, messageId: familyNotice.id },
+    );
+  } catch (error) {
+    if (familyNotice?.id) {
+      try {
+        await db.delete(cledwynCompanionMessages).where(eq(cledwynCompanionMessages.id, familyNotice.id));
+      } catch (deleteError) {
+        console.error("[Companion] could not remove unsent family notice", deleteError);
+      }
+    }
+    throw error;
+  }
+
+  try {
+    const patientNotice = await appendCompanionMessage({
+      userId: prepared.patientUserId,
+      aboutUserId: prepared.patientUserId,
+      role: "assistant",
+      eventType: "family_alert_patient",
+      content: patientContent,
+      metadata: patientMeta,
+    });
+    await deliverCompanionNotice(
+      prepared.patientUserId,
+      "Cledwyn",
+      patientPush,
+      {
+        type: manual ? "companion_manual_patient" : "companion_silence_patient",
+        href: "/(tabs)/cledwyn",
+        messageId: patientNotice.id,
+      },
+      { urgent: true, messageId: patientNotice.id },
+    );
+  } catch (error) {
+    // Family notice is already stored (manual rows count toward the hourly cap).
+    console.error("[Companion] family was alerted but the patient notice failed", error);
+  }
+
+  return { alertSent: true, familyContactName: prepared.familyContactName };
+}
+
 /**
  * Cloud Scheduler / inline entry — companion check-ins + family silence alerts.
  * All conversational lines go into Cledwyn companion threads (not patient↔family DMs).
@@ -346,10 +722,6 @@ export async function runCompanionCron(): Promise<{
     try {
       const patient = await storage.getUser(row.userId);
       if (!patient) continue;
-      const patientName =
-        `${patient.firstName || ""} ${patient.lastName || ""}`.trim() ||
-        patient.username ||
-        "Your loved one";
       const patientFirst = patient.firstName || "there";
 
       const checkInMs = row.checkInIntervalHours * 60 * 60 * 1000;
@@ -395,80 +767,32 @@ export async function runCompanionCron(): Promise<{
       // --- Family silence alert (Cledwyn threads only — never P2P DM) ---
       if (!row.familyContactUserId) continue;
       const silenceMs = row.silenceAlertAfterHours * 60 * 60 * 1000;
-      const lastAlert = row.lastFamilyAlertSentAt?.getTime() ?? 0;
       if (sinceReply < silenceMs) continue;
-      // Cooldown: don't re-alert more often than the silence interval itself
-      if (now - lastAlert < silenceMs) continue;
 
-      const family = await storage.getUser(row.familyContactUserId);
-      const familyName =
-        `${family?.firstName || ""} ${family?.lastName || ""}`.trim() ||
-        family?.username ||
-        "your family contact";
-      const duration = formatDurationHours(sinceReply);
-      const lastReplyLabel = new Date(lastReply).toLocaleString("en-ZA", {
-        timeZone: "Africa/Johannesburg",
-      });
+      const silenceClaim = await claimSilenceFamilyAlert(row.userId, silenceMs);
+      if (!silenceClaim.ok) continue;
 
-      // Patient Cledwyn: transparent notice that family was contacted
-      const patientNotice = await appendCompanionMessage({
-        userId: row.userId,
-        aboutUserId: row.userId,
-        role: "assistant",
-        eventType: "family_alert_patient",
-        content:
-          `Hey ${patientFirst} — I haven't heard from you for ${duration}, so I'm letting ${familyName} know you're okay to check on.\n\n` +
-          `You can reply here anytime. This keeps your chats with family clean — I'm holding these check-ins in our conversation.`,
-        metadata: {
-          familyContactUserId: row.familyContactUserId,
+      try {
+        const prepared = await prepareFamilyCompanionAlert(row.userId);
+        if (!("familyContactUserId" in prepared)) {
+          await releaseFamilyAlertClaim(row.userId, silenceClaim.previousAlertAt, silenceClaim.claimedAt);
+          console.warn("[CompanionCron] skip family alert", row.userId, prepared.message);
+          continue;
+        }
+        const sent = await commitFamilyCompanionAlert(prepared, {
+          reason: "silence",
           sinceReplyMs: sinceReply,
-          lastPatientReplyAt: new Date(lastReply).toISOString(),
-        },
-      });
-
-      // Family Cledwyn: alert in their AI chat (not the DM with the patient)
-      const familyNotice = await appendCompanionMessage({
-        userId: row.familyContactUserId,
-        aboutUserId: row.userId,
-        role: "assistant",
-        eventType: "family_alert_family",
-        content:
-          `Cledwyn Companion: ${patientName} hasn't replied for ${duration}.\n` +
-          `Last reply was ${lastReplyLabel}.\n\n` +
-          `This is an automated check from Personal Settings — not a medical emergency notice. ` +
-          `Open Cledwyn for details — check-ins live there for habit review later.`,
-        metadata: {
-          patientUserId: row.userId,
-          sinceReplyMs: sinceReply,
-          lastPatientReplyAt: new Date(lastReply).toISOString(),
-        },
-      });
-
-      await deliverCompanionNotice(
-        row.userId,
-        "Cledwyn",
-        `I haven't heard from you, so I let ${familyName} know.`,
-        { type: "companion_silence_patient", href: "/(tabs)/cledwyn", messageId: patientNotice.id },
-        { urgent: true, messageId: patientNotice.id },
-      );
-      await deliverCompanionNotice(
-        row.familyContactUserId,
-        "Cledwyn Companion",
-        `${patientName} hasn't replied for ${duration}. Open Cledwyn for details.`,
-        {
-          type: "companion_silence",
-          href: "/(tabs)/cledwyn",
-          aboutUserId: row.userId,
-          messageId: familyNotice.id,
-        },
-        { urgent: true, messageId: familyNotice.id },
-      );
-
-      await db
-        .update(personalCareSettings)
-        .set({ lastFamilyAlertSentAt: new Date(), updatedAt: new Date() })
-        .where(eq(personalCareSettings.userId, row.userId));
-      familyAlerts++;
+          lastReplyAt: new Date(lastReply),
+        });
+        if (sent.alertSent) familyAlerts++;
+      } catch (sendError) {
+        try {
+          await releaseFamilyAlertClaim(row.userId, silenceClaim.previousAlertAt, silenceClaim.claimedAt);
+        } catch (releaseError) {
+          console.error("[CompanionCron] release silence claim failed", row.userId, releaseError);
+        }
+        throw sendError;
+      }
     } catch (e) {
       console.error("[CompanionCron] row failed", row.userId, e);
     }
