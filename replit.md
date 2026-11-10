@@ -162,6 +162,7 @@ A business messaging app for Lekker Network - connecting Lekkerpreneurs with the
 - `PUBLIC_OBJECT_SEARCH_PATHS` - Public object search paths (auto-provisioned)
 - `PRIVATE_OBJECT_DIR` - Private object directory (auto-provisioned)
 - `LEKKER_NETWORK_API_KEY` - API key for lekker.network Lekkerpreneur directory API
+- `MOBILE_USER_ASSERTION_SECRET` - HMAC secret for the 60-second `X-User-Assertion` on Software SSO. Same value as lekker.network. Must not equal `LEKKER_NETWORK_API_KEY`. Read from the environment only; unset fails closed.
 - `LEKKER_NETWORK_API_URL` - Base URL for Lekker Network API (default: https://lekker.network/api/v1/lekkerpreneurs)
 
 ## Colors

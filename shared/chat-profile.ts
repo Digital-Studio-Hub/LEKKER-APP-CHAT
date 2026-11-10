@@ -257,7 +257,11 @@ export function planProfileSwitch(
   };
 }
 
-/** Body for POST /api/v1/mobile/session-token. Extra fields are optional for Network. */
+/**
+ * Body for POST /api/v1/mobile/session-token. Extra fields are optional.
+ * The call also sends X-User-Assertion. A 401 user_auth_required is not retried.
+ * A 403 not_a_member may retry with { userId } only and the same assertion.
+ */
 export function networkSessionTokenBody(input: {
   lekkerNetworkId: string;
   workspaceId?: string | null;

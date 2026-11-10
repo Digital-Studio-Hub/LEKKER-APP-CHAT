@@ -186,6 +186,7 @@ eas submit --platform ios
 - `DATABASE_URL` (Neon Lekker_Chat pooled URL)
 - `SESSION_SECRET`
 - `LEKKER_NETWORK_API_KEY` (matches V3 `MOBILE_API_KEY`)
+- `MOBILE_USER_ASSERTION_SECRET` (same value as Network; not the API key; Software SSO fails closed if unset)
 - `TWILIO_WHATSAPP_FROM`, `TWILIO_CONTENT_SID`, Twilio creds (WhatsApp OTP)
 - OpenRouter / object storage vars per `replit.md`
 - `LEKKER_WORKSPACE_ID` + `LEKKER_TOKEN` (Connect API — optional for Browse/marketplace)
