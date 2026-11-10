@@ -57,7 +57,7 @@ Response now also includes `profileId`, `phone`, `defaultWorkspaceId`, and `lekk
 
 ## Network API contract (parallel PR)
 
-Chat calls these today. Extra fields are optional. If `POST /api/v1/mobile/session-token` rejects an enriched body, Chat retries with `{ userId }` only.
+Chat calls these today. Extra fields are optional. Chat also sends `X-User-Assertion` (60-second JWT signed with `MOBILE_USER_ASSERTION_SECRET` for the WhatsApp-verified session user). A **401** `user_auth_required` is not retried. A **403** `not_a_member` retries with `{ userId }` only and the same assertion. A **400** with no error code (older builds rejecting extra fields) retries the same way.
 
 ### Already sent
 

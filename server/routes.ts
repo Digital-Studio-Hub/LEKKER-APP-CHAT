@@ -57,6 +57,7 @@ import {
 import { sendPasswordResetEmail, sendEmailVerificationEmail } from "./gmail";
 import { sendPasswordResetSMS, sendPhoneVerificationSMS } from "./twilio";
 import { sendWhatsAppOtp, isWhatsAppOtpConfigured, whatsAppOtpConfigStatus } from "./whatsapp-otp";
+import { signAssertionForVerifiedChatUser } from "./mobile-user-assertion";
 import {
   getAppleReviewConfig,
   isAppleReviewPhone,
@@ -3399,10 +3400,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!user?.lekkerNetworkId) {
         return res.status(403).json({ message: "Lekkerpreneur account required" });
       }
+      // Subject and phone come from this session's user row. WhatsApp verify
+      // sets phoneVerified. Query/body ids are not accepted.
+      const assertion = signAssertionForVerifiedChatUser({
+        lekkerNetworkId: user.lekkerNetworkId,
+        phone: user.phone,
+        phoneVerified: user.phoneVerified,
+      });
+      if (!assertion) {
+        return res.status(502).json({ message: "Could not create session. Try again later." });
+      }
       const token = await fetchMobileSessionToken(user.lekkerNetworkId, {
         workspaceId: user.lekkerWorkspaceId,
         chatProfileId: user.id,
         phone: user.phone,
+        assertion,
       });
       if (!token) {
         return res.status(502).json({ message: "Could not create session. Try again later." });

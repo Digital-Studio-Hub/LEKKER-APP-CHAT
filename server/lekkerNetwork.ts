@@ -1,5 +1,6 @@
 import { networkSessionTokenBody, networkSessionTokenBodyFallback } from "@shared/chat-profile";
 import { buildCompanionChatPayload } from "@shared/companion-history";
+import { shouldRetrySessionTokenAsUserIdOnly } from "./mobile-user-assertion";
 
 const LEKKER_API_BASE = process.env.LEKKER_API_BASE_URL || "https://lekker.network";
 const LEKKER_API_URL = `${LEKKER_API_BASE}/api/v1/lekkerpreneurs`;
@@ -925,30 +926,96 @@ export async function updateMarketplaceLeadStatus(input: {
   );
 }
 
+type MobileSessionTokenResponse = {
+  status: number;
+  code: string | null;
+  token: string | null;
+};
+
+/**
+ * POST /api/v1/mobile/session-token with the app key and X-User-Assertion.
+ * The assertion is required. A missing key or a network error returns no token
+ * and does not throw.
+ */
+async function requestMobileSessionToken(
+  body: Record<string, string>,
+  assertion: string,
+): Promise<MobileSessionTokenResponse> {
+  const apiKey = process.env.LEKKER_NETWORK_API_KEY || "";
+  if (!apiKey) {
+    console.warn("[session-token] LEKKER_NETWORK_API_KEY is not set; refusing to mint a mobile session");
+    return { status: 0, code: "missing_api_key", token: null };
+  }
+  let response: Response;
+  try {
+    response = await fetch(`${LEKKER_MOBILE_BASE}/api/v1/mobile/session-token`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "X-API-Key": apiKey,
+        "X-User-Assertion": assertion,
+      },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    console.warn("[session-token] Lekker Network session-token request failed");
+    return { status: 0, code: null, token: null };
+  }
+  let code: string | null = null;
+  let token: string | null = null;
+  try {
+    const data = (await response.json()) as { code?: unknown; token?: unknown };
+    if (typeof data.code === "string" && data.code) code = data.code;
+    if (response.ok && typeof data.token === "string" && data.token) token = data.token;
+  } catch {
+    // Non-JSON body. Status is enough to decide whether a retry is safe.
+  }
+  return { status: response.status, code, token };
+}
+
 export async function fetchMobileSessionToken(
   lekkerNetworkUserId: string,
-  opts?: { workspaceId?: string | null; chatProfileId?: string | null; phone?: string | null },
+  opts?: {
+    workspaceId?: string | null;
+    chatProfileId?: string | null;
+    phone?: string | null;
+    /** X-User-Assertion signed for this same lekkerNetworkUserId after WhatsApp OTP. */
+    assertion?: string | null;
+  },
 ): Promise<string | null> {
+  const assertion = typeof opts?.assertion === "string" ? opts.assertion.trim() : "";
+  if (!assertion) {
+    console.warn("[session-token] refusing mobile session mint without X-User-Assertion");
+    return null;
+  }
   const enriched = networkSessionTokenBody({
     lekkerNetworkId: lekkerNetworkUserId,
     workspaceId: opts?.workspaceId,
     profileId: opts?.chatProfileId,
     phone: opts?.phone,
   });
-  const data = await lekkerMobileFetch<{ token?: string }>("/api/v1/mobile/session-token", {
-    method: "POST",
-    body: JSON.stringify(enriched),
-  });
-  if (data?.token) return data.token;
-  // Current Network builds accept { userId } only. Retry if extra fields were rejected.
-  if (Object.keys(enriched).length > 1) {
-    const fallback = await lekkerMobileFetch<{ token?: string }>("/api/v1/mobile/session-token", {
-      method: "POST",
-      body: JSON.stringify(networkSessionTokenBodyFallback(lekkerNetworkUserId)),
-    });
-    return fallback?.token || null;
+  const first = await requestMobileSessionToken(enriched, assertion);
+  if (first.token) return first.token;
+  // 401 user_auth_required must not be retried as { userId } only.
+  // 403 not_a_member may retry, and the same assertion stays on the request.
+  if (
+    !shouldRetrySessionTokenAsUserIdOnly({
+      status: first.status,
+      code: first.code,
+      sentExtraFields: Object.keys(enriched).length > 1,
+    })
+  ) {
+    if (first.status === 401 || first.code === "user_auth_required") {
+      console.warn("[session-token] Network returned user_auth_required; not retrying as { userId } only");
+    }
+    return null;
   }
-  return null;
+  const fallback = await requestMobileSessionToken(
+    networkSessionTokenBodyFallback(lekkerNetworkUserId),
+    assertion,
+  );
+  return fallback.token;
 }
 
 export async function fetchWorkspaceEmailStatus(
