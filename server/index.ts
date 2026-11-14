@@ -4,6 +4,7 @@ import type { Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import * as fs from "fs";
 import * as path from "path";
+import { legalRedirects } from "./legal-redirects";
 
 process.on("uncaughtException", (err) => {
   console.error("[Process] Uncaught exception (server will continue):", err.message);
@@ -253,6 +254,9 @@ function configureExpoAndLanding(app: express.Application) {
   };
   app.get("/.well-known/assetlinks.json", sendAssetLinks);
   app.get("/assetlinks.json", sendAssetLinks);
+
+  // One legal set: /terms and /privacy (and the long URLs) 301 to lekker.network.
+  app.use(legalRedirects());
 
   app.use((req: Request, res: Response, next: NextFunction) => {
     if (req.path.startsWith("/api") || req.path.startsWith("/.well-known")) {
