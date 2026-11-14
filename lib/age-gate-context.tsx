@@ -9,7 +9,7 @@ import React, {
 } from "react";
 import { Platform } from "react-native";
 import { useAuth } from "@/lib/auth-context";
-import { fetchSocialAccess, syncAgeRange } from "@/lib/age-gate-api";
+import { fetchSocialAccess, syncAgeRange, type SocialAccessStatus } from "@/lib/age-gate-api";
 import { resolveDeviceAgeRange } from "@/lib/resolve-age-range";
 import { isSocialMediaAllowed } from "@shared/age-gate";
 
@@ -21,12 +21,22 @@ type AgeGateContextValue = {
   declareWithDevice: () => Promise<void>;
   declareWithDateOfBirth: (dateOfBirth: string) => Promise<void>;
   dismissDobPrompt: () => void;
+  /** Latest GET /api/user/social-access payload (DOB, source, cooldown) for Settings. */
+  ageStatus: SocialAccessStatus | null;
+  refreshAgeStatus: () => Promise<SocialAccessStatus | null>;
+  /**
+   * Settings → Account → Date of birth. Saves via POST /api/user/age-range (server enforces
+   * validation, device-source guard and the 30-day cooldown) and updates gating in place.
+   * Throws the apiRequest error on 400 / 409 / 429 so the caller can show the message.
+   */
+  changeDateOfBirth: (dateOfBirth: string) => Promise<{ socialMediaAllowed: boolean }>;
 };
 
 const AgeGateContext = createContext<AgeGateContextValue | null>(null);
 
 export function AgeGateProvider({ children }: { children: ReactNode }) {
-  const { isLoggedIn, user, updateProfile } = useAuth();
+  const { isLoggedIn, user, updateProfile, applyServerUser } = useAuth();
+  const [ageStatus, setAgeStatus] = useState<SocialAccessStatus | null>(null);
   const [socialMediaAllowed, setSocialMediaAllowed] = useState(false);
   const [needsAgeDeclaration, setNeedsAgeDeclaration] = useState(false);
   const [isChecking, setIsChecking] = useState(false);
@@ -53,6 +63,7 @@ export function AgeGateProvider({ children }: { children: ReactNode }) {
     setIsChecking(true);
     try {
       const status = await fetchSocialAccess();
+      setAgeStatus(status);
       setSocialMediaAllowed(status.socialMediaAllowed);
       setNeedsAgeDeclaration(status.needsAgeDeclaration);
       if (status.needsAgeDeclaration && Platform.OS !== "web") {
@@ -120,6 +131,38 @@ export function AgeGateProvider({ children }: { children: ReactNode }) {
     }
   }, [updateProfile]);
 
+  const refreshAgeStatus = useCallback(async () => {
+    if (!isLoggedIn) {
+      setAgeStatus(null);
+      return null;
+    }
+    try {
+      const status = await fetchSocialAccess();
+      setAgeStatus(status);
+      setSocialMediaAllowed(status.socialMediaAllowed);
+      setNeedsAgeDeclaration(status.needsAgeDeclaration);
+      return status;
+    } catch {
+      return null;
+    }
+  }, [isLoggedIn]);
+
+  const changeDateOfBirth = useCallback(async (dateOfBirth: string) => {
+    setIsChecking(true);
+    try {
+      const result = await syncAgeRange({ dateOfBirth: dateOfBirth.trim(), source: "dob" });
+      setSocialMediaAllowed(result.socialMediaAllowed);
+      setNeedsAgeDeclaration(false);
+      setShowDobPrompt(false);
+      // Keep the local user in step (age fields aren't in updateProfile's allow-list).
+      if (result.user) await applyServerUser(result.user as any);
+      await refreshAgeStatus();
+      return { socialMediaAllowed: result.socialMediaAllowed };
+    } finally {
+      setIsChecking(false);
+    }
+  }, [applyServerUser, refreshAgeStatus]);
+
   const value = useMemo(
     () => ({
       socialMediaAllowed,
@@ -129,6 +172,9 @@ export function AgeGateProvider({ children }: { children: ReactNode }) {
       declareWithDevice,
       declareWithDateOfBirth,
       dismissDobPrompt: () => setShowDobPrompt(false),
+      ageStatus,
+      refreshAgeStatus,
+      changeDateOfBirth,
     }),
     [
       socialMediaAllowed,
@@ -137,6 +183,9 @@ export function AgeGateProvider({ children }: { children: ReactNode }) {
       showDobPrompt,
       declareWithDevice,
       declareWithDateOfBirth,
+      ageStatus,
+      refreshAgeStatus,
+      changeDateOfBirth,
     ],
   );
 
