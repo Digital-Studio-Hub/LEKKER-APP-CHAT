@@ -85,7 +85,8 @@ import {
   releaseFamilyAlertClaim,
 } from "./personal-care";
 import { containsBlockedContent, CONTENT_FILTER_MESSAGE } from "./content-filter";
-import { isSocialMediaAllowed, type AgeRangeSource } from "../shared/age-gate";
+import { isSocialMediaAllowed } from "../shared/age-gate";
+import { evaluateAgeRangeRequest, isDeviceSource, nextAgeChangeAllowedAt } from "./age-range-rules";
 import { requireSocialMediaAccess } from "./age-gate";
 import {
   isConnectConfigured,
@@ -3510,53 +3511,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/user/age-range", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const {
-        lowerBound,
-        upperBound,
-        dateOfBirth,
-        source,
-      } = req.body || {};
+      const current = await storage.getUser(req.user!.userId);
+      if (!current) return res.status(404).json({ message: "User not found" });
 
-      const parsedLower = lowerBound === null || lowerBound === undefined
-        ? null
-        : Number(lowerBound);
-      const parsedUpper = upperBound === null || upperBound === undefined
-        ? null
-        : Number(upperBound);
-
-      if (parsedLower != null && Number.isNaN(parsedLower)) {
-        return res.status(400).json({ message: "Invalid lowerBound" });
+      // Validation, device-source guard, 30-day change cooldown and the social-access
+      // recalculation live in server/age-range-rules.ts (unit-tested).
+      const decision = evaluateAgeRangeRequest(current, req.body);
+      if (decision.kind === "error") {
+        return res.status(decision.status).json(decision.body);
       }
-      if (parsedUpper != null && Number.isNaN(parsedUpper)) {
-        return res.status(400).json({ message: "Invalid upperBound" });
+      if (decision.kind === "noop") {
+        return res.json({
+          socialMediaAllowed: decision.socialMediaAllowed,
+          user: sanitizeUser(current),
+          unchanged: true,
+        });
       }
 
-      const allowedSources: AgeRangeSource[] = ["apple", "google", "dob", "unknown"];
-      const ageSource: AgeRangeSource = allowedSources.includes(source)
-        ? source
-        : dateOfBirth
-          ? "dob"
-          : "unknown";
-
-      const socialMediaAllowed = isSocialMediaAllowed({
-        lowerBound: parsedLower,
-        upperBound: parsedUpper,
-        dateOfBirth: typeof dateOfBirth === "string" ? dateOfBirth : null,
-      });
-
-      const updated = await storage.updateUser(req.user!.userId, {
-        ageRangeLowerBound: parsedLower,
-        ageRangeUpperBound: parsedUpper,
-        dateOfBirth: typeof dateOfBirth === "string" ? dateOfBirth : undefined,
-        ageRangeSource: ageSource,
-        ageRangeDeclaredAt: new Date(),
-        socialMediaAllowed,
-      });
-
+      const updated = await storage.updateUser(req.user!.userId, decision.update);
       if (!updated) return res.status(404).json({ message: "User not found" });
       res.json({
-        socialMediaAllowed,
+        socialMediaAllowed: decision.socialMediaAllowed,
         user: sanitizeUser(updated),
+        nextAgeChangeAllowedAt: nextAgeChangeAllowedAt(updated)?.toISOString() ?? null,
       });
     } catch (e: any) {
       res.status(500).json({ message: e?.message || "Failed to save age range" });
@@ -3577,6 +3554,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         socialMediaAllowed,
         ageRangeDeclared: !!user.ageRangeDeclaredAt,
         needsAgeDeclaration: !user.ageRangeDeclaredAt && user.socialMediaAllowed == null,
+        // Own account only — used by Settings → Account → Date of birth.
+        dateOfBirth: user.dateOfBirth ?? null,
+        ageRangeSource: user.ageRangeSource ?? null,
+        ageVerifiedByDevice: isDeviceSource(user.ageRangeSource),
+        nextAgeChangeAllowedAt: nextAgeChangeAllowedAt(user)?.toISOString() ?? null,
       });
     } catch {
       res.status(500).json({ message: "Failed to check social access" });

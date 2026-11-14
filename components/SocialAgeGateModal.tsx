@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import Colors from "@/constants/colors";
 import { useAgeGate } from "@/lib/age-gate-context";
+import { parseAgeRangeError } from "@/lib/age-gate-api";
 import { SOCIAL_MEDIA_MIN_AGE } from "@shared/age-gate";
 
 export function SocialAgeGateModal() {
@@ -22,6 +23,18 @@ export function SocialAgeGateModal() {
     dismissDobPrompt,
   } = useAgeGate();
   const [dob, setDob] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  async function submitDob() {
+    if (!dob) return;
+    setError(null);
+    try {
+      await declareWithDateOfBirth(dob.trim());
+    } catch (e) {
+      // Server now rejects invalid dates with a 400 — show why instead of failing silently.
+      setError(parseAgeRangeError(e).message || "Could not save your date of birth. Try again.");
+    }
+  }
 
   if (!showDobPrompt) return null;
 
@@ -55,13 +68,17 @@ export function SocialAgeGateModal() {
             placeholder="YYYY-MM-DD"
             placeholderTextColor={Colors.textMuted}
             value={dob}
-            onChangeText={setDob}
+            onChangeText={(v) => {
+              setDob(v);
+              if (error) setError(null);
+            }}
             keyboardType="numbers-and-punctuation"
             autoCapitalize="none"
           />
+          {error ? <Text style={styles.error}>{error}</Text> : null}
           <Pressable
             style={[styles.primaryBtn, !dob && styles.disabled]}
-            onPress={() => dob && void declareWithDateOfBirth(dob)}
+            onPress={() => void submitDob()}
             disabled={isChecking || !dob}
           >
             <Text style={styles.primaryBtnText}>Continue</Text>
@@ -124,6 +141,7 @@ const styles = StyleSheet.create({
     color: "#000",
   },
   disabled: { opacity: 0.5 },
+  error: { color: Colors.danger, fontSize: 13, fontFamily: "Poppins_400Regular" },
   secondaryBtn: { alignItems: "center", paddingVertical: 8 },
   secondaryText: { color: Colors.textMuted, fontSize: 13 },
 });

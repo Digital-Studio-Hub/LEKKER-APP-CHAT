@@ -43,6 +43,8 @@ import { getApiUrl, apiRequest } from "@/lib/query-client";
 import * as FileSystem from "expo-file-system";
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
 import { MAX_CHAT_PROFILES, PROFILE_LABEL_SUGGESTIONS } from "@shared/chat-profile";
+import { useAgeGate } from "@/lib/age-gate-context";
+import { ChangeDobModal } from "@/components/ChangeDobModal";
 
 type PresenceStatus = "online" | "away" | "dnd" | "offline";
 
@@ -197,6 +199,17 @@ export default function SettingsScreen() {
       loadBlockedUsers();
     }, []),
   );
+
+  const { ageStatus, refreshAgeStatus } = useAgeGate();
+  const [showDobEditor, setShowDobEditor] = useState(false);
+  useFocusEffect(
+    useCallback(() => {
+      void refreshAgeStatus();
+    }, [refreshAgeStatus]),
+  );
+  const dobValueLabel = ageStatus?.ageVerifiedByDevice
+    ? "Verified by device"
+    : ageStatus?.dateOfBirth || "Not set";
 
   async function loadBlockedUsers() {
     const blocked = await fetchBlockedUsers();
@@ -660,7 +673,24 @@ export default function SettingsScreen() {
                   : <Ionicons name="alert-circle-outline" size={14} color={Colors.textMuted} />}
               </View>
             </View>
+            <Pressable
+              style={styles.optionRow}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                setShowDobEditor(true);
+              }}
+              testID="change-dob-entry"
+            >
+              <Ionicons name="calendar-outline" size={18} color={Colors.textSecondary} />
+              <Text style={styles.optionLabel}>Date of birth</Text>
+              <Text style={styles.optionValue}>{dobValueLabel}</Text>
+              <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
+            </Pressable>
           </View>
+          <Text style={styles.toggleHint}>
+            Your date of birth decides access to social features. You can change it once every 30 days.
+          </Text>
+          <ChangeDobModal visible={showDobEditor} onClose={() => setShowDobEditor(false)} />
         </View>
 
         <View style={styles.section}>
