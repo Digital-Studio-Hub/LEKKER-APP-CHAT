@@ -26,7 +26,6 @@
         "NSPhotoLibraryAddUsageDescription": "Lekker Chat saves photos received in conversations to your photo library.",
         "NSMicrophoneUsageDescription": "Lekker Chat uses your microphone to record voice notes.",
         "NSLocationWhenInUseUsageDescription": "Lekker Chat uses your location to find nearby Lekkerpreneurs and share your location in conversations.",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "Lekker Chat uses your location to find nearby Lekkerpreneurs and enhance your networking experience.",
         "NSContactsUsageDescription": "Lekker Chat reads contacts on your device to help you find people you know. If you choose to share a contact card in a chat, that contact's name and phone number will be uploaded to our servers and sent to conversation participants. Your full address book is never uploaded.",
         "ITSAppUsesNonExemptEncryption": false,
         "NSAppTransportSecurity": {
@@ -106,7 +105,7 @@
       [
         "expo-router",
         {
-          "origin": "https://replit.com/"
+          "origin": "https://chat.lekker.network"
         }
       ],
       "expo-font",
@@ -114,7 +113,6 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Lekker Chat uses your location to find nearby Lekkerpreneurs and enhance your networking experience.",
           "locationWhenInUsePermission": "Lekker Chat uses your location to find nearby Lekkerpreneurs."
         }
       ],
@@ -143,6 +141,12 @@
         {
           "microphonePermission": "Lekker Chat needs microphone access to record voice notes."
         }
+      ],
+      [
+        "expo-secure-store",
+        {
+          "faceIDPermission": false
+        }
       ]
     ],
     "experiments": {
@@ -153,7 +157,7 @@
       "privacyPolicyUrl": "https://lekker.network/privacy",
       "termsUrl": "https://lekker.network/terms",
       "router": {
-        "origin": "https://replit.com/"
+        "origin": "https://chat.lekker.network"
       },
       "eas": {
         "projectId": "385aa478-8c87-4480-b7b6-2ecb4addc68c"

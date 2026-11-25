@@ -1406,7 +1406,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!reportType || !reason) {
         return res.status(400).json({ message: "reportType and reason are required" });
       }
-      const allowed = ["user", "message", "chat"];
+      const allowed = ["user", "message", "chat", "post", "comment"];
       if (!allowed.includes(reportType)) {
         return res.status(400).json({ message: "Invalid reportType" });
       }
@@ -3582,7 +3582,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/feed/:id", authMiddleware, requireSocialMediaAccess, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const post = await getFeedPostById(req.params.id);
+      const post = await getFeedPostById(String(req.params.id), req.user!.userId);
       if (!post) return res.status(404).json({ message: "Post not found" });
       res.json({ post });
     } catch (e) {
@@ -3618,7 +3618,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/feed/:id/like", authMiddleware, requireSocialMediaAccess, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      await toggleFeedLike(req.params.id, req.user!.userId);
+      const postId = String(req.params.id);
+      const post = await getFeedPostById(postId, req.user!.userId);
+      if (!post) return res.status(404).json({ message: "Post not found" });
+      await toggleFeedLike(postId, req.user!.userId);
       res.json({ ok: true });
     } catch (e) {
       res.status(500).json({ message: "Failed to update like" });
@@ -3627,7 +3630,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/feed/:id/share", authMiddleware, requireSocialMediaAccess, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      await addFeedShare(req.params.id, req.user!.userId);
+      const postId = String(req.params.id);
+      const post = await getFeedPostById(postId, req.user!.userId);
+      if (!post) return res.status(404).json({ message: "Post not found" });
+      await addFeedShare(postId, req.user!.userId);
       res.json({ ok: true });
     } catch (e) {
       res.status(500).json({ message: "Failed to share post" });
@@ -3636,13 +3642,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/feed/:id/comments", authMiddleware, requireSocialMediaAccess, async (req: AuthenticatedRequest, res: Response) => {
     try {
+      const postId = String(req.params.id);
+      const post = await getFeedPostById(postId, req.user!.userId);
+      if (!post) return res.status(404).json({ message: "Post not found" });
       const content = String(req.body?.content || "").trim();
       if (!content) return res.status(400).json({ message: "Comment is required" });
       if (rejectBlockedContent(res, content)) {
         return;
       }
       await addFeedComment({
-        postId: req.params.id,
+        postId,
         authorId: req.user!.userId,
         content,
       });

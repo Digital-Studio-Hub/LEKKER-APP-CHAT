@@ -1,8 +1,13 @@
 import { createHash } from "crypto";
 import { and, desc, eq, gt, inArray, or, sql } from "drizzle-orm";
 import { db } from "./storage";
-import { feedComments, feedLikes, feedPosts, feedShares, users } from "@shared/schema";
+import { feedComments, feedLikes, feedPosts, feedShares, userBlocks, users } from "@shared/schema";
 import { isSocialMediaAllowed } from "../shared/age-gate";
+import {
+  filterCommentsByHiddenAuthors,
+  filterPostsByHiddenAuthors,
+  hiddenAuthorIdsForViewer,
+} from "./feed-visibility";
 
 export type FeedPostDto = {
   id: string;
@@ -29,7 +34,21 @@ function hashContent(content: string): string {
   return createHash("sha256").update(content.toLowerCase().trim()).digest("hex").slice(0, 16);
 }
 
-async function hydratePosts(postRows: typeof feedPosts.$inferSelect[]): Promise<FeedPostDto[]> {
+async function loadHiddenAuthorIds(viewerId: string): Promise<Set<string>> {
+  const blocks = await db
+    .select({
+      blockerId: userBlocks.blockerId,
+      blockedUserId: userBlocks.blockedUserId,
+    })
+    .from(userBlocks)
+    .where(or(eq(userBlocks.blockerId, viewerId), eq(userBlocks.blockedUserId, viewerId)));
+  return hiddenAuthorIdsForViewer(viewerId, blocks);
+}
+
+async function hydratePosts(
+  postRows: typeof feedPosts.$inferSelect[],
+  hiddenAuthorIds: ReadonlySet<string> = new Set(),
+): Promise<FeedPostDto[]> {
   if (postRows.length === 0) return [];
   const postIds = postRows.map((p) => p.id);
   const authorIds = [...new Set(postRows.map((p) => p.authorId))];
@@ -47,11 +66,12 @@ async function hydratePosts(postRows: typeof feedPosts.$inferSelect[]): Promise<
   const authorMap = new Map(authors.map((a) => [a.id, a]));
 
   const likes = await db.select().from(feedLikes).where(inArray(feedLikes.postId, postIds));
-  const comments = await db
+  const commentRows = await db
     .select()
     .from(feedComments)
     .where(inArray(feedComments.postId, postIds))
     .orderBy(feedComments.createdAt);
+  const comments = filterCommentsByHiddenAuthors(commentRows, hiddenAuthorIds);
   const shares = await db.select().from(feedShares).where(inArray(feedShares.postId, postIds));
 
   const commentAuthorIds = [...new Set(comments.map((c) => c.authorId))];
@@ -164,14 +184,20 @@ export async function listFeedPosts(opts: {
       .map((a) => a.id),
   );
 
-  const filtered = rows.filter((r) => allowedAuthors.has(r.authorId)).slice(0, limit);
-  return hydratePosts(filtered);
+  const hiddenAuthorIds = await loadHiddenAuthorIds(opts.viewerId);
+  const filtered = filterPostsByHiddenAuthors(
+    rows.filter((r) => allowedAuthors.has(r.authorId)),
+    hiddenAuthorIds,
+  ).slice(0, limit);
+  return hydratePosts(filtered, hiddenAuthorIds);
 }
 
-export async function getFeedPostById(postId: string): Promise<FeedPostDto | null> {
+export async function getFeedPostById(postId: string, viewerId: string): Promise<FeedPostDto | null> {
   const [row] = await db.select().from(feedPosts).where(eq(feedPosts.id, postId)).limit(1);
   if (!row) return null;
-  const [dto] = await hydratePosts([row]);
+  const hiddenAuthorIds = await loadHiddenAuthorIds(viewerId);
+  if (hiddenAuthorIds.has(row.authorId)) return null;
+  const [dto] = await hydratePosts([row], hiddenAuthorIds);
   return dto || null;
 }
 
