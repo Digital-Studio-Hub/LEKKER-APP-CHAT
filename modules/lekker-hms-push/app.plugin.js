@@ -3,6 +3,8 @@ const path = require("path");
 
 const HUAWEI_MAVEN = "maven { url 'https://developer.huawei.com/repo/' }";
 const HUAWEI_MAVEN_MARKER = "https://developer.huawei.com/repo/";
+const AGCP_CLASSPATH = "classpath 'com.huawei.agconnect:agcp:1.9.1.301'";
+const AGCP_APPLY = "apply plugin: 'com.huawei.agconnect'";
 
 /** Insert the Huawei Maven repo into the root Android build.gradle. Idempotent. */
 function ensureHuaweiMaven(gradle) {
@@ -14,12 +16,51 @@ function ensureHuaweiMaven(gradle) {
   return gradle.replace(/repositories\s*\{/, (block) => `${block}\n        ${HUAWEI_MAVEN}`);
 }
 
+/**
+ * Add the AGConnect Gradle plugin to the root buildscript.
+ * Only call this when agconnect-services.json is part of the build.
+ * Idempotent.
+ */
+function ensureAgconnectBuildscript(gradle) {
+  if (typeof gradle !== "string" || gradle.includes("com.huawei.agconnect:agcp")) return gradle;
+  let next = gradle.replace(
+    /buildscript\s*\{\s*repositories\s*\{/,
+    (block) => `${block}\n        ${HUAWEI_MAVEN}`,
+  );
+  next = next.replace(
+    /buildscript\s*\{[\s\S]*?dependencies\s*\{/,
+    (block) => `${block}\n        ${AGCP_CLASSPATH}`,
+  );
+  return next;
+}
+
+/** Apply com.huawei.agconnect at the bottom of app/build.gradle. Idempotent. */
+function ensureAgconnectApplied(gradle) {
+  if (typeof gradle !== "string" || gradle.includes("com.huawei.agconnect")) return gradle;
+  const trimmed = gradle.endsWith("\n") ? gradle : `${gradle}\n`;
+  return `${trimmed}${AGCP_APPLY}\n`;
+}
+
+function agconnectServicesPresent(projectRoot) {
+  return fs.existsSync(path.join(projectRoot, "agconnect-services.json"));
+}
+
 function withHuaweiPush(config) {
-  const { withProjectBuildGradle, withAndroidManifest, withDangerousMod } = require("@expo/config-plugins");
+  const { withProjectBuildGradle, withAppBuildGradle, withAndroidManifest, withDangerousMod } = require("@expo/config-plugins");
 
   config = withProjectBuildGradle(config, (cfg) => {
     if (cfg.modResults.language === "groovy") {
       cfg.modResults.contents = ensureHuaweiMaven(cfg.modResults.contents);
+      if (agconnectServicesPresent(cfg.modRequest.projectRoot)) {
+        cfg.modResults.contents = ensureAgconnectBuildscript(cfg.modResults.contents);
+      }
+    }
+    return cfg;
+  });
+
+  config = withAppBuildGradle(config, (cfg) => {
+    if (cfg.modResults.language === "groovy" && agconnectServicesPresent(cfg.modRequest.projectRoot)) {
+      cfg.modResults.contents = ensureAgconnectApplied(cfg.modResults.contents);
     }
     return cfg;
   });
@@ -58,3 +99,5 @@ function withHuaweiPush(config) {
 
 module.exports = withHuaweiPush;
 module.exports.ensureHuaweiMaven = ensureHuaweiMaven;
+module.exports.ensureAgconnectBuildscript = ensureAgconnectBuildscript;
+module.exports.ensureAgconnectApplied = ensureAgconnectApplied;

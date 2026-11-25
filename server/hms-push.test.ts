@@ -117,7 +117,7 @@ test("oauth access token is reused for a second send", async () => {
         text: async () => JSON.stringify({ access_token: "access-reuse", expires_in: 3600 }),
       };
     }
-    return { ok: true, status: 200, text: async () => "{}" };
+    return { ok: true, status: 200, text: async () => JSON.stringify({ code: "80000000", msg: "Success" }) };
   };
   const env = creds();
   const deps = { fetch: fetchImpl, env, now: () => 1_700_000_000_000 };
@@ -151,6 +151,43 @@ test("oauth and send failures do not throw", async () => {
     { fetch: sendFail, env: creds() },
   );
   assert.deepEqual(sendResult, { delivered: false, reason: "send_failed", status: 503 });
+});
+
+test("HTTP 200 is not delivery unless Huawei's code is 80000000", async () => {
+  resetHmsPushStateForTests();
+  async function sendWith(body: string) {
+    resetHmsPushStateForTests();
+    const fetchImpl: HmsFetch = async (url) => {
+      if (url.includes("/oauth2/")) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ access_token: "t", expires_in: 3600 }),
+        };
+      }
+      return { ok: true, status: 200, text: async () => body };
+    };
+    return sendHmsPush(
+      { tokens: ["hms-1"], title: "A", body: "B" },
+      { fetch: fetchImpl, env: creds() },
+    );
+  }
+
+  const partial = await sendWith(JSON.stringify({ code: "80100000", msg: "partial" }));
+  assert.equal(partial.delivered, false);
+  if (!partial.delivered) assert.equal(partial.code, "80100000");
+
+  const rejected = await sendWith(JSON.stringify({ code: "80300007", msg: "token" }));
+  assert.equal(rejected.delivered, false);
+  if (!rejected.delivered) assert.equal(rejected.code, "80300007");
+
+  const missing = await sendWith("{}");
+  assert.equal(missing.delivered, false);
+  if (!missing.delivered) assert.equal(missing.code, "missing_code");
+
+  const garbage = await sendWith("not-json");
+  assert.equal(garbage.delivered, false);
+  if (!garbage.delivered) assert.equal(garbage.code, "unparsed");
 });
 
 test("empty token list does not call Huawei", async () => {

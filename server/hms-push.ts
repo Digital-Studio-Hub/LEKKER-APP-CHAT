@@ -63,9 +63,25 @@ export function buildHmsMessageBody(input: HmsMessageInput): Record<string, unkn
   return { validate_only: false, message };
 }
 
+/** Huawei Push Kit v1: only this code means every token in the request was accepted. */
+export const HMS_SEND_SUCCESS = "80000000";
+
+export function interpretHmsSendResponse(body: string): { ok: boolean; code: string } {
+  let parsed: { code?: unknown };
+  try {
+    parsed = JSON.parse(body) as { code?: unknown };
+  } catch {
+    return { ok: false, code: "unparsed" };
+  }
+  const raw = parsed.code;
+  const code = typeof raw === "string" ? raw : typeof raw === "number" ? String(raw) : "";
+  if (!code) return { ok: false, code: "missing_code" };
+  return { ok: code === HMS_SEND_SUCCESS, code };
+}
+
 export type HmsPushResult =
   | { delivered: false; reason: "not_configured" | "no_tokens" }
-  | { delivered: false; reason: "oauth_failed" | "send_failed"; status?: number }
+  | { delivered: false; reason: "oauth_failed" | "send_failed"; status?: number; code?: string }
   | { delivered: true; tokenCount: number; status: number };
 
 type FetchResponse = {
@@ -201,11 +217,16 @@ export async function sendHmsPush(input: HmsMessageInput, deps: HmsPushDeps = {}
       return { delivered: false, reason: "send_failed" };
     }
     lastStatus = res.status;
+    const bodyText = await res.text().catch(() => "");
     if (!res.ok) {
       console.error("[Push] HMS send error:", res.status);
       return { delivered: false, reason: "send_failed", status: res.status };
     }
-    await res.text().catch(() => "");
+    const interpreted = interpretHmsSendResponse(bodyText);
+    if (!interpreted.ok) {
+      console.error("[Push] HMS send rejected:", interpreted.code);
+      return { delivered: false, reason: "send_failed", status: res.status, code: interpreted.code };
+    }
     sent += chunk.length;
   }
 

@@ -1,5 +1,6 @@
 package expo.modules.lekkerhmspush
 
+import android.content.Context
 import android.content.pm.PackageManager
 import android.util.Log
 import com.google.android.gms.common.ConnectionResult
@@ -12,6 +13,18 @@ class LekkerHmsPushModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("LekkerHmsPush")
 
+    Events("onNewToken")
+
+    OnStartObserving {
+      LekkerHmsTokenEvents.emit = { token ->
+        sendEvent("onNewToken", mapOf("token" to token))
+      }
+    }
+
+    OnStopObserving {
+      LekkerHmsTokenEvents.emit = null
+    }
+
     AsyncFunction("googlePlayServicesStatus") {
       googlePlayServicesStatus()
     }
@@ -19,6 +32,25 @@ class LekkerHmsPushModule : Module() {
     AsyncFunction("getHmsToken") { appId: String? ->
       getHmsToken(appId)
     }
+
+    Function("peekPendingHmsToken") {
+      pendingToken()
+    }
+
+    Function("clearPendingHmsToken") {
+      clearPendingToken()
+    }
+  }
+
+  private fun prefs() =
+    appContext.reactContext?.getSharedPreferences(LekkerHmsMessageService.PREFS, Context.MODE_PRIVATE)
+
+  private fun pendingToken(): String? {
+    return prefs()?.getString(LekkerHmsMessageService.KEY_TOKEN, null)?.trim()?.takeIf { it.isNotEmpty() }
+  }
+
+  private fun clearPendingToken() {
+    prefs()?.edit()?.remove(LekkerHmsMessageService.KEY_TOKEN)?.apply()
   }
 
   private fun googlePlayServicesStatus(): String {

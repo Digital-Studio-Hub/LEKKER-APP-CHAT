@@ -5,7 +5,13 @@ import {
   registerPushTokenOnServer,
   unregisterPushTokenOnServer,
 } from "@/lib/push-api";
-import { getHmsPushToken, googlePlayServicesStatus } from "@/modules/lekker-hms-push";
+import {
+  clearPendingHmsToken,
+  getHmsPushToken,
+  googlePlayServicesStatus,
+  peekPendingHmsToken,
+  subscribeHmsTokenRefresh,
+} from "@/modules/lekker-hms-push";
 import { pushAcquisitionPlan, type PushProvider } from "@shared/push-routing";
 
 const NOTIF_KEY = "lekker_notifications_enabled";
@@ -135,6 +141,32 @@ async function reportPushDiag(payload: Record<string, unknown>): Promise<void> {
   }
 }
 
+let hmsRefreshStarted = false;
+
+function ensureHmsTokenRefreshListener(): void {
+  if (hmsRefreshStarted || Platform.OS !== "android") return;
+  hmsRefreshStarted = true;
+  subscribeHmsTokenRefresh((token) => {
+    void registerRefreshedHmsToken(token);
+  });
+}
+
+async function registerRefreshedHmsToken(token: string): Promise<void> {
+  const gms = await googlePlayServicesStatus();
+  if (gms === "available") return;
+  const ok = await registerPushTokenOnServer(token, "android", "hms");
+  if (!ok) return;
+  await AsyncStorage.setItem(PUSH_TOKEN_KEY, token);
+  clearPendingHmsToken();
+}
+
+/** Prefer a token Huawei delivered via onNewToken, then a direct getToken call. */
+async function readHmsPushToken(): Promise<string | null> {
+  const pending = peekPendingHmsToken();
+  if (pending) return pending;
+  return getHmsPushToken(huaweiAppId());
+}
+
 function huaweiAppId(): string | null {
   const value = process.env.EXPO_PUBLIC_HUAWEI_APP_ID;
   if (typeof value !== "string") return null;
@@ -184,7 +216,7 @@ export async function acquireDevicePushToken(): Promise<{ token: string; provide
   const gms = Platform.OS === "android" ? await googlePlayServicesStatus() : "unknown";
   const plan = pushAcquisitionPlan(Platform.OS, gms);
   for (const provider of plan) {
-    const token = provider === "hms" ? await getHmsPushToken(huaweiAppId()) : await readExpoPushToken();
+    const token = provider === "hms" ? await readHmsPushToken() : await readExpoPushToken();
     if (token) return { token, provider };
   }
   await reportPushDiag({
@@ -205,6 +237,7 @@ export async function getDevicePushToken(): Promise<string | null> {
 
 export async function registerDevicePushToken(): Promise<boolean> {
   if (Platform.OS === "web") return false;
+  ensureHmsTokenRefreshListener();
 
   const N = await getNotifications();
   if (!N) {
@@ -235,6 +268,7 @@ export async function registerDevicePushToken(): Promise<boolean> {
   const ok = await registerPushTokenOnServer(acquired.token, Platform.OS, acquired.provider);
   if (ok) {
     await AsyncStorage.setItem(PUSH_TOKEN_KEY, acquired.token);
+    if (acquired.provider === "hms") clearPendingHmsToken();
     await reportPushDiag({
       stage: "register",
       ok: true,

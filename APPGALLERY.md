@@ -57,11 +57,15 @@ The send path is Push Kit for Android HMS devices: OAuth `https://oauth-login.cl
 
 `EXPO_PUBLIC_HUAWEI_APP_ID` is the same public app id, set as an EAS environment variable for the `appgallery` profile when the Android app exists in AppGallery Connect. It is not in `eas.json`, so an empty value cannot override a secret. The config plugin writes `com.huawei.hms.client.appid` only when the variable is present at prebuild.
 
-Without that variable and without `agconnect-services.json`, the HMS token call returns null and the rest of the app still runs. GMS devices still register FCM.
+Without that variable and without `agconnect-services.json`, the HMS token call returns null and the rest of the app still runs. GMS devices still register FCM. Passing the app id into `HmsInstanceId.getToken(appId, "HCM")` does not need the AGConnect Gradle plugin.
 
-`agconnect-services.json` is gitignored (it contains the app secret). If the file is present locally or in the EAS build environment, the config plugin copies it into `android/app/` at prebuild. Do not commit it.
+`agconnect-services.json` is gitignored (it contains the app secret). If that file is present at prebuild, the config plugin copies it into `android/app/`, adds the `com.huawei.agconnect:agcp` classpath, and applies `com.huawei.agconnect`. Copying the file alone does not configure HMS. Builds without the file do not apply the plugin, so a Play build is not required to have it. Do not commit the file.
+
+Huawei can return a token later, or replace one, through `HmsMessageService.onNewToken`. That token is stored on the device and registered with provider `hms` when Google Play services are not available. A GMS device does not replace its FCM registration with that token.
 
 The native module lives in `modules/lekker-hms-push` and is autolinked from `modules/` (Expo’s default). The plugin `./modules/lekker-hms-push/app.plugin.js` adds Huawei’s Maven repo (`https://developer.huawei.com/repo/`).
+
+A Push Kit HTTP 200 is delivered only when the JSON body has `code` `80000000`. Other codes, including partial success `80100000`, are logged and not reported as delivered. The log line is the code, not the token.
 
 ## Location links
 
