@@ -60,7 +60,7 @@ export const ECOSYSTEM_SHORTCUTS = [
   {
     id: "website",
     title: "Lekker Website",
-    subtitle: "R799 sites & free *.lekker.website",
+    subtitle: "Build a website for your business",
     url: LEKKER_WEBSITE_URL,
     icon: "globe-outline" as const,
     color: "#A855F7",

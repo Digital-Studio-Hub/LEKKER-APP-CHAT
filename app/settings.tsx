@@ -1046,7 +1046,7 @@ export default function SettingsScreen() {
             </Text>
             <Text style={[styles.infoText, { marginTop: 8 }]}>
               <Text style={styles.infoTextBold}>Contacts: </Text>
-              Your full address book is never uploaded. We may read contacts on your device to help you find friends (matching happens locally). If you share a contact card in a chat, that contact&apos;s name and phone number are uploaded to our servers and delivered to conversation participants only.
+              Your address book is never stored on our servers. We may read contacts on your device to help you find friends. If you agree, we send phone numbers from your address book to our servers for a one-time match; we do not store your address book. If you share a contact card in a chat, that contact&apos;s name and phone number are uploaded to our servers and delivered to conversation participants only.
             </Text>
             <Text style={[styles.infoText, { marginTop: 8 }]}>
               We do not sell your personal data. Limited sharing occurs with service providers (SMS/email delivery, cloud hosting, AI processing) only to operate the app. We do not track you across other companies&apos; apps or websites.
