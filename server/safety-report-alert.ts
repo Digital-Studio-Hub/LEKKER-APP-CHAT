@@ -5,7 +5,33 @@
  * content are not emailed.
  */
 
-export const SAFETY_REPORT_ALERT_TO = "info@digitalstudiohub.com";
+export const SAFETY_REPORT_ALERT_TO_ENV = "SAFETY_REPORT_ALERT_TO";
+
+export const SAFETY_REPORT_ALERT_DEFAULT_RECIPIENTS = [
+  "warren@digitalstudiohub.com",
+  "info@digitalstudiohub.com",
+] as const;
+
+/** @deprecated Use SAFETY_REPORT_ALERT_DEFAULT_RECIPIENTS */
+export const SAFETY_REPORT_ALERT_TO = SAFETY_REPORT_ALERT_DEFAULT_RECIPIENTS.join(",");
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+export function parseSafetyReportAlertRecipients(raw?: string | null): string[] {
+  const parsed = String(raw ?? "")
+    .split(/[,;\s]+/)
+    .map((value) => value.trim().toLowerCase())
+    .filter((value) => EMAIL_RE.test(value));
+  const unique: string[] = [];
+  for (const value of parsed) {
+    if (!unique.includes(value)) unique.push(value);
+  }
+  return unique.length ? unique : [...SAFETY_REPORT_ALERT_DEFAULT_RECIPIENTS];
+}
+
+export function getSafetyReportAlertRecipients(): string[] {
+  return parseSafetyReportAlertRecipients(process.env[SAFETY_REPORT_ALERT_TO_ENV]);
+}
 
 export type SafetyReportAlertInput = {
   reportId: string;
@@ -32,7 +58,7 @@ function oneLine(value: string): string {
 }
 
 export function buildSafetyReportAlert(input: SafetyReportAlertInput): {
-  to: string;
+  to: string[];
   subject: string;
   text: string;
   html: string;
@@ -67,5 +93,5 @@ ${rows.map(([k, v]) => `<tr><th align="left">${escapeHtml(k)}</th><td>${escapeHt
 </table>
 <p>The report is stored in the <code>content_reports</code> table with status <code>open</code>.</p>`;
 
-  return { to: SAFETY_REPORT_ALERT_TO, subject, text, html };
+  return { to: getSafetyReportAlertRecipients(), subject, text, html };
 }
