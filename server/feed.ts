@@ -4,6 +4,7 @@ import { db } from "./storage";
 import { feedComments, feedLikes, feedPosts, feedShares, userBlocks, users } from "@shared/schema";
 import { isSocialMediaAllowed } from "../shared/age-gate";
 import {
+  blockedAuthorExclusion,
   filterCommentsByHiddenAuthors,
   filterPostsByHiddenAuthors,
   hiddenAuthorIdsForViewer,
@@ -147,7 +148,7 @@ export async function listFeedPosts(opts: {
     sql`EXISTS (SELECT 1 FROM feed_shares WHERE feed_shares.post_id = ${feedPosts.id})`,
   );
 
-  const conditions = [visibility];
+  const conditions = [visibility, blockedAuthorExclusion(opts.viewerId)];
   if (opts.authorId) {
     conditions.push(eq(feedPosts.authorId, opts.authorId));
   }

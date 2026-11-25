@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
+import { PgDialect } from "drizzle-orm/pg-core";
 import {
+  blockedAuthorExclusion,
   filterCommentsByHiddenAuthors,
   filterPostsByHiddenAuthors,
   hiddenAuthorIdsForViewer,
@@ -68,6 +73,43 @@ test("no blocks leaves posts and comments unchanged", () => {
   const comments = [{ id: "c1", authorId: AUTHOR }];
   assert.equal(filterPostsByHiddenAuthors(posts, hidden), posts);
   assert.equal(filterCommentsByHiddenAuthors(comments, hidden), comments);
+});
+
+test("a page still fills when the newest posts are from blocked authors", () => {
+  const hidden = hiddenAuthorIdsForViewer(VIEWER, [
+    { blockerId: VIEWER, blockedUserId: "blocked" },
+  ]);
+  const newestFirst = [
+    ...Array.from({ length: 40 }, (_, i) => ({ id: `blocked-${i}`, authorId: "blocked" })),
+    { id: "visible-1", authorId: OTHER },
+    { id: "visible-2", authorId: VIEWER },
+  ];
+  const page = filterPostsByHiddenAuthors(newestFirst, hidden).slice(0, 20);
+  assert.deepEqual(
+    page.map((post) => post.id),
+    ["visible-1", "visible-2"],
+  );
+});
+
+test("blocked-author exclusion is a bidirectional NOT EXISTS on user_blocks", () => {
+  const query = new PgDialect().sqlToQuery(blockedAuthorExclusion(VIEWER));
+  assert.match(query.sql, /not exists/i);
+  assert.match(query.sql, /user_blocks/);
+  assert.match(query.sql, /blocker_id/);
+  assert.match(query.sql, /blocked_user_id/);
+  assert.match(query.sql, /"feed_posts"\."author_id"/);
+  assert.equal(query.params.filter((param) => param === VIEWER).length, 2);
+});
+
+test("listFeedPosts applies the block exclusion before the page limit", () => {
+  const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "feed.ts"), "utf8");
+  const fn = src.slice(
+    src.indexOf("export async function listFeedPosts"),
+    src.indexOf("export async function getFeedPostById"),
+  );
+  const exclusion = fn.indexOf("blockedAuthorExclusion");
+  const limit = fn.indexOf(".limit(");
+  assert.ok(exclusion >= 0 && limit >= 0 && exclusion < limit);
 });
 
 test("a block that does not involve the viewer hides nothing", () => {

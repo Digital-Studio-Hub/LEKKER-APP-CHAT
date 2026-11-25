@@ -1,9 +1,29 @@
+import { sql, type SQL } from "drizzle-orm";
+import { feedPosts } from "@shared/schema";
+
 /**
  * Newsfeed block filtering.
  *
  * Blocks are mutual for visibility, matching `storage.isEitherUserBlocked`:
  * a post or comment is hidden when either person has blocked the other.
  */
+
+/**
+ * SQL predicate for `listFeedPosts`. It belongs in the WHERE clause, before
+ * LIMIT/OFFSET, so a run of blocked authors cannot consume the page window.
+ */
+export function blockedAuthorExclusion(viewerId: string): SQL {
+  return sql`NOT EXISTS (
+    SELECT 1 FROM user_blocks
+    WHERE (
+      user_blocks.blocker_id = ${viewerId}
+      AND user_blocks.blocked_user_id = ${feedPosts.authorId}
+    ) OR (
+      user_blocks.blocker_id = ${feedPosts.authorId}
+      AND user_blocks.blocked_user_id = ${viewerId}
+    )
+  )`;
+}
 
 export type UserBlockEdge = {
   blockerId: string;
