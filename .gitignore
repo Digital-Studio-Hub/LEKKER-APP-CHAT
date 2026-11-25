@@ -9,9 +9,11 @@ dist/
 web-build/
 expo-env.d.ts
 
-# Native
+# Native (prebuild output). The HMS module under modules/ is source, not prebuild output.
 ios/
 android/
+!modules/**/android/
+!modules/**/android/**
 *.orig.*
 *.jks
 *.p8
@@ -68,3 +70,6 @@ expo-token
 # FCM service account (never commit)
 lekker-chat-fcm-sa.json
 *-fcm-sa.json
+
+# Huawei AppGallery Connect app config (contains the app secret)
+agconnect-services.json

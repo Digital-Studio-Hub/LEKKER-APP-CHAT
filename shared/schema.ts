@@ -239,6 +239,8 @@ export const pushTokens = pgTable("push_tokens", {
     .default(sql`gen_random_uuid()`),
   userId: varchar("user_id", { length: 36 }).notNull(),
   expoPushToken: text("expo_push_token").notNull(),
+  /** fcm | hms | apns | expo. Missing/legacy rows are expo (Expo push service). */
+  provider: varchar("provider", { length: 16 }).notNull().default("expo"),
   platform: varchar("platform", { length: 20 }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),

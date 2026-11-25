@@ -1,0 +1,25 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.lekkerhmspush'
+version = '1.0.0'
+
+android {
+  namespace "expo.modules.lekkerhmspush"
+  defaultConfig {
+    versionCode 1
+    versionName "1.0.0"
+    consumerProguardFiles 'proguard-rules.pro'
+  }
+  lintOptions {
+    abortOnError false
+  }
+}
+
+dependencies {
+  // Bundled so isGooglePlayServicesAvailable can report SERVICE_MISSING on HMS-only devices.
+  implementation 'com.google.android.gms:play-services-base:18.5.0'
+  implementation 'com.huawei.hms:push:6.13.0.300'
+}

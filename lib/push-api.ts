@@ -8,6 +8,7 @@ import { getAuthToken } from "@/lib/auth-token";
 export async function registerPushToken(
   token: string,
   platform?: string,
+  provider?: string,
 ): Promise<boolean> {
   const baseUrl = getApiUrl();
   const authToken = getAuthToken();
@@ -24,6 +25,7 @@ export async function registerPushToken(
       body: JSON.stringify({
         token,
         platform: platform || undefined,
+        provider: provider || undefined,
         deviceId: platform || undefined,
       }),
     });

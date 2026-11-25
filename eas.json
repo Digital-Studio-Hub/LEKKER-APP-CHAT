@@ -32,6 +32,17 @@
       "env": {
         "EXPO_PUBLIC_API_URL": "https://chat.lekker.network"
       }
+    },
+    "appgallery": {
+      "distribution": "store",
+      "autoIncrement": false,
+      "android": {
+        "buildType": "apk",
+        "credentialsSource": "remote"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://chat.lekker.network"
+      }
     }
   },
   "submit": {

@@ -3653,18 +3653,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
   app.post("/api/push/register", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { token, platform, deviceId } = req.body || {};
+      const { token, platform, deviceId, provider } = req.body || {};
       if (!token || typeof token !== "string") {
         return res.status(400).json({ message: "token is required" });
       }
-      // Persist Expo push token (platform optional — android | ios)
+      const storedProvider = typeof provider === "string" ? provider : undefined;
+      // Persist device push token. provider: fcm | hms | apns | expo (optional).
       await registerPushToken(
         req.user!.userId,
         token,
         typeof platform === "string" ? platform : typeof deviceId === "string" ? deviceId : undefined,
+        storedProvider,
       );
       console.log(
-        `[Push] registered user=${req.user!.userId} platform=${platform || deviceId || "?"} token=${token.slice(0, 24)}…`,
+        `[Push] registered user=${req.user!.userId} platform=${platform || deviceId || "?"} provider=${storedProvider || "expo"} token=${token.slice(0, 24)}…`,
       );
       res.json({ ok: true });
     } catch (e) {

@@ -21,6 +21,7 @@ Deploy / Publish / Cloud Run / EAS only ships application code. Missing migratio
 | `migrations/20260913_notification_preferences.sql` | Notification preferences |
 | `migrations/20260913_personal_care_settings.sql` | Personal care settings |
 | `migrations/20260913_reply_to_message.sql` | Reply-to message |
+| `migrations/20261125_push_token_provider.sql` | `push_tokens.provider` (`expo` / `fcm` / `apns` / `hms`). Apply before deploying the Huawei push server. |
 
 Pending vs applied is environment-specific: verify on the target Neon DB before shipping features that depend on new columns.
 

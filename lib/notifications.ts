@@ -5,6 +5,8 @@ import {
   registerPushTokenOnServer,
   unregisterPushTokenOnServer,
 } from "@/lib/push-api";
+import { getHmsPushToken, googlePlayServicesStatus } from "@/modules/lekker-hms-push";
+import { pushAcquisitionPlan, type PushProvider } from "@shared/push-routing";
 
 const NOTIF_KEY = "lekker_notifications_enabled";
 const PUSH_TOKEN_KEY = "lekker_expo_push_token";
@@ -133,9 +135,14 @@ async function reportPushDiag(payload: Record<string, unknown>): Promise<void> {
   }
 }
 
-export async function getDevicePushToken(): Promise<string | null> {
-  if (Platform.OS === "web") return null;
+function huaweiAppId(): string | null {
+  const value = process.env.EXPO_PUBLIC_HUAWEI_APP_ID;
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
 
+async function readExpoPushToken(): Promise<string | null> {
   const N = await getNotifications();
   if (!N) {
     await reportPushDiag({ stage: "import", ok: false, error: "expo-notifications unavailable" });
@@ -166,39 +173,74 @@ export async function getDevicePushToken(): Promise<string | null> {
   }
 }
 
+/**
+ * GMS devices keep Expo/FCM (and iOS keeps Expo/APNs). HMS is used when Google
+ * Play services are missing. A missing native module or app id returns null
+ * and does not throw.
+ */
+export async function acquireDevicePushToken(): Promise<{ token: string; provider: PushProvider } | null> {
+  if (Platform.OS === "web") return null;
+
+  const gms = Platform.OS === "android" ? await googlePlayServicesStatus() : "unknown";
+  const plan = pushAcquisitionPlan(Platform.OS, gms);
+  for (const provider of plan) {
+    const token = provider === "hms" ? await getHmsPushToken(huaweiAppId()) : await readExpoPushToken();
+    if (token) return { token, provider };
+  }
+  await reportPushDiag({
+    stage: "acquire",
+    ok: false,
+    platform: Platform.OS,
+    gms,
+    plan: plan.join(","),
+    huaweiAppIdConfigured: !!huaweiAppId(),
+  });
+  return null;
+}
+
+export async function getDevicePushToken(): Promise<string | null> {
+  const acquired = await acquireDevicePushToken();
+  return acquired?.token ?? null;
+}
+
 export async function registerDevicePushToken(): Promise<boolean> {
   if (Platform.OS === "web") return false;
 
   const N = await getNotifications();
-  if (!N) return false;
-
-  let { status, canAskAgain } = await N.getPermissionsAsync();
-  if (status !== "granted") {
-    // Prompt once when we can — closed-app DMs depend on this.
-    if (canAskAgain === false) {
-      await reportPushDiag({ stage: "permission", ok: false, error: "denied_permanent", status });
+  if (!N) {
+    // Expo notifications failed to load. On Android, still try an HMS token
+    // instead of failing the whole registration.
+    if (Platform.OS !== "android") return false;
+  } else {
+    let { status, canAskAgain } = await N.getPermissionsAsync();
+    if (status !== "granted") {
+      // Prompt once when we can — closed-app DMs depend on this.
+      if (canAskAgain === false) {
+        await reportPushDiag({ stage: "permission", ok: false, error: "denied_permanent", status });
+        return false;
+      }
+      const req = await N.requestPermissionsAsync();
+      status = req.status;
+    }
+    if (status !== "granted") {
+      await reportPushDiag({ stage: "permission", ok: false, error: "not_granted", status });
       return false;
     }
-    const req = await N.requestPermissionsAsync();
-    status = req.status;
+    await AsyncStorage.setItem(NOTIF_KEY, "true");
   }
-  if (status !== "granted") {
-    await reportPushDiag({ stage: "permission", ok: false, error: "not_granted", status });
-    return false;
-  }
-  await AsyncStorage.setItem(NOTIF_KEY, "true");
 
-  const token = await getDevicePushToken();
-  if (!token) return false;
+  const acquired = await acquireDevicePushToken();
+  if (!acquired) return false;
 
-  const ok = await registerPushTokenOnServer(token, Platform.OS);
+  const ok = await registerPushTokenOnServer(acquired.token, Platform.OS, acquired.provider);
   if (ok) {
-    await AsyncStorage.setItem(PUSH_TOKEN_KEY, token);
+    await AsyncStorage.setItem(PUSH_TOKEN_KEY, acquired.token);
     await reportPushDiag({
       stage: "register",
       ok: true,
       platform: Platform.OS,
-      tokenPrefix: token.slice(0, 24),
+      provider: acquired.provider,
+      tokenPrefix: acquired.token.slice(0, 24),
     });
   } else {
     console.warn("[Push] server rejected token registration");
