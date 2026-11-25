@@ -1,0 +1,13 @@
+{
+  "name": "lekker-hms-push",
+  "version": "1.0.0",
+  "description": "GMS availability check and Huawei Push Kit token for Lekker Chat",
+  "main": "index.ts",
+  "license": "UNLICENSED",
+  "peerDependencies": {
+    "expo": "*",
+    "expo-modules-core": "*",
+    "react": "*",
+    "react-native": "*"
+  }
+}

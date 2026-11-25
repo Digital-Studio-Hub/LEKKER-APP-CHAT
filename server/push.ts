@@ -7,6 +7,8 @@ import {
   DND_BYPASS_CATEGORIES,
   type NotificationCategory,
 } from "@shared/notification-prefs";
+import { normalisePushProvider, planPushDeliveries } from "@shared/push-routing";
+import { sendHmsPush } from "./hms-push";
 
 const EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send";
 
@@ -14,7 +16,9 @@ export async function registerPushToken(
   userId: string,
   expoPushToken: string,
   platform?: string,
+  provider?: string,
 ): Promise<void> {
+  const storedProvider = normalisePushProvider(provider);
   const existing = await db
     .select()
     .from(pushTokens)
@@ -24,7 +28,7 @@ export async function registerPushToken(
   if (existing.length > 0) {
     await db
       .update(pushTokens)
-      .set({ userId, platform: platform || null, updatedAt: new Date() })
+      .set({ userId, platform: platform || null, provider: storedProvider, updatedAt: new Date() })
       .where(eq(pushTokens.expoPushToken, expoPushToken));
     return;
   }
@@ -33,6 +37,7 @@ export async function registerPushToken(
     userId,
     expoPushToken,
     platform: platform || null,
+    provider: storedProvider,
   });
 }
 
@@ -105,6 +110,38 @@ async function sendExpoPush(
     } catch (e) {
       console.error("[Push] Failed to send:", e);
     }
+  }
+}
+
+async function deliverPush(
+  rows: Array<{ token: string; provider: string | null }>,
+  payload: {
+    title: string;
+    body: string;
+    data?: Record<string, string>;
+    channelId?: string;
+  },
+): Promise<void> {
+  const plan = planPushDeliveries(rows);
+  if (plan.expo.length > 0) {
+    await sendExpoPush(
+      plan.expo.map((t) => ({
+        to: t.token,
+        title: payload.title,
+        body: payload.body,
+        data: payload.data,
+        channelId: payload.channelId,
+      })),
+    );
+  }
+  if (plan.hms.length > 0) {
+    await sendHmsPush({
+      tokens: plan.hms.map((t) => t.token),
+      title: payload.title,
+      body: payload.body,
+      data: payload.data,
+      channelId: payload.channelId,
+    });
   }
 }
 
@@ -217,7 +254,7 @@ export async function notifyChatMessage(
       if (await storage.isEitherUserBlocked(senderId, recipientId)) continue;
 
       const tokens = await db
-        .select({ expoPushToken: pushTokens.expoPushToken })
+        .select({ token: pushTokens.expoPushToken, provider: pushTokens.provider })
         .from(pushTokens)
         .where(eq(pushTokens.userId, recipientId));
 
@@ -233,20 +270,17 @@ export async function notifyChatMessage(
           : null) || "Someone";
 
       const preview = messagePreview(message);
-      await sendExpoPush(
-        tokens.map((t) => ({
-          to: t.expoPushToken,
-          title: String(senderName),
-          body: preview,
-          channelId: androidChannelFor(category),
-          data: {
-            chatId,
-            type: "message",
-            category,
-            messageId: message.id,
-          },
-        })),
-      );
+      await deliverPush(tokens, {
+        title: String(senderName),
+        body: preview,
+        channelId: androidChannelFor(category),
+        data: {
+          chatId,
+          type: "message",
+          category,
+          messageId: message.id,
+        },
+      });
     }
   } catch (e) {
     console.error("[Push] notifyChatMessage error:", e);
@@ -302,20 +336,18 @@ export async function notifyUserPush(
     }
 
     const tokens = await db
-      .select({ expoPushToken: pushTokens.expoPushToken })
+      .select({ token: pushTokens.expoPushToken, provider: pushTokens.provider })
       .from(pushTokens)
       .where(eq(pushTokens.userId, userId));
     if (!tokens.length) return;
 
-    await sendExpoPush(
-      tokens.map((t) => ({
-        to: t.expoPushToken,
-        title,
-        body: body.length > 120 ? `${body.slice(0, 117)}…` : body,
-        channelId: androidChannelFor(category),
-        data: { ...(data || {}), category },
-      })),
-    );
+    const preview = body.length > 120 ? `${body.slice(0, 117)}…` : body;
+    await deliverPush(tokens, {
+      title,
+      body: preview,
+      channelId: androidChannelFor(category),
+      data: { ...(data || {}), category },
+    });
   } catch (e) {
     console.error("[Push] notifyUserPush error:", e);
   }

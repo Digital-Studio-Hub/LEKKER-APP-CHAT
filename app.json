@@ -109,6 +109,7 @@
         }
       ],
       "expo-font",
+      "./modules/lekker-hms-push/app.plugin.js",
       "expo-web-browser",
       [
         "expo-location",

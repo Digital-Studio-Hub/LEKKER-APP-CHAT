@@ -33,6 +33,7 @@ import {
   promptContentReport,
 } from "@/lib/safety-api";
 import { containsBlockedContent, CONTENT_FILTER_MESSAGE } from "@shared/content-filter";
+import { locationOpenTarget } from "@shared/map-link";
 import { isSmallScreen, fontScale } from "@/lib/responsive";
 import {
   pickImage,
@@ -503,17 +504,12 @@ function MessageBubbleInner({
         return (
           <Pressable
             onPress={() => {
-              if (message.latitude && message.longitude) {
-                if (Platform.OS === "web") {
-                  const mapUrl = `https://www.google.com/maps?q=${message.latitude},${message.longitude}`;
-                  router.push({ pathname: "/in-app-browser", params: { url: mapUrl, title: message.locationName || "Location" } });
+              const target = locationOpenTarget(Platform.OS, message.latitude, message.longitude);
+              if (target) {
+                if (target.kind === "web") {
+                  router.push({ pathname: "/in-app-browser", params: { url: target.url, title: message.locationName || "Location" } });
                 } else {
-                  const url = Platform.select({
-                    ios: `maps:0,0?q=${message.latitude},${message.longitude}`,
-                    android: `geo:${message.latitude},${message.longitude}?q=${message.latitude},${message.longitude}`,
-                    default: `https://www.google.com/maps?q=${message.latitude},${message.longitude}`,
-                  });
-                  Linking.openURL(url).catch(() => {});
+                  Linking.openURL(target.url).catch(() => {});
                 }
               }
             }}

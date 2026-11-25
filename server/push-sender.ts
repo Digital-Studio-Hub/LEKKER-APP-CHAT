@@ -1,3 +1,7 @@
+/**
+ * Expo push service only (FCM / APNs tokens shaped as ExponentPushToken).
+ * HMS tokens are delivered by server/hms-push.ts from server/push.ts.
+ */
 const EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send";
 
 export async function sendPushNotifications(
