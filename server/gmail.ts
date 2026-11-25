@@ -200,3 +200,20 @@ export async function sendPasswordResetEmail(toEmail: string, code: string, firs
     return false;
   }
 }
+
+/**
+ * Moderation alert for a new safety report. Never throws; returns false on any failure
+ * so the caller's report flow is unaffected.
+ */
+export async function sendSafetyReportAlertEmail(
+  input: import("./safety-report-alert").SafetyReportAlertInput,
+): Promise<boolean> {
+  try {
+    const { buildSafetyReportAlert } = await import("./safety-report-alert");
+    const alert = buildSafetyReportAlert(input);
+    return await sendTransactionalEmail(alert.to, alert.subject, alert.html, alert.text);
+  } catch (error) {
+    console.error("[Email] Failed to send safety report alert:", error);
+    return false;
+  }
+}

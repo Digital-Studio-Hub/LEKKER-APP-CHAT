@@ -1,6 +1,6 @@
 # iOS bundle identifier
 
-**Current Expo SoT (`app.json`):** `com.lekker.chat` (matches Android `package`).
+**Current Expo SoT (`app.json`):** iOS `app.replit.lekkerchatios` (see 2026-11-25 update below); Android `package` `com.lekker.chat`.
 
 | Context | ID |
 |---------|-----|
@@ -14,3 +14,5 @@
 
 - Prefer building from `~/Projects/LEKKER-APP-CHAT` (no spaces in path).
 - Legacy listing (`app.replit.lekkerchatios`) can stay listed until the new app is live, then sunset.
+
+**2026-11-25 update (Delano approved 09:48 SAST, via PA):** iOS ships on the **existing** App Store Connect app `6761997512`, so `app.json` → `ios.bundleIdentifier` is now **`app.replit.lekkerchatios`** (App ID `KCP43KJMLS`, team `HAZ87MAKR8`, App Store profile `79393YFA2V`, dist cert `27FB9F2FHD`). Android stays **`com.lekker.chat`**. `eas.json` `ascAppId` `6761997512` already matches. This supersedes the 13 Sep plan to create a new ASC app for `com.lekker.chat`; the `com.lekker.chat` App ID (`T5UXQSQ2BY`) is left in place but unused for iOS.

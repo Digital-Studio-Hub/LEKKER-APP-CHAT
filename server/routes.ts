@@ -54,7 +54,7 @@ import {
   type LekkerNetworkEntry,
   type WorkspaceDetail,
 } from "./lekkerNetwork";
-import { sendPasswordResetEmail, sendEmailVerificationEmail } from "./gmail";
+import { sendPasswordResetEmail, sendEmailVerificationEmail, sendSafetyReportAlertEmail } from "./gmail";
 import { sendPasswordResetSMS, sendPhoneVerificationSMS } from "./twilio";
 import { sendWhatsAppOtp, isWhatsAppOtpConfigured, whatsAppOtpConfigStatus } from "./whatsapp-otp";
 import { signAssertionForVerifiedChatUser } from "./mobile-user-assertion";
@@ -1423,6 +1423,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         details: details ? String(details).slice(0, 2000) : null,
       });
       console.log(`[safety] Report ${report.id} type=${reportType} reason=${reason} reporter=${req.user!.userId}`);
+      // Moderation alert (24h review). Fire-and-forget: a mail failure must not fail the report.
+      void sendSafetyReportAlertEmail({
+        reportId: report.id,
+        reportType: String(reportType),
+        reason: String(reason).slice(0, 50),
+        reporterId: req.user!.userId,
+        reportedUserId: reportedUserId || null,
+        messageId: messageId || null,
+        chatId: chatId || null,
+      })
+        .then((sent) => {
+          if (!sent) console.warn(`[safety] Report ${report.id} alert email not sent`);
+        })
+        .catch((err) => console.error(`[safety] Report ${report.id} alert email error:`, err));
       res.status(201).json({
         ok: true,
         reportId: report.id,

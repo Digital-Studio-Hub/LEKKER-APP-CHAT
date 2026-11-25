@@ -17,7 +17,7 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.lekker.chat",
+      "bundleIdentifier": "app.replit.lekkerchatios",
       "buildNumber": "21",
       "infoPlist": {
         "UIRequiresFullScreen": false,
@@ -26,7 +26,7 @@
         "NSPhotoLibraryAddUsageDescription": "Lekker Chat saves photos received in conversations to your photo library.",
         "NSMicrophoneUsageDescription": "Lekker Chat uses your microphone to record voice notes.",
         "NSLocationWhenInUseUsageDescription": "Lekker Chat uses your location to find nearby Lekkerpreneurs and share your location in conversations.",
-        "NSContactsUsageDescription": "Lekker Chat reads contacts on your device to help you find people you know. If you choose to share a contact card in a chat, that contact's name and phone number will be uploaded to our servers and sent to conversation participants. Your full address book is never uploaded.",
+        "NSContactsUsageDescription": "Lekker Chat reads contacts on your device to help you find people you know. To do that, we send phone numbers from your address book to our servers for a one-time match; we do not store your address book. If you choose to share a contact card in a chat, that contact's name and phone number will be uploaded to our servers and sent to conversation participants.",
         "ITSAppUsesNonExemptEncryption": false,
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true
@@ -134,7 +134,7 @@
       [
         "expo-contacts",
         {
-          "contactsPermission": "Lekker Chat reads contacts on your device to help you find people. If you share a contact card in a chat, that contact's name and phone are uploaded to our servers and sent to the conversation. Your full address book is never uploaded."
+          "contactsPermission": "Lekker Chat reads contacts on your device to help you find people you know. To do that, we send phone numbers from your address book to our servers for a one-time match; we do not store your address book. If you choose to share a contact card in a chat, that contact's name and phone number will be uploaded to our servers and sent to conversation participants."
         }
       ],
       [
