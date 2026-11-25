@@ -9,6 +9,7 @@ import {
   RefreshControl,
   Image,
   ActivityIndicator,
+  Alert,
 } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -25,6 +26,7 @@ import {
   shareFeedPost,
   type FeedPost,
 } from "@/lib/feed-api";
+import { blockUserServer, confirmBlockUser, promptContentReport, promptReportOrBlock } from "@/lib/safety-api";
 
 function Avatar({ name, color, size = 40, photo }: { name: string; color: string; size?: number; photo?: string }) {
   if (photo) {
@@ -55,6 +57,7 @@ function PostCard({
   onLike,
   onComment,
   onShare,
+  onOpenSafety,
 }: {
   post: FeedPost;
   userId: string;
@@ -62,6 +65,7 @@ function PostCard({
   onLike: () => void;
   onComment: () => void;
   onShare: () => void;
+  onOpenSafety?: () => void;
 }) {
   const isLiked = post.likes.includes(userId);
   const photo =
@@ -77,12 +81,24 @@ function PostCard({
           <Text style={postStyles.authorName}>{post.authorName}</Text>
           <Text style={postStyles.timestamp}>{formatTimeAgo(post.createdAt)}</Text>
         </View>
-        {post.shares.length > 0 && (
-          <View style={postStyles.sharedBadge}>
-            <Ionicons name="repeat" size={12} color={Colors.primary} />
-            <Text style={postStyles.sharedText}>Shared</Text>
-          </View>
-        )}
+        <View style={postStyles.headerSide}>
+          {post.shares.length > 0 && (
+            <View style={postStyles.sharedBadge}>
+              <Ionicons name="repeat" size={12} color={Colors.primary} />
+              <Text style={postStyles.sharedText}>Shared</Text>
+            </View>
+          )}
+          {onOpenSafety && (
+            <Pressable
+              onPress={onOpenSafety}
+              style={postStyles.safetyButton}
+              accessibilityLabel="Post options"
+              hitSlop={8}
+            >
+              <Ionicons name="ellipsis-horizontal" size={20} color={Colors.textMuted} />
+            </Pressable>
+          )}
+        </View>
       </View>
 
       <Text style={postStyles.content}>{post.content}</Text>
@@ -141,6 +157,8 @@ const postStyles = StyleSheet.create({
     marginBottom: 12,
   },
   headerInfo: { flex: 1 },
+  headerSide: { flexDirection: "row", alignItems: "center", gap: 4 },
+  safetyButton: { width: 32, height: 32, alignItems: "center", justifyContent: "center" },
   authorName: { fontFamily: "Poppins_600SemiBold", fontSize: 15, color: Colors.text },
   timestamp: { fontFamily: "Poppins_400Regular", fontSize: 12, color: Colors.textMuted },
   sharedBadge: {
@@ -190,10 +208,6 @@ export default function FeedScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { socialMediaAllowed } = useAgeGate();
-
-  if (!socialMediaAllowed) {
-    return <SocialAccessBlocked feature="The Newsfeed" />;
-  }
   const [allPosts, setAllPosts] = useState<FeedPost[]>([]);
   const [visiblePosts, setVisiblePosts] = useState<FeedPost[]>([]);
   const [refreshing, setRefreshing] = useState(false);
@@ -201,9 +215,48 @@ export default function FeedScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      if (!socialMediaAllowed) return;
       loadPosts();
-    }, []),
+    }, [socialMediaAllowed]),
   );
+
+  function hideAuthor(authorId: string) {
+    setAllPosts((prev) => prev.filter((post) => post.authorId !== authorId));
+    setVisiblePosts((prev) => prev.filter((post) => post.authorId !== authorId));
+  }
+
+  function openPostSafety(post: FeedPost) {
+    if (!user || post.authorId === user.id) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    promptReportOrBlock({
+      title: post.authorName,
+      reportLabel: "Report post",
+      blockLabel: "Block author",
+      onReport: () => {
+        promptContentReport({
+          reportType: "post",
+          reportedUserId: post.authorId,
+          messageId: post.id,
+          subjectLabel: "post",
+          details: post.content.slice(0, 500),
+        });
+      },
+      onBlock: () => {
+        confirmBlockUser(post.authorName, async () => {
+          const ok = await blockUserServer(post.authorId);
+          if (!ok) {
+            Alert.alert("Couldn't block", "Please try again.");
+            return;
+          }
+          hideAuthor(post.authorId);
+        });
+      },
+    });
+  }
+
+  if (!socialMediaAllowed) {
+    return <SocialAccessBlocked feature="The Newsfeed" />;
+  }
 
   async function loadPosts() {
     const feedPosts = await fetchFeedPosts({ page: 1 });
@@ -263,10 +316,13 @@ export default function FeedScreen() {
           <PostCard
             post={item}
             userId={user?.id || ""}
-            userPhoto={user?.profilePhoto}
+            userPhoto={user?.profilePhoto ?? undefined}
             onLike={() => handleLike(item.id)}
             onComment={() => router.push({ pathname: "/post-comments", params: { postId: item.id } })}
             onShare={() => handleShare(item.id)}
+            onOpenSafety={
+              user && item.authorId !== user.id ? () => openPostSafety(item) : undefined
+            }
           />
         )}
         maxToRenderPerBatch={8}

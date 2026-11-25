@@ -7,6 +7,7 @@ import {
   feedPosts, feedLikes, feedComments, feedShares,
   type User, type InsertUser, type Chat, type ChatParticipant, type ChatMessage, type UserEmail,
 } from "@shared/schema";
+import { deletePersonalCareAndCompanionData } from "./account-deletion";
 
 if (!process.env.DATABASE_URL) {
   throw new Error("DATABASE_URL is required");
@@ -615,6 +616,8 @@ class PgStorage implements IStorage {
     await db.delete(feedComments).where(eq(feedComments.authorId, userId));
     await db.delete(feedLikes).where(eq(feedLikes.userId, userId));
     await db.delete(feedShares).where(eq(feedShares.userId, userId));
+
+    await deletePersonalCareAndCompanionData(db, userId);
 
     await db.delete(authAuditLogs).where(eq(authAuditLogs.userId, userId));
     await db.delete(users).where(eq(users.id, userId));
